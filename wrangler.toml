@@ -3,18 +3,17 @@
 name = "zixo-app"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat_v2"]
-
-[assets]
-directory = ".open-next/assets"
+pages_build_output_dir = ".vercel/output/static"
 
 # R2 bucket binding for media storage
 [[r2_buckets]]
 binding = "R2_BUCKET"
 bucket_name = "zixocall"
 
-# Environment variables (secrets like FIREBASE_DATABASE_SECRET should be set via Cloudflare dashboard)
+# Environment variables
 [vars]
 FIREBASE_PROJECT_ID = "zixo-call"
+FIREBASE_DATABASE_SECRET = "rGYDgKhd17onhPLaVg3t7nTLoNak6dbMAsJV1AvP"
 
 [placement]
 mode = "smart"

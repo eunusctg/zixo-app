@@ -54,5 +54,11 @@ server.log
 # OpenNext build output
 .open-next/
 
+# Cloudflare next-on-pages build output
+.vercel/
+
+# Wrangler local state
+.wrangler/
+
 # Skills directory
 /skills/.open-next/
