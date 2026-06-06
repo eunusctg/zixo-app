@@ -12,11 +12,14 @@ import {
   where,
   orderBy,
   limit,
+  startAfter,
+  endAt,
   serverTimestamp,
   Timestamp,
   writeBatch,
   type Unsubscribe,
   type DocumentData,
+  type DocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type { ZixoUserProfile } from './auth';
@@ -74,23 +77,48 @@ export interface FirestoreCall {
 
 /**
  * Create or get an existing 1-on-1 chat between two users
+ * Handles the case where Firestore indexes may not be deployed yet
  */
 export async function createOrGetChat(
   uid1: string,
   uid2: string
 ): Promise<string> {
-  // Check if chat already exists
-  const q = query(
-    collection(db, 'chats'),
-    where('participants', 'array-contains', uid1)
-  );
-  const snapshot = await getDocs(q);
+  // Strategy 1: Try the indexed query first (participants + updatedAt)
+  try {
+    const q = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', uid1),
+      orderBy('updatedAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
 
-  for (const docSnap of snapshot.docs) {
-    const data = docSnap.data() as FirestoreChat;
-    if (data.participants.includes(uid2) && !data.isGroup) {
-      return docSnap.id;
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data() as FirestoreChat;
+      if (data.participants.includes(uid2) && !data.isGroup) {
+        return docSnap.id;
+      }
     }
+  } catch (indexError) {
+    // Index may not be deployed yet - fall back to simpler query
+    console.warn('[Zixo] Indexed chat query failed, trying fallback query:', indexError);
+  }
+
+  // Strategy 2: Fallback query without orderBy (no index needed)
+  try {
+    const q = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', uid1)
+    );
+    const snapshot = await getDocs(q);
+
+    for (const docSnap of snapshot.docs) {
+      const data = docSnap.data() as FirestoreChat;
+      if (data.participants.includes(uid2) && !data.isGroup) {
+        return docSnap.id;
+      }
+    }
+  } catch (fallbackError) {
+    console.warn('[Zixo] Fallback chat query also failed:', fallbackError);
   }
 
   // Create new chat
@@ -129,7 +157,7 @@ export async function sendMessage(
 
   const msgRef = await addDoc(collection(db, 'chats', chatId, 'messages'), messageData);
 
-  // Update chat metadata
+  // Update chat metadata including last active time
   const chatRef = doc(db, 'chats', chatId);
   const chatSnap = await getDoc(chatRef);
   if (chatSnap.exists()) {
@@ -147,9 +175,18 @@ export async function sendMessage(
       lastMessage: text,
       lastMessageSender: senderId,
       lastMessageTime: serverTimestamp(),
+      lastActiveAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       ...unreadUpdates,
     });
+  }
+
+  // Update sender's last active time in their user profile
+  try {
+    const userRef = doc(db, 'users', senderId);
+    await updateDoc(userRef, { lastActiveAt: serverTimestamp() });
+  } catch {
+    // Non-critical - don't fail the message send
   }
 
   return msgRef.id;
@@ -222,6 +259,54 @@ export async function deleteMessage(
   await deleteDoc(msgRef);
 }
 
+/**
+ * Batch delete multiple messages in a chat
+ */
+export async function batchDeleteMessages(
+  chatId: string,
+  messageIds: string[]
+): Promise<void> {
+  if (messageIds.length === 0) return;
+
+  // Firestore batches support up to 500 operations
+  const batchSize = 500;
+  for (let i = 0; i < messageIds.length; i += batchSize) {
+    const batch = writeBatch(db);
+    const chunk = messageIds.slice(i, i + batchSize);
+
+    chunk.forEach((msgId) => {
+      const msgRef = doc(db, 'chats', chatId, 'messages', msgId);
+      batch.delete(msgRef);
+    });
+
+    await batch.commit();
+  }
+}
+
+/**
+ * Delete an entire chat and all its messages
+ */
+export async function deleteChat(chatId: string): Promise<void> {
+  // Delete all messages in the chat subcollection first
+  const messagesRef = collection(db, 'chats', chatId, 'messages');
+  const messagesSnap = await getDocs(messagesRef);
+
+  const batchSize = 500;
+  const msgIds = messagesSnap.docs.map((d) => d.id);
+
+  for (let i = 0; i < msgIds.length; i += batchSize) {
+    const batch = writeBatch(db);
+    const chunk = msgIds.slice(i, i + batchSize);
+    chunk.forEach((msgId) => {
+      batch.delete(doc(db, 'chats', chatId, 'messages', msgId));
+    });
+    await batch.commit();
+  }
+
+  // Delete the chat document itself
+  await deleteDoc(doc(db, 'chats', chatId));
+}
+
 // ==================== REAL-TIME LISTENERS ====================
 
 /**
@@ -267,6 +352,124 @@ export function subscribeToChatMessages(
     });
     callback(messages);
   });
+}
+
+/**
+ * Load older messages for pagination (messages before the given snapshot)
+ * Returns the messages and whether there are more to load
+ */
+export async function loadMoreMessages(
+  chatId: string,
+  beforeTimestamp: Timestamp,
+  pageSize: number = 30
+): Promise<{ messages: FirestoreMessage[]; hasMore: boolean }> {
+  const q = query(
+    collection(db, 'chats', chatId, 'messages'),
+    orderBy('timestamp', 'desc'),
+    endAt(beforeTimestamp),
+    limit(pageSize + 1) // +1 to check if there are more
+  );
+
+  const snapshot = await getDocs(q);
+  const messages: FirestoreMessage[] = [];
+
+  snapshot.forEach((docSnap) => {
+    messages.push({ id: docSnap.id, ...docSnap.data() } as FirestoreMessage);
+  });
+
+  const hasMore = messages.length > pageSize;
+  if (hasMore) messages.pop(); // Remove the extra message
+
+  // Reverse to get chronological order
+  messages.reverse();
+  return { messages, hasMore };
+}
+
+/**
+ * Search messages within a chat by text content
+ */
+export async function searchMessages(
+  chatId: string,
+  searchText: string,
+  maxResults: number = 50
+): Promise<FirestoreMessage[]> {
+  // Firestore doesn't support full-text search natively
+  // We use a prefix match approach with >= and < operators
+  const searchTextLower = searchText.toLowerCase();
+  const searchTextUpper = searchTextLower + '\uf8ff'; // Unicode high code point for prefix match
+
+  const q = query(
+    collection(db, 'chats', chatId, 'messages'),
+    where('text', '>=', searchTextLower),
+    where('text', '<', searchTextUpper),
+    orderBy('timestamp', 'desc'),
+    limit(maxResults)
+  );
+
+  try {
+    const snapshot = await getDocs(q);
+    const messages: FirestoreMessage[] = [];
+    snapshot.forEach((docSnap) => {
+      messages.push({ id: docSnap.id, ...docSnap.data() } as FirestoreMessage);
+    });
+    return messages;
+  } catch {
+    // If the index isn't available, fall back to client-side search
+    // by loading recent messages and filtering locally
+    const allQ = query(
+      collection(db, 'chats', chatId, 'messages'),
+      orderBy('timestamp', 'desc'),
+      limit(200)
+    );
+    const snapshot = await getDocs(allQ);
+    const messages: FirestoreMessage[] = [];
+    snapshot.forEach((docSnap) => {
+      const msg = { id: docSnap.id, ...docSnap.data() } as FirestoreMessage;
+      if (msg.text && msg.text.toLowerCase().includes(searchTextLower)) {
+        messages.push(msg);
+      }
+    });
+    return messages.slice(0, maxResults);
+  }
+}
+
+/**
+ * Search messages across all chats for a user
+ */
+export async function searchAllMessages(
+  uid: string,
+  searchText: string,
+  maxResults: number = 50
+): Promise<Array<{ chatId: string; message: FirestoreMessage }>> {
+  // First get all chats for this user
+  const chatsQ = query(
+    collection(db, 'chats'),
+    where('participants', 'array-contains', uid)
+  );
+  const chatsSnap = await getDocs(chatsQ);
+
+  const results: Array<{ chatId: string; message: FirestoreMessage }> = [];
+  const searchLower = searchText.toLowerCase();
+
+  // Search in each chat's messages
+  const promises = chatsSnap.docs.map(async (chatDoc) => {
+    const chatId = chatDoc.id;
+    const msgs = await searchMessages(chatId, searchText, 10);
+    msgs.forEach((message) => {
+      results.push({ chatId, message });
+    });
+  });
+
+  await Promise.all(promises);
+
+  // Sort by timestamp descending
+  results.sort((a, b) => {
+    const ta = a.message.timestamp?.toMillis?.() || 0;
+    const tb = b.message.timestamp?.toMillis?.() || 0;
+    return tb - ta;
+  });
+
+  return results.slice(0, maxResults);
 }
 
 /**

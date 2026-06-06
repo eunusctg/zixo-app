@@ -1,9 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn, formatMessageTime, formatDateGroup, getInitials, getAvatarColor } from '@/lib/zixo-utils';
-import type { Message } from '@/stores/useZixoStore';
+import { useZixoStore, type Message } from '@/stores/useZixoStore';
+import { setTypingIndicator } from '@/services/presence';
+import { searchMessages as firestoreSearchMessages } from '@/services/firestore';
+import { uploadChatMedia, type UploadProgress } from '@/services/storage';
 
 interface MessageBubbleProps {
   message: Message;
@@ -83,9 +86,18 @@ export function MessageBubble({
 
             {message.type === 'image' && (
               <div className="relative">
-                <div className="w-48 h-36 rounded-xl bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary text-xs">
-                  📷 Image
-                </div>
+                {message.mediaUrl ? (
+                  <img
+                    src={message.mediaUrl}
+                    alt="Shared image"
+                    className="w-48 h-36 rounded-xl object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-48 h-36 rounded-xl bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary text-xs">
+                    📷 Image
+                  </div>
+                )}
                 {message.text && <p className="mt-1.5">{message.text}</p>}
               </div>
             )}
@@ -192,20 +204,146 @@ export function DateSeparator({ date }: DateSeparatorProps) {
   );
 }
 
+// ==================== MESSAGE SEARCH ====================
+
+interface MessageSearchBarProps {
+  onSearch: (query: string) => void;
+  onClose: () => void;
+  searchQuery: string;
+  isSearching: boolean;
+}
+
+export function MessageSearchBar({ onSearch, onClose, searchQuery, isSearching }: MessageSearchBarProps) {
+  const [text, setText] = useState(searchQuery);
+
+  const handleSearch = () => {
+    if (text.trim()) {
+      onSearch(text.trim());
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    } else if (e.key === 'Escape') {
+      onClose();
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: 'auto', opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      className="overflow-hidden border-b border-white/5"
+    >
+      <div className="flex items-center gap-2 px-3 py-2">
+        <div className="flex-1 relative">
+          <input
+            type="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Search messages..."
+            autoFocus
+            className="w-full px-3 py-1.5 rounded-lg bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none"
+          />
+        </div>
+        <button
+          onClick={handleSearch}
+          disabled={isSearching}
+          className="px-3 py-1.5 rounded-lg gradient-primary text-white text-xs font-medium disabled:opacity-50"
+        >
+          {isSearching ? '...' : 'Find'}
+        </button>
+        <button
+          onClick={onClose}
+          className="px-2 py-1.5 rounded-lg text-zixo-text-secondary hover:text-zixo-text text-xs"
+        >
+          ✕
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+// ==================== SCROLL-TO-BOTTOM FAB ====================
+
+interface ScrollToBottomFABProps {
+  onClick: () => void;
+  unreadCount?: number;
+}
+
+export function ScrollToBottomFAB({ onClick, unreadCount }: ScrollToBottomFABProps) {
+  return (
+    <motion.button
+      initial={{ scale: 0, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      exit={{ scale: 0, opacity: 0 }}
+      whileTap={{ scale: 0.9 }}
+      onClick={onClick}
+      className="absolute bottom-4 right-4 w-10 h-10 rounded-full bg-zixo-surface shadow-lg border border-white/10 flex items-center justify-center text-zixo-primary hover:bg-zixo-surface-light transition-colors z-10"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
+      {unreadCount && unreadCount > 0 && (
+        <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-zixo-primary text-white text-[10px] font-bold flex items-center justify-center">
+          {unreadCount > 9 ? '9+' : unreadCount}
+        </span>
+      )}
+    </motion.button>
+  );
+}
+
+// ==================== CHAT INPUT BAR ====================
+
 interface ChatInputBarProps {
   onSend: (text: string) => void;
   onAttachment: (type: string) => void;
   onVoiceRecord: () => void;
+  onFileUpload: (file: File, type: 'image' | 'file') => void;
+  chatId: string;
 }
 
-export function ChatInputBar({ onSend, onAttachment, onVoiceRecord }: ChatInputBarProps) {
+export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload, chatId }: ChatInputBarProps) {
   const [text, setText] = useState('');
   const [showAttachments, setShowAttachments] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const { currentUser, updateStorageUpload, removeStorageUpload } = useZixoStore();
+
+  // Typing indicator handling
+  const handleTypingStart = useCallback(() => {
+    if (!chatId || !currentUser) return;
+    setTypingIndicator(chatId, currentUser.uid, true);
+  }, [chatId, currentUser]);
+
+  const handleTypingStop = useCallback(() => {
+    if (!chatId || !currentUser) return;
+    setTypingIndicator(chatId, currentUser.uid, false);
+  }, [chatId, currentUser]);
+
+  const handleTextChange = (value: string) => {
+    setText(value);
+    if (value.trim()) {
+      handleTypingStart();
+      // Clear previous timeout
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      // Auto-stop typing after 3 seconds of inactivity
+      typingTimeoutRef.current = setTimeout(handleTypingStop, 3000);
+    } else {
+      handleTypingStop();
+    }
+  };
 
   const handleSend = () => {
     if (text.trim()) {
       onSend(text.trim());
       setText('');
+      handleTypingStop();
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     }
   };
 
@@ -213,6 +351,25 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord }: ChatInputB
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  // Handle file upload with progress tracking
+  const handleFileSelect = async (files: FileList | null, mediaType: 'image' | 'file') => {
+    if (!files || files.length === 0 || !currentUser) return;
+
+    const file = files[0];
+    try {
+      const result = await uploadChatMedia(chatId, currentUser.uid, file, mediaType, (progress: UploadProgress) => {
+        updateStorageUpload(progress.uploadId, progress);
+        if (progress.state === 'success' || progress.state === 'error') {
+          setTimeout(() => removeStorageUpload(progress.uploadId), 3000);
+        }
+      });
+
+      onFileUpload(file, mediaType);
+    } catch (error) {
+      console.error('[Zixo] File upload failed:', error);
     }
   };
 
@@ -224,8 +381,39 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord }: ChatInputB
     { icon: '👤', label: 'Contact', type: 'contact' },
   ];
 
+  // Get active uploads for this chat
+  const storageUploads = useZixoStore((s) => s.storageUploads);
+  const activeUploads = Object.values(storageUploads).filter(
+    (u) => u.state === 'running' && u.uploadId.includes(chatId)
+  );
+
   return (
     <div className="glass-strong safe-area-bottom">
+      {/* Upload Progress */}
+      <AnimatePresence>
+        {activeUploads.length > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="px-4 py-2 space-y-1"
+          >
+            {activeUploads.map((upload) => (
+              <div key={upload.uploadId} className="flex items-center gap-2">
+                <span className="text-[11px] text-zixo-text-secondary truncate flex-1">{upload.fileName}</span>
+                <div className="w-20 h-1.5 bg-zixo-surface-light rounded-full overflow-hidden">
+                  <div
+                    className="h-full gradient-primary rounded-full transition-all duration-300"
+                    style={{ width: `${upload.progress}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-zixo-text-secondary">{upload.progress}%</span>
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Attachment Panel */}
       <AnimatePresence>
         {showAttachments && (
@@ -241,7 +429,13 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord }: ChatInputB
                   key={a.type}
                   whileTap={{ scale: 0.9 }}
                   onClick={() => {
-                    onAttachment(a.type);
+                    if (a.type === 'image') {
+                      imageInputRef.current?.click();
+                    } else if (a.type === 'file') {
+                      fileInputRef.current?.click();
+                    } else {
+                      onAttachment(a.type);
+                    }
                     setShowAttachments(false);
                   }}
                   className="flex flex-col items-center gap-1.5"
@@ -256,6 +450,21 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord }: ChatInputB
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Hidden file inputs */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => handleFileSelect(e.target.files, 'image')}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(e) => handleFileSelect(e.target.files, 'file')}
+      />
 
       {/* Input Bar */}
       <div className="flex items-end gap-2 px-3 py-2">
@@ -274,7 +483,7 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord }: ChatInputB
         <div className="flex-1 relative">
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => handleTextChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             rows={1}

@@ -1,0 +1,42 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper: check if user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Helper: check if the user ID matches the authenticated user
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // ==================== USER AVATARS ====================
+    // Users can upload/read their own avatars
+    match /avatars/{uid}/{imageId} {
+      allow read: if isAuth();
+      allow write: if isOwner(uid)
+        && request.resource.size < 5 * 1024 * 1024  // Max 5MB
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // ==================== CHAT MEDIA ====================
+    // Images, voice notes, files shared in chats
+    match /chats/{chatId}/{type}/{fileId} {
+      allow read: if isAuth();
+      allow write: if isAuth()
+        && request.resource.size < 50 * 1024 * 1024  // Max 50MB
+        && (type == 'images' && request.resource.contentType.matches('image/.*')
+         || type == 'voice' && request.resource.contentType.matches('audio/.*')
+         || type == 'files');
+    }
+
+    // ==================== CALL RECORDINGS ====================
+    // (if call recording feature is enabled)
+    match /recordings/{callId}/{fileId} {
+      allow read: if isAuth();
+      allow write: if false;  // Only admin can write recordings
+    }
+  }
+}

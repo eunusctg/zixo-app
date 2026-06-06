@@ -1,13 +1,74 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { useZixoStore, generateDemoChats, generateDemoMessages, generateDemoCalls } from '@/stores/useZixoStore';
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
-import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles } from '@/services/firestore';
+import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory } from '@/services/firestore';
 import { initFCM } from '@/services/messaging';
-import { setupPresence, subscribeToTyping, subscribeToIncomingCalls } from '@/services/presence';
+import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToMultiplePresence } from '@/services/presence';
 
-// Load demo data helper (defined outside hook to avoid hoisting issues)
+// ==================== RETRY LOGIC ====================
+
+/**
+ * Retry a Firestore subscription with exponential backoff
+ */
+function retrySubscription<T>(
+  subscribeFn: () => (() => void) | null,
+  maxRetries: number = 3,
+  baseDelay: number = 1000,
+  onRetry?: (attempt: number) => void
+): { unsubscribe: () => void; retryNow: () => void } {
+  let attempt = 0;
+  let currentUnsub: (() => void) | null = null;
+  let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
+
+  const trySubscribe = () => {
+    if (disposed) return;
+    try {
+      currentUnsub = subscribeFn();
+      if (currentUnsub) {
+        attempt = 0; // Reset on success
+      } else {
+        scheduleRetry();
+      }
+    } catch (error) {
+      console.warn(`[Zixo] Subscription attempt ${attempt + 1} failed:`, error);
+      scheduleRetry();
+    }
+  };
+
+  const scheduleRetry = () => {
+    if (disposed || attempt >= maxRetries) return;
+    const delay = Math.pow(2, attempt) * baseDelay;
+    attempt++;
+    onRetry?.(attempt);
+    console.log(`[Zixo] Retrying subscription in ${delay}ms (attempt ${attempt}/${maxRetries})`);
+    retryTimeout = setTimeout(trySubscribe, delay);
+  };
+
+  trySubscribe();
+
+  return {
+    unsubscribe: () => {
+      disposed = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
+      if (currentUnsub) currentUnsub();
+    },
+    retryNow: () => {
+      if (retryTimeout) clearTimeout(retryTimeout);
+      if (currentUnsub) currentUnsub();
+      attempt = 0;
+      trySubscribe();
+    },
+  };
+}
+
+// ==================== DEMO DATA ====================
+
+// Only load demo data if explicitly requested or in dev mode
+const isDevMode = process.env.NODE_ENV === 'development';
+
 function loadDemoDataHelper(
   currentUser: ZixoUserProfile,
   setChats: (chats: any[]) => void,
@@ -42,10 +103,12 @@ function loadDemoDataHelper(
  * - Listens to auth state changes
  * - Sets up RTDB presence (online/offline)
  * - Subscribes to real-time chat updates (Firestore)
+ * - Subscribes to presence of chat participants
  * - Subscribes to typing indicators (RTDB)
  * - Listens for incoming calls (RTDB)
+ * - Loads call history from Firestore
  * - Initializes FCM push notifications
- * - Loads demo data as fallback when no real data exists
+ * - Demo data only loads in dev mode or when explicitly requested
  */
 export function useFirebaseBridge() {
   const {
@@ -64,6 +127,8 @@ export function useFirebaseBridge() {
 
   const initialized = useRef(false);
   const chatUnsubs = useRef<Record<string, () => void>>({});
+  const presenceUnsubs = useRef<Record<string, () => void>>({});
+  const callHistoryLoaded = useRef(false);
 
   // 1. Listen to Firebase auth state changes
   useEffect(() => {
@@ -94,7 +159,18 @@ export function useFirebaseBridge() {
             login(tempProfile);
           }
         } catch (error) {
-          console.error('Error loading user profile:', error);
+          console.error('[Zixo] Error loading user profile:', error);
+          // Error recovery: retry once after a delay
+          setTimeout(async () => {
+            try {
+              const profile = await getUserProfile(firebaseUser.uid);
+              if (profile) {
+                login(profile);
+              }
+            } catch (retryError) {
+              console.error('[Zixo] Profile load retry also failed:', retryError);
+            }
+          }, 2000);
         }
       }
     });
@@ -111,7 +187,20 @@ export function useFirebaseBridge() {
     try {
       presenceUnsub = setupPresence(currentUser.uid);
     } catch (error) {
-      console.warn('RTDB presence setup failed:', error);
+      console.warn('[Zixo] RTDB presence setup failed, will retry:', error);
+      // Retry presence setup after delay
+      const retryTimeout = setTimeout(() => {
+        try {
+          presenceUnsub = setupPresence(currentUser.uid);
+        } catch (retryError) {
+          console.warn('[Zixo] RTDB presence retry also failed:', retryError);
+        }
+      }, 3000);
+
+      return () => {
+        clearTimeout(retryTimeout);
+        if (presenceUnsub) presenceUnsub();
+      };
     }
 
     return () => {
@@ -120,69 +209,123 @@ export function useFirebaseBridge() {
   }, [isAuthenticated, currentUser]);
 
   // 3. Subscribe to real-time chats when authenticated (Firestore)
+  //    With retry logic (exponential backoff)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
-    let unsub: (() => void) | null = null;
+    const { unsubscribe } = retrySubscription(
+      () => {
+        const unsub = subscribeToUserChats(currentUser.uid, async (firestoreChats) => {
+          if (firestoreChats.length > 0) {
+            const allUids = new Set<string>();
+            firestoreChats.forEach((c) => c.participants.forEach((uid) => allUids.add(uid)));
+            const profiles = await getUserProfiles(Array.from(allUids));
+            setUserProfiles(profiles);
 
-    try {
-      unsub = subscribeToUserChats(currentUser.uid, async (firestoreChats) => {
-        if (firestoreChats.length > 0) {
-          const allUids = new Set<string>();
-          firestoreChats.forEach((c) => c.participants.forEach((uid) => allUids.add(uid)));
-          const profiles = await getUserProfiles(Array.from(allUids));
-          setUserProfiles(profiles);
+            const uiChats = firestoreChats.map((fc) => {
+              const myUnread = fc.unreadCount?.[currentUser.uid] || 0;
+              return {
+                id: fc.id,
+                participants: fc.participants,
+                participantProfiles: fc.participants.map(
+                  (uid) => profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now() }
+                ),
+                lastMessage: fc.lastMessage
+                  ? {
+                      id: `${fc.id}-last`,
+                      chatId: fc.id,
+                      senderId: fc.lastMessageSender || '',
+                      text: fc.lastMessage,
+                      type: 'text' as const,
+                      timestamp: fc.lastMessageTime?.toMillis?.() || Date.now(),
+                      status: 'delivered' as const,
+                    }
+                  : undefined,
+                unreadCount: myUnread,
+                isGroup: fc.isGroup,
+                groupName: fc.groupName,
+                groupAvatar: fc.groupAvatar,
+                typing: fc.typing || [],
+                pinned: fc.pinned,
+                muted: fc.muted?.includes(currentUser.uid),
+                createdAt: fc.createdAt?.toMillis?.() || Date.now(),
+                updatedAt: fc.updatedAt?.toMillis?.() || Date.now(),
+              };
+            });
 
-          const uiChats = firestoreChats.map((fc) => {
-            const myUnread = fc.unreadCount?.[currentUser.uid] || 0;
-            return {
-              id: fc.id,
-              participants: fc.participants,
-              participantProfiles: fc.participants.map(
-                (uid) => profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now() }
-              ),
-              lastMessage: fc.lastMessage
-                ? {
-                    id: `${fc.id}-last`,
-                    chatId: fc.id,
-                    senderId: fc.lastMessageSender || '',
-                    text: fc.lastMessage,
-                    type: 'text' as const,
-                    timestamp: fc.lastMessageTime?.toMillis?.() || Date.now(),
-                    status: 'delivered' as const,
-                  }
-                : undefined,
-              unreadCount: myUnread,
-              isGroup: fc.isGroup,
-              groupName: fc.groupName,
-              groupAvatar: fc.groupAvatar,
-              typing: fc.typing || [],
-              pinned: fc.pinned,
-              muted: fc.muted?.includes(currentUser.uid),
-              createdAt: fc.createdAt?.toMillis?.() || Date.now(),
-              updatedAt: fc.updatedAt?.toMillis?.() || Date.now(),
-            };
-          });
+            uiChats.sort((a, b) => b.updatedAt - a.updatedAt);
+            setChats(uiChats);
+          } else {
+            // Only load demo data in dev mode - NOT as a silent fallback
+            if (isDevMode) {
+              console.log('[Zixo] No Firestore chats found, loading demo data (dev mode)');
+              loadDemoDataHelper(currentUser, setChats, setMessages, setUserProfiles, setCallHistory);
+            }
+          }
+        });
 
-          uiChats.sort((a, b) => b.updatedAt - a.updatedAt);
-          setChats(uiChats);
-        } else {
-          loadDemoDataHelper(currentUser, setChats, setMessages, setUserProfiles, setCallHistory);
+        return unsub;
+      },
+      3, // max retries
+      1000, // base delay
+      (attempt) => console.warn(`[Zixo] Chat subscription retry attempt ${attempt}`)
+    );
+
+    addUnsub(unsubscribe);
+    return () => unsubscribe();
+  }, [isAuthenticated, currentUser, setChats, setMessages, setUserProfiles, setCallHistory, addUnsub]);
+
+  // 4. Subscribe to presence of chat participants (RTDB)
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+
+    // Clean up previous presence subscriptions
+    Object.values(presenceUnsubs.current).forEach((unsub) => unsub());
+    presenceUnsubs.current = {};
+
+    const store = useZixoStore.getState();
+    const otherUids = store.chats
+      .flatMap((c) => c.participants)
+      .filter((uid) => uid !== currentUser.uid);
+
+    if (otherUids.length === 0) return;
+
+    // Subscribe to presence for all chat participants
+    const unsub = subscribeToMultiplePresence(otherUids, (statuses) => {
+      const currentStore = useZixoStore.getState();
+      const updatedProfiles = { ...currentStore.userProfiles };
+
+      Object.entries(statuses).forEach(([uid, status]) => {
+        if (updatedProfiles[uid]) {
+          updatedProfiles[uid] = {
+            ...updatedProfiles[uid],
+            online: status.online,
+            lastSeen: status.lastSeen,
+          };
         }
       });
 
-      if (unsub) addUnsub(unsub);
-    } catch (error) {
-      console.warn('Firestore subscription failed, using demo data:', error);
-      loadDemoDataHelper(currentUser, setChats, setMessages, setUserProfiles, setCallHistory);
-    }
+      currentStore.setUserProfiles(updatedProfiles);
+
+      // Also update chats with the new presence info
+      const updatedChats = currentStore.chats.map((chat) => ({
+        ...chat,
+        participantProfiles: chat.participantProfiles.map((p) =>
+          updatedProfiles[p.uid] ? { ...p, ...updatedProfiles[p.uid] } : p
+        ),
+      }));
+      currentStore.setChats(updatedChats);
+    });
+
+    presenceUnsubs.current['chat-list'] = unsub;
 
     return () => {
-      if (unsub) unsub();
+      Object.values(presenceUnsubs.current).forEach((unsub) => unsub());
+      presenceUnsubs.current = {};
     };
-  }, [isAuthenticated, currentUser, setChats, setMessages, setUserProfiles, setCallHistory, addUnsub]);
+  }, [isAuthenticated, currentUser, useZixoStore.getState().chats.length]);
 
-  // 4. Subscribe to typing indicators when active chat changes (RTDB)
+  // 5. Subscribe to typing indicators when active chat changes (RTDB)
   useEffect(() => {
     if (!activeChatId || !isAuthenticated || !currentUser) return;
 
@@ -190,7 +333,6 @@ export function useFirebaseBridge() {
 
     try {
       unsub = subscribeToTyping(activeChatId, (typingUids) => {
-        // Update the chat's typing state in the store
         const store = useZixoStore.getState();
         const updatedChats = store.chats.map((chat) =>
           chat.id === activeChatId ? { ...chat, typing: typingUids } : chat
@@ -198,8 +340,7 @@ export function useFirebaseBridge() {
         store.setChats(updatedChats);
       });
     } catch (error) {
-      // RTDB typing subscription is optional - don't break the app
-      console.warn('RTDB typing subscription failed:', error);
+      console.warn('[Zixo] RTDB typing subscription failed:', error);
     }
 
     return () => {
@@ -207,7 +348,8 @@ export function useFirebaseBridge() {
     };
   }, [activeChatId, isAuthenticated, currentUser]);
 
-  // 5. Subscribe to messages when active chat changes (Firestore)
+  // 6. Subscribe to messages when active chat changes (Firestore)
+  //    With retry logic and no demo data fallback
   useEffect(() => {
     if (!activeChatId || !isAuthenticated) return;
 
@@ -215,48 +357,80 @@ export function useFirebaseBridge() {
       chatUnsubs.current[activeChatId]();
     }
 
-    let unsub: (() => void) | null = null;
+    const { unsubscribe } = retrySubscription(
+      () => {
+        const unsub = subscribeToChatMessages(activeChatId, 100, (firestoreMessages) => {
+          if (firestoreMessages.length > 0) {
+            const uiMessages = firestoreMessages.map((fm) => ({
+              id: fm.id,
+              chatId: fm.chatId,
+              senderId: fm.senderId,
+              text: fm.text,
+              type: fm.type,
+              timestamp: fm.timestamp?.toMillis?.() || Date.now(),
+              status: fm.status,
+              replyTo: fm.replyTo,
+              starred: fm.starred,
+              mediaUrl: fm.mediaUrl,
+              fileName: fm.fileName,
+              fileSize: fm.fileSize,
+              duration: fm.duration,
+            }));
+            setMessages(activeChatId, uiMessages);
+          }
+          // No demo data fallback for messages - only show real data
+        });
 
-    try {
-      unsub = subscribeToChatMessages(activeChatId, 100, (firestoreMessages) => {
-        if (firestoreMessages.length > 0) {
-          const uiMessages = firestoreMessages.map((fm) => ({
-            id: fm.id,
-            chatId: fm.chatId,
-            senderId: fm.senderId,
-            text: fm.text,
-            type: fm.type,
-            timestamp: fm.timestamp?.toMillis?.() || Date.now(),
-            status: fm.status,
-            replyTo: fm.replyTo,
-            starred: fm.starred,
-            mediaUrl: fm.mediaUrl,
-            fileName: fm.fileName,
-            fileSize: fm.fileSize,
-            duration: fm.duration,
-          }));
-          setMessages(activeChatId, uiMessages);
-        } else {
-          const demoMsgs = generateDemoMessages(activeChatId, 'demo-1');
-          setMessages(activeChatId, demoMsgs);
-        }
-      });
+        return unsub;
+      },
+      3,
+      1000,
+      (attempt) => console.warn(`[Zixo] Message subscription retry attempt ${attempt}`)
+    );
 
-      if (unsub) {
-        chatUnsubs.current[activeChatId] = unsub;
-      }
-    } catch (error) {
-      console.warn('Message subscription failed, using demo data:', error);
-      const demoMsgs = generateDemoMessages(activeChatId, 'demo-1');
-      setMessages(activeChatId, demoMsgs);
-    }
+    chatUnsubs.current[activeChatId] = unsubscribe;
 
     return () => {
-      if (unsub) unsub();
+      unsubscribe();
     };
   }, [activeChatId, isAuthenticated, setMessages]);
 
-  // 6. Listen for incoming calls (RTDB)
+  // 7. Load call history from Firestore on auth
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser || callHistoryLoaded.current) return;
+    callHistoryLoaded.current = true;
+
+    getCallHistory(currentUser.uid)
+      .then((calls) => {
+        if (calls.length > 0) {
+          const uiCalls = calls.map((c) => ({
+            id: c.id,
+            callerId: c.callerId,
+            callerName: c.callerName,
+            callerAvatar: c.callerAvatar,
+            receiverId: c.receiverId,
+            receiverName: c.receiverName,
+            receiverAvatar: c.receiverAvatar,
+            type: c.type,
+            direction: c.direction,
+            duration: c.duration,
+            timestamp: c.timestamp?.toMillis?.() || Date.now(),
+          }));
+          setCallHistory(uiCalls);
+        } else if (isDevMode) {
+          // Only load demo call data in dev mode
+          setCallHistory(generateDemoCalls());
+        }
+      })
+      .catch((error) => {
+        console.warn('[Zixo] Failed to load call history:', error);
+        if (isDevMode) {
+          setCallHistory(generateDemoCalls());
+        }
+      });
+  }, [isAuthenticated, currentUser, setCallHistory]);
+
+  // 8. Listen for incoming calls (RTDB)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -265,14 +439,14 @@ export function useFirebaseBridge() {
     try {
       unsub = subscribeToIncomingCalls(currentUser.uid, (calls) => {
         if (calls.length > 0) {
-          const call = calls[0]; // Handle the first incoming call
+          const call = calls[0];
           console.log('[Zixo] Incoming call:', call);
           // In a full implementation, this would show an incoming call screen
           // For now, we just log it
         }
       });
     } catch (error) {
-      console.warn('RTDB incoming call subscription failed:', error);
+      console.warn('[Zixo] RTDB incoming call subscription failed:', error);
     }
 
     return () => {
@@ -280,7 +454,7 @@ export function useFirebaseBridge() {
     };
   }, [isAuthenticated, currentUser]);
 
-  // 7. Update online status on visibility change (Firestore)
+  // 9. Update online status on visibility change (Firestore)
   useEffect(() => {
     if (!currentUser) return;
 
@@ -288,7 +462,9 @@ export function useFirebaseBridge() {
       updateOnlineStatus(
         currentUser.uid,
         document.visibilityState === 'visible'
-      ).catch(console.error);
+      ).catch((error) => {
+        console.warn('[Zixo] Failed to update online status:', error);
+      });
     };
 
     document.addEventListener('visibilitychange', handleVisibility);

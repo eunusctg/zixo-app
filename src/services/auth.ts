@@ -5,9 +5,14 @@ import {
   GoogleAuthProvider,
   signOut,
   sendPasswordResetEmail,
+  sendEmailVerification,
   updateProfile,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
   type User,
+  type AuthError,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
@@ -17,6 +22,90 @@ const googleProvider = new GoogleAuthProvider();
 // Scopes for Google Sign-In
 googleProvider.addScope('profile');
 googleProvider.addScope('email');
+
+// ==================== AUTH ERROR MESSAGES ====================
+
+/**
+ * Map Firebase Auth error codes to user-friendly messages
+ */
+export function getAuthErrorMessage(error: AuthError | { code?: string }): string {
+  const code = (error as AuthError).code || '';
+  const errorMessages: Record<string, string> = {
+    'auth/email-already-in-use': 'This email is already registered. Try signing in instead.',
+    'auth/invalid-email': 'Please enter a valid email address.',
+    'auth/operation-not-allowed': 'This sign-in method is not enabled. Please contact support.',
+    'auth/weak-password': 'Password is too weak. Use at least 6 characters with a mix of letters and numbers.',
+    'auth/user-disabled': 'This account has been disabled. Please contact support.',
+    'auth/user-not-found': 'No account found with this email. Please sign up first.',
+    'auth/wrong-password': 'Incorrect password. Please try again or reset your password.',
+    'auth/invalid-credential': 'Invalid email or password. Please check your credentials and try again.',
+    'auth/too-many-requests': 'Too many attempts. Please wait a moment and try again.',
+    'auth/network-request-failed': 'Network error. Please check your internet connection and try again.',
+    'auth/popup-closed-by-user': 'Sign-in was cancelled.',
+    'auth/popup-blocked': 'Pop-up was blocked by your browser. Please allow pop-ups and try again.',
+    'auth/cancelled-popup-request': 'Only one sign-in popup is allowed at a time.',
+    'auth/credential-already-in-use': 'This credential is already linked to another account.',
+    'auth/requires-recent-login': 'This operation requires a recent login. Please sign in again.',
+    'auth/unverified-email': 'Please verify your email before signing in.',
+    'auth/account-exists-with-different-credential': 'An account already exists with this email using a different sign-in method.',
+    'auth/invalid-verification-code': 'The verification code is invalid. Please try again.',
+    'auth/invalid-verification-id': 'The verification ID is invalid. Please restart the verification process.',
+    'auth/expired-action-code': 'This link has expired. Please request a new one.',
+    'auth/invalid-action-code': 'This link is invalid. Please request a new one.',
+  };
+
+  return errorMessages[code] || 'An unexpected error occurred. Please try again.';
+}
+
+/**
+ * Check if error is a rate limiting error
+ */
+export function isRateLimitError(error: AuthError | { code?: string }): boolean {
+  const code = (error as AuthError).code || '';
+  return code === 'auth/too-many-requests';
+}
+
+// ==================== SESSION PERSISTENCE ====================
+
+/**
+ * Configure session persistence
+ * @param remember - If true, persists across browser sessions (default). If false, clears on tab close.
+ */
+export async function setSessionPersistence(remember: boolean): Promise<void> {
+  await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+}
+
+// Initialize with local persistence (remember user across sessions)
+setPersistence(auth, browserLocalPersistence).catch(console.error);
+
+// ==================== EMAIL VERIFICATION ====================
+
+/**
+ * Send email verification to the current user
+ */
+export async function sendVerificationEmail(): Promise<void> {
+  if (auth.currentUser && !auth.currentUser.emailVerified) {
+    await sendEmailVerification(auth.currentUser);
+  }
+}
+
+/**
+ * Check if the current user's email is verified
+ */
+export function isEmailVerified(): boolean {
+  return auth.currentUser?.emailVerified ?? false;
+}
+
+/**
+ * Reload the current user to check if email has been verified
+ */
+export async function reloadUser(): Promise<boolean> {
+  if (auth.currentUser) {
+    await auth.currentUser.reload();
+    return auth.currentUser.emailVerified;
+  }
+  return false;
+}
 
 export interface ZixoUserProfile {
   uid: string;
@@ -44,6 +133,9 @@ export async function registerWithEmail(
 
   // Update Firebase Auth display name
   await updateProfile(user, { displayName });
+
+  // Send email verification
+  await sendEmailVerification(user).catch(console.error);
 
   // Create Firestore user profile
   const username = `@${displayName.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;

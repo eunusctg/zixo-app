@@ -5,12 +5,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useZixoStore, generateDemoChats, generateDemoMessages, generateDemoCalls } from '@/stores/useZixoStore';
 import { useFirebaseBridge } from '@/hooks/useFirebaseBridge';
 import { logoutUser } from '@/services/auth';
-import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead } from '@/services/firestore';
+import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead, searchMessages as firestoreSearchMessages } from '@/services/firestore';
 import { cn, formatDateGroup } from '@/lib/zixo-utils';
 import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/Onboarding';
 import Avatar from '@/components/zixo/Avatar';
 import { ChatList } from '@/components/zixo/ChatList';
-import { MessageBubble, DateSeparator, ChatInputBar } from '@/components/zixo/ChatScreen';
+import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToBottomFAB } from '@/components/zixo/ChatScreen';
 import { AudioCallScreen, VideoCallScreen } from '@/components/zixo/CallScreens';
 import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
@@ -58,14 +58,17 @@ export default function ZixoApp() {
   } = useZixoStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const demoLoaded = useRef(false);
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (currentScreen === 'chat' && messagesEndRef.current) {
+    if (currentScreen === 'chat' && messagesEndRef.current && !isScrolledUp) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, activeChatId, currentScreen]);
+  }, [messages, activeChatId, currentScreen, isScrolledUp]);
 
   // Load demo data as fallback when authenticated but no Firestore data exists
   useEffect(() => {
@@ -134,8 +137,8 @@ export default function ZixoApp() {
     }
   }, [setActiveChat, markChatRead, currentUser]);
 
-  // Handle sending a message (tries Firestore, falls back to local)
-  const handleSendMessage = useCallback((text: string, type: 'text' | 'image' | 'voice' | 'file' | 'location' = 'text') => {
+  // Handle sending a message with media support (tries Firestore, falls back to local)
+  const handleSendMessage = useCallback((text: string, type: 'text' | 'image' | 'voice' | 'file' | 'location' = 'text', extras?: { mediaUrl?: string; fileName?: string; fileSize?: number }) => {
     if (!activeChatId || !currentUser) return;
 
     // Add optimistic local message
@@ -147,11 +150,12 @@ export default function ZixoApp() {
       type,
       timestamp: Date.now(),
       status: 'sending' as const,
+      ...extras,
     };
     addMessage(activeChatId, tempMsg);
 
     // Try to send via Firestore
-    firestoreSendMessage(activeChatId, currentUser.uid, text, type).then(() => {
+    firestoreSendMessage(activeChatId, currentUser.uid, text, type, extras).then(() => {
       // Update status to sent
       const store = useZixoStore.getState();
       store.updateMessage(activeChatId, tempMsg.id, { status: 'sent' });
@@ -193,6 +197,50 @@ export default function ZixoApp() {
     };
     startCall(call.type, user);
   }, [currentUser, startCall]);
+
+  // Handle file upload from ChatInputBar
+  const handleFileUpload = useCallback((file: File, type: 'image' | 'file') => {
+    if (type === 'image') {
+      handleSendMessage('📷 Photo', 'image');
+    } else {
+      handleSendMessage(`📄 ${file.name}`, 'file', { fileName: file.name, fileSize: file.size });
+    }
+  }, [handleSendMessage]);
+
+  // Handle message search within active chat
+  const handleMessageSearch = useCallback(async (query: string) => {
+    if (!activeChatId) return;
+    try {
+      const store = useZixoStore.getState();
+      store.searchMessages(query);
+      const results = await firestoreSearchMessages(activeChatId, query);
+      const searchResults = results.map((msg) => ({
+        chatId: msg.chatId,
+        messageId: msg.id,
+        text: msg.text,
+        senderId: msg.senderId,
+        timestamp: msg.timestamp?.toMillis?.() || Date.now(),
+      }));
+      // Store results in state for display
+      useZixoStore.setState({ messageSearchResults: searchResults, isSearchingMessages: false });
+    } catch (error) {
+      console.warn('[Zixo] Message search failed:', error);
+      useZixoStore.setState({ isSearchingMessages: false });
+    }
+  }, [activeChatId]);
+
+  // Handle scroll to detect when user is scrolled up
+  const handleMessageScroll = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    setIsScrolledUp(distanceFromBottom > 150);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setIsScrolledUp(false);
+  }, []);
 
   // Handle logout with Firebase
   const handleLogout = useCallback(async () => {
@@ -445,6 +493,16 @@ export default function ZixoApp() {
             <div className="flex items-center gap-1 shrink-0">
               <motion.button
                 whileTap={{ scale: 0.9 }}
+                onClick={() => setShowMessageSearch(!showMessageSearch)}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-primary hover:bg-zixo-surface-light transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.9 }}
                 onClick={() => startCall('video', otherUser)}
                 className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-secondary hover:bg-zixo-surface-light transition-colors"
               >
@@ -466,8 +524,23 @@ export default function ZixoApp() {
           </div>
         </div>
 
+        {/* Message Search */}
+        <AnimatePresence>
+          {showMessageSearch && (
+            <MessageSearchBar
+              onSearch={handleMessageSearch}
+              onClose={() => {
+                setShowMessageSearch(false);
+                useZixoStore.getState().clearMessageSearch();
+              }}
+              searchQuery={useZixoStore.getState().messageSearchQuery}
+              isSearching={useZixoStore.getState().isSearchingMessages}
+            />
+          )}
+        </AnimatePresence>
+
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-2">
+        <div className="flex-1 overflow-y-auto px-4 py-2 relative" ref={messagesContainerRef} onScroll={handleMessageScroll}>
           <div className="flex justify-center mb-4">
             <EncryptionBadge />
           </div>
@@ -496,6 +569,13 @@ export default function ZixoApp() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Scroll to Bottom FAB */}
+        <AnimatePresence>
+          {isScrolledUp && (
+            <ScrollToBottomFAB onClick={scrollToBottom} />
+          )}
+        </AnimatePresence>
+
         {/* Input Bar */}
         <ChatInputBar
           onSend={(text) => handleSendMessage(text)}
@@ -505,6 +585,8 @@ export default function ZixoApp() {
             else if (type === 'location') handleSendMessage('📍 Location shared', 'location');
           }}
           onVoiceRecord={() => handleSendMessage('🎤 Voice note', 'voice')}
+          onFileUpload={handleFileUpload}
+          chatId={activeChatId || ''}
         />
       </div>
     );

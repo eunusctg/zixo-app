@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ZixoUserProfile } from '@/services/auth';
 import type { FirestoreChat, FirestoreMessage, FirestoreCall } from '@/services/firestore';
+import type { UploadProgress } from '@/services/storage';
 
 // Types for UI state (compatible with existing components)
 export interface Message {
@@ -72,6 +73,15 @@ export type Tab = 'chats' | 'calls' | 'settings';
 
 export type CallStatus = 'idle' | 'ringing' | 'connecting' | 'connected' | 'ended';
 
+export interface SearchMessagesResult {
+  chatId: string;
+  messageId: string;
+  text: string;
+  senderId: string;
+  timestamp: number;
+  highlighted?: boolean;
+}
+
 interface ZixoState {
   // Navigation
   currentScreen: Screen;
@@ -110,6 +120,18 @@ interface ZixoState {
   authLoading: boolean;
   authError: string | null;
 
+  // Storage uploads
+  storageUploads: Record<string, UploadProgress>;
+
+  // Message search
+  messageSearchResults: SearchMessagesResult[];
+  messageSearchQuery: string;
+  isSearchingMessages: boolean;
+
+  // Pagination
+  hasMoreMessages: Record<string, boolean>;
+  isLoadingMoreMessages: boolean;
+
   // Firebase unsubscribers
   _unsubs: Array<() => void>;
 
@@ -141,6 +163,15 @@ interface ZixoState {
   setAuthError: (error: string | null) => void;
   addUnsub: (unsub: () => void) => void;
   clearUnsubs: () => void;
+  updateStorageUpload: (uploadId: string, progress: UploadProgress) => void;
+  removeStorageUpload: (uploadId: string) => void;
+  updateUserProfile: (updates: Partial<Pick<ZixoUserProfile, 'displayName' | 'bio' | 'avatar' | 'username'>>) => void;
+  deleteChat: (chatId: string) => void;
+  searchMessages: (query: string) => void;
+  clearMessageSearch: () => void;
+  loadMoreMessages: (chatId: string) => void;
+  setHasMoreMessages: (chatId: string, hasMore: boolean) => void;
+  prependMessages: (chatId: string, messages: Message[]) => void;
 }
 
 export const useZixoStore = create<ZixoState>((set, get) => ({
@@ -172,6 +203,18 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   showFABMenu: false,
   authLoading: false,
   authError: null,
+
+  // Storage uploads
+  storageUploads: {},
+
+  // Message search
+  messageSearchResults: [],
+  messageSearchQuery: '',
+  isSearchingMessages: false,
+
+  // Pagination
+  hasMoreMessages: {},
+  isLoadingMoreMessages: false,
 
   // Firebase unsubscribers
   _unsubs: [],
@@ -345,6 +388,66 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     unsubs.forEach((fn) => fn());
     set({ _unsubs: [] });
   },
+
+  // Storage upload tracking
+  updateStorageUpload: (uploadId, progress) =>
+    set((state) => ({
+      storageUploads: { ...state.storageUploads, [uploadId]: progress },
+    })),
+
+  removeStorageUpload: (uploadId) =>
+    set((state) => {
+      const { [uploadId]: _, ...rest } = state.storageUploads;
+      return { storageUploads: rest };
+    }),
+
+  // Update user profile (syncs with Firestore externally)
+  updateUserProfile: (updates) =>
+    set((state) => {
+      if (!state.currentUser) return {};
+      const updatedUser = { ...state.currentUser, ...updates };
+      return {
+        currentUser: updatedUser,
+        userProfiles: { ...state.userProfiles, [updatedUser.uid]: updatedUser },
+      };
+    }),
+
+  // Delete a chat from local state (Firestore deletion handled separately)
+  deleteChat: (chatId) =>
+    set((state) => {
+      const { [chatId]: _, ...remainingMessages } = state.messages;
+      return {
+        chats: state.chats.filter((c) => c.id !== chatId),
+        messages: remainingMessages,
+        activeChatId: state.activeChatId === chatId ? null : state.activeChatId,
+        currentScreen: state.activeChatId === chatId ? 'home' : state.currentScreen,
+      };
+    }),
+
+  // Search messages (results populated externally from Firestore service)
+  searchMessages: (query) =>
+    set({ messageSearchQuery: query, isSearchingMessages: true }),
+
+  clearMessageSearch: () =>
+    set({ messageSearchResults: [], messageSearchQuery: '', isSearchingMessages: false }),
+
+  // Load more messages (pagination trigger)
+  loadMoreMessages: (chatId) =>
+    set({ isLoadingMoreMessages: true }),
+
+  setHasMoreMessages: (chatId, hasMore) =>
+    set((state) => ({
+      hasMoreMessages: { ...state.hasMoreMessages, [chatId]: hasMore },
+    })),
+
+  prependMessages: (chatId, newMessages) =>
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [chatId]: [...newMessages, ...(state.messages[chatId] || [])],
+      },
+      isLoadingMoreMessages: false,
+    })),
 }));
 
 // ==================== DEMO DATA (Fallback when no Firebase connection) ====================

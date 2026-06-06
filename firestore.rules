@@ -14,9 +14,14 @@ service cloud.firestore {
       return isAuth() && request.auth.uid == uid;
     }
 
-    // Check if the user is a participant in a chat
+    // Check if the user is a participant in a chat (for existing data)
     function isChatParticipant(chatData) {
       return isAuth() && chatData.participants.hasAny([request.auth.uid]);
+    }
+
+    // Check if the request data includes the user as participant (for creates)
+    function isCreatingParticipant() {
+      return isAuth() && request.resource.data.participants.hasAny([request.auth.uid]);
     }
 
     // ==================== USERS ====================
@@ -43,10 +48,13 @@ service cloud.firestore {
     match /chats/{chatId} {
 
       // Chat metadata
+      // CREATE: user must be in the participants array of the new document
+      // READ/UPDATE: user must be in the participants array of the existing document
+      allow create: if isAuth() && isCreatingParticipant();
       allow read: if isAuth() && isChatParticipant(resource.data);
-      allow create: if isAuth() && request.resource.data.participants.hasAny([request.auth.uid]);
       allow update: if isAuth() && isChatParticipant(resource.data)
         && isChatParticipant(request.resource.data);
+      allow delete: if isAuth() && isChatParticipant(resource.data);
 
       // Messages subcollection
       match /messages/{messageId} {
@@ -57,9 +65,10 @@ service cloud.firestore {
           && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data)
           && request.resource.data.senderId == request.auth.uid;
         allow update: if isAuth()
-          && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data);
+          && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data)
+          && resource.data.senderId == request.auth.uid;
         allow delete: if isAuth()
-          && request.resource.data.senderId == request.auth.uid;
+          && resource.data.senderId == request.auth.uid;
       }
     }
 
@@ -92,6 +101,14 @@ service cloud.firestore {
       allow delete: if isAuth()
         && (resource.data.callerId == request.auth.uid
           || resource.data.receiverId == request.auth.uid);
+    }
+
+    // ==================== FCM TOKENS ====================
+    // Store FCM tokens for push notifications
+
+    match /fcmTokens/{uid} {
+      allow read: if isAuth();
+      allow write: if isOwner(uid);
     }
   }
 }
