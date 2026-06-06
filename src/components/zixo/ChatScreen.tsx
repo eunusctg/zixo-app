@@ -1,0 +1,325 @@
+'use client';
+
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { cn, formatMessageTime, formatDateGroup, getInitials, getAvatarColor } from '@/lib/zixo-utils';
+import type { Message } from '@/stores/useZixoStore';
+
+interface MessageBubbleProps {
+  message: Message;
+  isOwn: boolean;
+  showAvatar: boolean;
+  senderName?: string;
+  senderUid?: string;
+  isConsecutive: boolean;
+}
+
+export function MessageBubble({
+  message,
+  isOwn,
+  showAvatar,
+  senderName,
+  senderUid,
+  isConsecutive,
+}: MessageBubbleProps) {
+  const [showActions, setShowActions] = useState(false);
+
+  const statusIcon = () => {
+    if (!isOwn) return null;
+    switch (message.status) {
+      case 'sending':
+        return <span className="text-zixo-text-secondary/60 text-[10px]">✓</span>;
+      case 'sent':
+        return <span className="text-zixo-text-secondary text-[10px]">✓✓</span>;
+      case 'delivered':
+        return <span className="text-zixo-text-secondary text-[10px]">✓✓</span>;
+      case 'read':
+        return <span className="text-zixo-primary text-[10px]">✓✓</span>;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.2 }}
+      className={cn(
+        'flex gap-2 message-in',
+        isOwn ? 'justify-end' : 'justify-start',
+        isConsecutive ? 'mt-0.5' : 'mt-3'
+      )}
+      onClick={() => setShowActions(!showActions)}
+    >
+      {/* Avatar for received messages */}
+      {!isOwn && showAvatar && senderUid && (
+        <div className={cn(
+          'w-7 h-7 rounded-full bg-gradient-to-br flex items-center justify-center text-[9px] font-semibold text-white shrink-0 mt-auto',
+          getAvatarColor(senderUid)
+        )}>
+          {senderName ? getInitials(senderName) : '?'}
+        </div>
+      )}
+      {!isOwn && !showAvatar && <div className="w-7" />}
+
+      {/* Bubble */}
+      <div className={cn('max-w-[75%] group', isOwn ? 'items-end' : 'items-start')}>
+        {/* Sender name for groups */}
+        {!isOwn && showAvatar && senderName && (
+          <p className="text-[11px] text-zixo-primary font-medium mb-0.5 ml-1">{senderName}</p>
+        )}
+
+        <div className="relative">
+          <div
+            className={cn(
+              'px-3.5 py-2 rounded-2xl text-sm leading-relaxed',
+              isOwn
+                ? 'bg-gradient-to-br from-zixo-primary to-zixo-primary/80 text-white rounded-br-md'
+                : 'bg-zixo-surface text-zixo-text border border-white/5 rounded-bl-md'
+            )}
+          >
+            {message.type === 'text' && <p>{message.text}</p>}
+
+            {message.type === 'image' && (
+              <div className="relative">
+                <div className="w-48 h-36 rounded-xl bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary text-xs">
+                  📷 Image
+                </div>
+                {message.text && <p className="mt-1.5">{message.text}</p>}
+              </div>
+            )}
+
+            {message.type === 'voice' && (
+              <div className="flex items-center gap-2 min-w-[140px]">
+                <button className="w-7 h-7 rounded-full gradient-primary flex items-center justify-center shrink-0">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                </button>
+                <div className="flex items-center gap-[2px] flex-1 h-5">
+                  {[4, 8, 12, 6, 14, 10, 5, 13, 7, 11, 15, 8, 4, 9, 12, 6, 10, 14, 7, 3, 11, 8, 13, 5].map((h, i) => (
+                    <div
+                      key={i}
+                      className="w-[2px] rounded-full bg-current opacity-60"
+                      style={{ height: `${h}px` }}
+                    />
+                  ))}
+                </div>
+                <span className="text-[10px] opacity-70">
+                  {message.duration ? `${Math.floor(message.duration / 60)}:${(message.duration % 60).toString().padStart(2, '0')}` : '0:03'}
+                </span>
+              </div>
+            )}
+
+            {message.type === 'file' && (
+              <div className="flex items-center gap-2 bg-zixo-surface-light/50 rounded-xl px-3 py-2">
+                <div className="w-8 h-8 rounded-lg bg-zixo-primary/20 flex items-center justify-center text-zixo-primary text-xs">📄</div>
+                <div className="min-w-0">
+                  <p className="text-xs font-medium truncate">{message.fileName || 'Document'}</p>
+                  <p className="text-[10px] text-zixo-text-secondary">
+                    {message.fileSize ? `${(message.fileSize / 1024).toFixed(0)} KB` : 'PDF'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {message.type === 'location' && (
+              <div className="rounded-xl overflow-hidden">
+                <div className="w-48 h-28 bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary text-xs">
+                  📍 Location shared
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Timestamp & Status */}
+          <div className={cn(
+            'flex items-center gap-1 mt-0.5',
+            isOwn ? 'justify-end pr-1' : 'justify-start pl-1'
+          )}>
+            <span className="text-[10px] text-zixo-text-secondary">
+              {formatMessageTime(message.timestamp)}
+            </span>
+            {statusIcon()}
+          </div>
+        </div>
+
+        {/* Action buttons on long press / click */}
+        <AnimatePresence>
+          {showActions && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              className={cn(
+                'flex gap-1 mt-1',
+                isOwn ? 'justify-end' : 'justify-start'
+              )}
+            >
+              {['Reply', 'Copy', 'Forward', 'Star'].map((action) => (
+                <button
+                  key={action}
+                  className="px-2 py-0.5 rounded-full bg-zixo-surface-light text-[10px] text-zixo-text-secondary hover:text-zixo-text hover:bg-zixo-surface transition-colors"
+                >
+                  {action}
+                </button>
+              ))}
+              {isOwn && (
+                <button className="px-2 py-0.5 rounded-full bg-zixo-error/10 text-[10px] text-zixo-error hover:bg-zixo-error/20 transition-colors">
+                  Delete
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+}
+
+interface DateSeparatorProps {
+  date: string;
+}
+
+export function DateSeparator({ date }: DateSeparatorProps) {
+  return (
+    <div className="flex items-center justify-center my-4">
+      <span className="px-3 py-1 rounded-full bg-zixo-surface/80 text-[11px] text-zixo-text-secondary">
+        {date}
+      </span>
+    </div>
+  );
+}
+
+interface ChatInputBarProps {
+  onSend: (text: string) => void;
+  onAttachment: (type: string) => void;
+  onVoiceRecord: () => void;
+}
+
+export function ChatInputBar({ onSend, onAttachment, onVoiceRecord }: ChatInputBarProps) {
+  const [text, setText] = useState('');
+  const [showAttachments, setShowAttachments] = useState(false);
+
+  const handleSend = () => {
+    if (text.trim()) {
+      onSend(text.trim());
+      setText('');
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const attachmentTypes = [
+    { icon: '📷', label: 'Gallery', type: 'image' },
+    { icon: '🎥', label: 'Camera', type: 'camera' },
+    { icon: '📄', label: 'File', type: 'file' },
+    { icon: '📍', label: 'Location', type: 'location' },
+    { icon: '👤', label: 'Contact', type: 'contact' },
+  ];
+
+  return (
+    <div className="glass-strong safe-area-bottom">
+      {/* Attachment Panel */}
+      <AnimatePresence>
+        {showAttachments && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="flex gap-4 px-6 py-4">
+              {attachmentTypes.map((a) => (
+                <motion.button
+                  key={a.type}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => {
+                    onAttachment(a.type);
+                    setShowAttachments(false);
+                  }}
+                  className="flex flex-col items-center gap-1.5"
+                >
+                  <div className="w-12 h-12 rounded-full bg-zixo-surface-light flex items-center justify-center text-xl">
+                    {a.icon}
+                  </div>
+                  <span className="text-[10px] text-zixo-text-secondary">{a.label}</span>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Input Bar */}
+      <div className="flex items-end gap-2 px-3 py-2">
+        {/* Attachment Toggle */}
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={() => setShowAttachments(!showAttachments)}
+          className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-primary hover:bg-zixo-surface-light transition-colors"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </motion.button>
+
+        {/* Text Input */}
+        <div className="flex-1 relative">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message..."
+            rows={1}
+            className="w-full px-4 py-2.5 rounded-2xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none resize-none max-h-28 transition-colors"
+            style={{ minHeight: '40px' }}
+          />
+        </div>
+
+        {/* Voice / Send Button */}
+        <AnimatePresence mode="wait">
+          {text.trim() ? (
+            <motion.button
+              key="send"
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              exit={{ scale: 0, rotate: 180 }}
+              whileTap={{ scale: 0.85 }}
+              onClick={handleSend}
+              className="shrink-0 w-10 h-10 rounded-full gradient-primary flex items-center justify-center glow-primary"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                <line x1="22" y1="2" x2="11" y2="13" stroke="white" strokeWidth="2" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" fill="white" />
+              </svg>
+            </motion.button>
+          ) : (
+            <motion.button
+              key="mic"
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0 }}
+              whileTap={{ scale: 0.85 }}
+              onClick={onVoiceRecord}
+              className="shrink-0 w-10 h-10 rounded-full bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
