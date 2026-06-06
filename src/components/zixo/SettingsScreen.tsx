@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
-import type { UserProfile } from '@/stores/useZixoStore';
+import type { ZixoUserProfile } from '@/services/auth';
 
 // Moved outside of component to avoid "Cannot create components during render" error
 function SettingSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -58,7 +58,7 @@ function ChevronRight() {
 }
 
 interface SettingsScreenProps {
-  user: UserProfile;
+  user: ZixoUserProfile;
   onEditProfile: () => void;
   onLogout: () => void;
   onBack: () => void;

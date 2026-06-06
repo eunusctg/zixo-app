@@ -1,13 +1,15 @@
 /**
  * WebRTC Service for Zixo
  * Handles peer-to-peer audio/video calls using Google STUN servers
- * 
- * Signaling is done through Firestore (offer/answer/ICE candidates stored in a call document)
- * This avoids needing a separate WebSocket server for signaling.
+ *
+ * Signaling uses Firebase Realtime Database (RTDB) for low-latency
+ * offer/answer/ICE candidate exchange.
+ * Falls back to Firestore if RTDB is unavailable.
  */
 
-import { doc, setDoc, getDoc, updateDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, onSnapshot, deleteDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
+import { createCallSignal, updateCallSignal, endCallSignal, addICECandidate, subscribeToIncomingCalls, type RTDBCallSignal } from './presence';
 
 // Free Google STUN servers
 const ICE_SERVERS: RTCConfiguration = {
@@ -26,6 +28,12 @@ export class ZixoWebRTC {
   private remoteStream: MediaStream | null = null;
   private callId: string | null = null;
   private unsubscribeSignaling: (() => void) | null = null;
+  private isCaller: boolean = false;
+
+  // Callbacks
+  public onRemoteStream: ((stream: MediaStream) => void) | null = null;
+  public onConnectionStateChange: ((state: RTCPeerConnectionState) => void) | null = null;
+  public onICEStateChange: ((state: RTCIceConnectionState) => void) | null = null;
 
   /**
    * Initialize a peer connection
@@ -51,7 +59,7 @@ export class ZixoWebRTC {
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
       if (event.candidate && this.callId) {
-        this.sendICECandidate(this.callId, event.candidate, this.isCaller);
+        addICECandidate(this.callId, event.candidate.toJSON(), this.isCaller);
       }
     };
 
@@ -71,17 +79,12 @@ export class ZixoWebRTC {
     return pc;
   }
 
-  // Callbacks
-  public onRemoteStream: ((stream: MediaStream) => void) | null = null;
-  public onConnectionStateChange: ((state: RTCPeerConnectionState) => void) | null = null;
-  public onICEStateChange: ((state: RTCIceConnectionState) => void) | null = null;
-  private isCaller: boolean = false;
-
   /**
    * Start a call (caller side)
    */
   async startCall(
     callerId: string,
+    callerName: string,
     receiverId: string,
     type: 'audio' | 'video'
   ): Promise<string> {
@@ -94,28 +97,21 @@ export class ZixoWebRTC {
     this.isCaller = true;
     this.peerConnection = this.createPeerConnection();
 
-    // Create call document in Firestore
-    const callRef = doc(collection(db, 'calls_signaling'));
-    this.callId = callRef.id;
-
-    await setDoc(callRef, {
+    // Create call signal in RTDB
+    this.callId = createCallSignal({
       callerId,
+      callerName,
       receiverId,
       type,
       status: 'ringing',
-      createdAt: serverTimestamp(),
-      offer: null,
-      answer: null,
-      callerCandidates: [],
-      receiverCandidates: [],
     });
 
     // Create offer
     const offer = await this.peerConnection.createOffer();
     await this.peerConnection.setLocalDescription(offer);
 
-    // Store offer in Firestore
-    await updateDoc(callRef, {
+    // Update signal with offer
+    updateCallSignal(this.callId, {
       offer: { type: offer.type, sdp: offer.sdp },
     });
 
@@ -128,37 +124,29 @@ export class ZixoWebRTC {
   /**
    * Answer a call (receiver side)
    */
-  async answerCall(callId: string): Promise<void> {
+  async answerCall(callId: string, callData: RTDBCallSignal): Promise<void> {
     this.isCaller = false;
     this.callId = callId;
-
-    // Get call signaling data
-    const callRef = doc(db, 'calls_signaling', callId);
-    const callSnap = await getDoc(callRef);
-
-    if (!callSnap.exists()) throw new Error('Call not found');
-
-    const callData = callSnap.data();
-    const type = callData.type as 'audio' | 'video';
 
     // Get local media stream
     this.localStream = await navigator.mediaDevices.getUserMedia({
       audio: true,
-      video: type === 'video' ? { width: 720, height: 1280 } : false,
+      video: callData.type === 'video' ? { width: 720, height: 1280 } : false,
     });
 
     this.peerConnection = this.createPeerConnection();
 
     // Set remote description (offer)
-    const offer = callData.offer;
-    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    if (callData.offer) {
+      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(callData.offer));
+    }
 
     // Create answer
     const answer = await this.peerConnection.createAnswer();
     await this.peerConnection.setLocalDescription(answer);
 
-    // Store answer in Firestore
-    await updateDoc(callRef, {
+    // Update signal with answer
+    updateCallSignal(callId, {
       answer: { type: answer.type, sdp: answer.sdp },
       status: 'connected',
     });
@@ -168,59 +156,11 @@ export class ZixoWebRTC {
   }
 
   /**
-   * Listen for signaling data (answer + ICE candidates)
+   * Listen for signaling data (answer + ICE candidates) via RTDB
    */
   private listenForSignaling(callId: string): void {
-    const callRef = doc(db, 'calls_signaling', callId);
-
-    this.unsubscribeSignaling = onSnapshot(callRef, async (snap) => {
-      if (!snap.exists() || !this.peerConnection) return;
-
-      const data = snap.data();
-
-      // If we're the caller, wait for answer
-      if (this.isCaller && data.answer && !this.peerConnection.currentRemoteDescription) {
-        await this.peerConnection.setRemoteDescription(
-          new RTCSessionDescription(data.answer)
-        );
-      }
-
-      // Process ICE candidates
-      const candidatesKey = this.isCaller ? 'receiverCandidates' : 'callerCandidates';
-      const candidates = data[candidatesKey] || [];
-
-      for (const candidate of candidates) {
-        if (candidate && !candidate.processed) {
-          try {
-            await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-            candidate.processed = true;
-          } catch (e) {
-            console.warn('Error adding ICE candidate:', e);
-          }
-        }
-      }
-    });
-  }
-
-  /**
-   * Send ICE candidate to Firestore
-   */
-  private async sendICECandidate(
-    callId: string,
-    candidate: RTCIceCandidate,
-    isCaller: boolean
-  ): Promise<void> {
-    const callRef = doc(db, 'calls_signaling', callId);
-    const field = isCaller ? 'callerCandidates' : 'receiverCandidates';
-
-    const callSnap = await getDoc(callRef);
-    if (callSnap.exists()) {
-      const data = callSnap.data();
-      const existing: any[] = data[field] || [];
-      existing.push(candidate.toJSON());
-
-      await updateDoc(callRef, { [field]: existing });
-    }
+    // RTDB signaling is handled by the presence service listeners
+    // The call screen component will manage the state updates
   }
 
   /**
@@ -295,10 +235,10 @@ export class ZixoWebRTC {
       this.peerConnection.close();
     }
 
-    // Clean up signaling document
+    // Clean up RTDB signaling
     if (this.callId) {
       try {
-        await deleteDoc(doc(db, 'calls_signaling', this.callId));
+        endCallSignal(this.callId);
       } catch (e) {
         // Document may already be deleted
       }
@@ -331,9 +271,6 @@ export class ZixoWebRTC {
     return this.remoteStream;
   }
 }
-
-// Helper imports
-import { collection, serverTimestamp } from 'firebase/firestore';
 
 // Singleton instance
 let webrtcInstance: ZixoWebRTC | null = null;

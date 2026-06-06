@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn, formatCallDuration, formatCallTime } from '@/lib/zixo-utils';
-import type { CallRecord, UserProfile } from '@/stores/useZixoStore';
+import type { CallRecord } from '@/stores/useZixoStore';
+import type { ZixoUserProfile } from '@/services/auth';
 
 interface CallHistoryListProps {
   calls: CallRecord[];
@@ -159,7 +160,7 @@ export function CallHistoryList({ calls, currentUserId, onCallBack }: CallHistor
 }
 
 interface ContactsScreenProps {
-  contacts: UserProfile[];
+  contacts: ZixoUserProfile[];
   onStartChat: (userId: string) => void;
   onStartCall: (userId: string, type: 'audio' | 'video') => void;
 }

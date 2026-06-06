@@ -5,6 +5,7 @@ import { useZixoStore, generateDemoChats, generateDemoMessages, generateDemoCall
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
 import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles } from '@/services/firestore';
 import { initFCM } from '@/services/messaging';
+import { setupPresence, subscribeToTyping, subscribeToIncomingCalls } from '@/services/presence';
 
 // Load demo data helper (defined outside hook to avoid hoisting issues)
 function loadDemoDataHelper(
@@ -39,8 +40,12 @@ function loadDemoDataHelper(
 /**
  * Hook that manages the Firebase <-> Zustand bridge
  * - Listens to auth state changes
- * - Subscribes to real-time chat updates
- * - Loads demo data as fallback
+ * - Sets up RTDB presence (online/offline)
+ * - Subscribes to real-time chat updates (Firestore)
+ * - Subscribes to typing indicators (RTDB)
+ * - Listens for incoming calls (RTDB)
+ * - Initializes FCM push notifications
+ * - Loads demo data as fallback when no real data exists
  */
 export function useFirebaseBridge() {
   const {
@@ -80,7 +85,7 @@ export function useFirebaseBridge() {
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
               email: firebaseUser.email || '',
               username: `@${(firebaseUser.displayName || 'user').toLowerCase().replace(/\s+/g, '')}`,
-              bio: 'Living free, connecting freely 🌍',
+              bio: 'Living free, connecting freely',
               avatar: firebaseUser.photoURL || '',
               online: true,
               lastSeen: Date.now(),
@@ -97,7 +102,24 @@ export function useFirebaseBridge() {
     return () => unsub();
   }, [setFirebaseReady, login]);
 
-  // 2. Subscribe to real-time chats when authenticated
+  // 2. Set up RTDB presence when authenticated
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+
+    let presenceUnsub: (() => void) | null = null;
+
+    try {
+      presenceUnsub = setupPresence(currentUser.uid);
+    } catch (error) {
+      console.warn('RTDB presence setup failed:', error);
+    }
+
+    return () => {
+      if (presenceUnsub) presenceUnsub();
+    };
+  }, [isAuthenticated, currentUser]);
+
+  // 3. Subscribe to real-time chats when authenticated (Firestore)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -160,7 +182,32 @@ export function useFirebaseBridge() {
     };
   }, [isAuthenticated, currentUser, setChats, setMessages, setUserProfiles, setCallHistory, addUnsub]);
 
-  // 3. Subscribe to messages when active chat changes
+  // 4. Subscribe to typing indicators when active chat changes (RTDB)
+  useEffect(() => {
+    if (!activeChatId || !isAuthenticated || !currentUser) return;
+
+    let unsub: (() => void) | null = null;
+
+    try {
+      unsub = subscribeToTyping(activeChatId, (typingUids) => {
+        // Update the chat's typing state in the store
+        const store = useZixoStore.getState();
+        const updatedChats = store.chats.map((chat) =>
+          chat.id === activeChatId ? { ...chat, typing: typingUids } : chat
+        );
+        store.setChats(updatedChats);
+      });
+    } catch (error) {
+      // RTDB typing subscription is optional - don't break the app
+      console.warn('RTDB typing subscription failed:', error);
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [activeChatId, isAuthenticated, currentUser]);
+
+  // 5. Subscribe to messages when active chat changes (Firestore)
   useEffect(() => {
     if (!activeChatId || !isAuthenticated) return;
 
@@ -209,7 +256,31 @@ export function useFirebaseBridge() {
     };
   }, [activeChatId, isAuthenticated, setMessages]);
 
-  // 4. Update online status on visibility change
+  // 6. Listen for incoming calls (RTDB)
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+
+    let unsub: (() => void) | null = null;
+
+    try {
+      unsub = subscribeToIncomingCalls(currentUser.uid, (calls) => {
+        if (calls.length > 0) {
+          const call = calls[0]; // Handle the first incoming call
+          console.log('[Zixo] Incoming call:', call);
+          // In a full implementation, this would show an incoming call screen
+          // For now, we just log it
+        }
+      });
+    } catch (error) {
+      console.warn('RTDB incoming call subscription failed:', error);
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [isAuthenticated, currentUser]);
+
+  // 7. Update online status on visibility change (Firestore)
   useEffect(() => {
     if (!currentUser) return;
 

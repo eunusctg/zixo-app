@@ -5,10 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { OnlineStatus, EncryptionBadge } from './Common';
 import { cn } from '@/lib/zixo-utils';
-import type { UserProfile } from '@/stores/useZixoStore';
+import type { ZixoUserProfile } from '@/services/auth';
 
 interface AudioCallScreenProps {
-  remoteUser: UserProfile;
+  remoteUser: ZixoUserProfile;
   callStatus: 'ringing' | 'connecting' | 'connected' | 'ended';
   duration: number;
   isMuted: boolean;
@@ -251,7 +251,7 @@ export function AudioCallScreen({
 }
 
 interface VideoCallScreenProps {
-  remoteUser: UserProfile;
+  remoteUser: ZixoUserProfile;
   callStatus: 'ringing' | 'connecting' | 'connected' | 'ended';
   duration: number;
   isMuted: boolean;
