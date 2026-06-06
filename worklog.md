@@ -139,7 +139,7 @@ Set these environment variables in Cloudflare Pages project settings:
 - Updated `.env.example` with complete documentation
 - Set `FIREBASE_PRIVATE_KEY` as Cloudflare secret (user needs to update with real key)
 
-### How to Set Firebase Private Key (Manual Step)
+### How to Set Firebase Private Key (Manual Step) — ✅ COMPLETED
 
 1. Go to [Firebase Console](https://console.firebase.google.com/) > Project Settings > Service Accounts
 2. Click **"Generate New Private Key"** to download the JSON file
@@ -151,4 +151,24 @@ Set these environment variables in Cloudflare Pages project settings:
    ```
 5. Redeploy: `CLOUDFLARE_API_TOKEN=your_token npx wrangler pages deploy .vercel/output/static --project-name zixo-app`
 
-Once set, the health endpoint will report `"adminEnabled": true` and all Firestore/FCM admin operations will work.
+---
+
+## Session 4: Firebase Private Key Configured
+
+**Date:** 2026-06-06
+
+### Changes
+- Set `FIREBASE_PRIVATE_KEY` as Cloudflare Pages secret (via `wrangler pages secret put`)
+- Updated `.env.local` with the actual private key from the service account JSON
+- Redeployed to Cloudflare Pages
+- Verified `adminEnabled: true` on production
+
+### Verified Working
+- `GET /api/zixo` → `{"adminEnabled": true, "rtdbEnabled": true}`
+- `POST /api/zixo` action `verifyUsername` → uses Firestore admin API (`"source": "firestore"`)
+- `POST /api/zixo` action `searchUsers` → uses Firestore admin query
+- FCM v1 API ready for push notifications
+- Custom auth token generation available
+
+### Production Status
+**https://zixo-app-cfy.pages.dev** — Fully operational with Firebase Admin ✅
