@@ -1,0 +1,40 @@
+{
+  "name": "Zixo - Free Video and Audio Calling App",
+  "short_name": "Zixo",
+  "description": "Connect freely. No social clutter. Free video and audio calling with end-to-end encryption.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A0A1A",
+  "theme_color": "#6C5CE7",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["communication", "social"],
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "New Chat",
+      "short_name": "Chat",
+      "description": "Start a new conversation",
+      "url": "/?action=new-chat",
+      "icons": []
+    },
+    {
+      "name": "Quick Call",
+      "short_name": "Call",
+      "description": "Start a quick call",
+      "url": "/?action=quick-call",
+      "icons": []
+    }
+  ],
+  "gcm_sender_id": "809372450511",
+  "gcm_sender_id_comment": "Firebase Cloud Messaging sender ID"
+}
