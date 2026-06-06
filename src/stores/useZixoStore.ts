@@ -371,9 +371,14 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       })
       .catch((err) => {
         console.error('[Zixo] Failed to start call:', err);
-        // Clean up on failure
         webrtc.endCall();
         set({ activeCall: null, currentScreen: 'home' });
+        // Show user-friendly error
+        if (err?.name === 'NotAllowedError') {
+          alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
+        } else {
+          alert('Failed to start call. Please try again.');
+        }
       });
   },
 
@@ -429,6 +434,12 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         console.error('[Zixo] Failed to answer call:', err);
         webrtc.endCall();
         set({ activeCall: null, currentScreen: 'home' });
+        // Show user-friendly error
+        if (err?.name === 'NotAllowedError') {
+          alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
+        } else {
+          alert('Failed to answer call. Please try again.');
+        }
       });
   },
 

@@ -37,7 +37,7 @@ export default function ChatListItem({ chat, currentUserId, onClick, onQuickCall
           {lastMsg && (
             <span className={cn(
               'text-[11px] shrink-0',
-              chat.unreadCount > 0 ? 'text-zixo-primary font-medium' : 'text-zixo-text-secondary'
+              chat.unreadCount > 0 ? 'text-[#25D366] font-medium' : 'text-zixo-text-secondary'
             )}>
               {formatTime(lastMsg.timestamp)}
             </span>
@@ -62,7 +62,7 @@ export default function ChatListItem({ chat, currentUserId, onClick, onQuickCall
           )}
 
           {chat.unreadCount > 0 && (
-            <div className="shrink-0 min-w-[20px] h-[20px] flex items-center justify-center rounded-full bg-zixo-primary text-white text-[10px] font-bold px-1 glow-primary">
+            <div className="shrink-0 min-w-[20px] h-[20px] flex items-center justify-center rounded-full bg-[#25D366] text-white text-[10px] font-bold px-1">
               {chat.unreadCount}
             </div>
           )}

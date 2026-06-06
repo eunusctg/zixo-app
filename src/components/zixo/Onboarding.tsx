@@ -266,6 +266,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Phone OTP state
+  const [phoneMode, setPhoneMode] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpLoading, setOtpLoading] = useState(false);
+
   const passwordStrength = () => {
     if (!password) return 0;
     let score = 0;
@@ -352,6 +359,46 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     }
   };
 
+  const handleSendOTP = async () => {
+    if (!phoneNumber || phoneNumber.length < 10) {
+      setError('Please enter a valid phone number with country code (e.g., +1234567890)');
+      return;
+    }
+    setError(null);
+    setOtpLoading(true);
+    try {
+      const { initRecaptcha, sendOTP } = await import('@/services/auth');
+      initRecaptcha('recaptcha-container');
+      await sendOTP(phoneNumber);
+      setOtpSent(true);
+    } catch (err: any) {
+      console.error('[Zixo Auth] Send OTP error:', err);
+      setError(err?.message || 'Failed to send OTP. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    if (!otpCode || otpCode.length < 6) {
+      setError('Please enter the 6-digit verification code');
+      return;
+    }
+    setError(null);
+    setOtpLoading(true);
+    try {
+      const { verifyOTP } = await import('@/services/auth');
+      const result = await verifyOTP(otpCode);
+      console.log('[Zixo Auth] Phone auth successful:', result.profile.displayName);
+      onAuth({ email: result.profile.email, displayName: result.profile.displayName });
+    } catch (err: any) {
+      console.error('[Zixo Auth] Verify OTP error:', err);
+      setError(err?.message || 'Invalid code. Please try again.');
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-zixo-bg mesh-bg">
       <div className="h-full flex flex-col max-w-lg mx-auto">
@@ -392,6 +439,124 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
             </p>
           </motion.div>
 
+          {phoneMode ? (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="text-xs font-medium text-zixo-text-secondary mb-1.5 block">Phone Number</label>
+                <input
+                  type="tel"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="+1 234 567 8900"
+                  disabled={otpSent}
+                  className="w-full px-4 py-3 rounded-xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none transition-colors disabled:opacity-50"
+                />
+              </div>
+
+              {!otpSent ? (
+                <motion.button
+                  whileTap={{ scale: 0.98 }}
+                  type="button"
+                  onClick={handleSendOTP}
+                  disabled={otpLoading}
+                  className={cn(
+                    'w-full py-3.5 rounded-xl font-semibold text-sm transition-all min-h-[44px]',
+                    otpLoading
+                      ? 'bg-zixo-primary/50 text-white/70'
+                      : 'gradient-primary text-white'
+                  )}
+                >
+                  {otpLoading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                      />
+                      Sending...
+                    </div>
+                  ) : (
+                    'Send Verification Code'
+                  )}
+                </motion.button>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-medium text-zixo-text-secondary mb-1.5 block">Verification Code</label>
+                    <input
+                      type="text"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="123456"
+                      maxLength={6}
+                      className="w-full px-4 py-3 rounded-xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none transition-colors text-center tracking-[0.5em] font-mono text-lg"
+                    />
+                  </div>
+                  <motion.button
+                    whileTap={{ scale: 0.98 }}
+                    type="button"
+                    onClick={handleVerifyOTP}
+                    disabled={otpLoading}
+                    className={cn(
+                      'w-full py-3.5 rounded-xl font-semibold text-sm transition-all min-h-[44px]',
+                      otpLoading
+                        ? 'bg-zixo-primary/50 text-white/70'
+                        : 'gradient-primary text-white'
+                    )}
+                  >
+                    {otpLoading ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                          className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                        />
+                        Verifying...
+                      </div>
+                    ) : (
+                      'Verify & Sign In'
+                    )}
+                  </motion.button>
+                  <button
+                    type="button"
+                    onClick={() => { setOtpSent(false); setOtpCode(''); }}
+                    className="w-full text-center text-xs text-zixo-text-secondary hover:text-zixo-primary transition-colors min-h-[44px]"
+                  >
+                    Didn&apos;t get a code? Try again
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={() => { setPhoneMode(false); setOtpSent(false); setOtpCode(''); setError(null); }}
+                className="w-full text-center text-xs text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+              >
+                ← Back to email sign in
+              </button>
+
+              {/* Error Display */}
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -5 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zixo-error/10 border border-zixo-error/20"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zixo-error shrink-0">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="15" y1="9" x2="9" y2="15" />
+                    <line x1="9" y1="9" x2="15" y2="15" />
+                  </svg>
+                  <p className="text-xs text-zixo-error">{error}</p>
+                </motion.div>
+              )}
+            </motion.div>
+          ) : (
           <motion.form
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -524,6 +689,7 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
               </motion.div>
             )}
           </motion.form>
+          )}
 
           {/* Google Sign-In */}
           {mode !== 'forgot' && (
@@ -539,35 +705,52 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
                 <div className="flex-1 h-px bg-white/10" />
               </div>
 
-              <motion.button
-                whileTap={{ scale: 0.98 }}
-                onClick={handleGoogleSignIn}
-                disabled={isLoading}
-                className={cn(
-                  "w-full py-3 rounded-xl bg-white/5 text-zixo-text font-medium text-sm border border-white/10 hover:bg-white/10 transition-colors flex items-center justify-center gap-3",
-                  isLoading && "opacity-50 cursor-not-allowed"
-                )}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24">
-                  <path
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
-                    fill="#4285F4"
-                  />
-                  <path
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    fill="#34A853"
-                  />
-                  <path
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                    fill="#FBBC05"
-                  />
-                  <path
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                    fill="#EA4335"
-                  />
-                </svg>
-                Google
-              </motion.button>
+              <div className="flex flex-col gap-3">
+                <motion.button
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleGoogleSignIn}
+                  disabled={isLoading}
+                  className={cn(
+                    "w-full py-3 rounded-xl bg-white/5 text-zixo-text font-medium text-sm border border-white/10 hover:bg-white/10 transition-colors flex items-center justify-center gap-3 min-h-[44px]",
+                    isLoading && "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24">
+                    <path
+                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
+                      fill="#4285F4"
+                    />
+                    <path
+                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      fill="#34A853"
+                    />
+                    <path
+                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      fill="#FBBC05"
+                    />
+                    <path
+                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      fill="#EA4335"
+                    />
+                  </svg>
+                  Google
+                </motion.button>
+
+                <motion.button
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setPhoneMode(true)}
+                  disabled={isLoading}
+                  className={cn(
+                    "w-full py-3 rounded-xl bg-white/5 text-zixo-text font-medium text-sm border border-white/10 hover:bg-white/10 transition-colors flex items-center justify-center gap-3 min-h-[44px]",
+                    isLoading && "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+                  </svg>
+                  Phone Number
+                </motion.button>
+              </div>
             </motion.div>
           )}
 
@@ -613,6 +796,8 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
           </motion.div>
         </div>
       </div>
+      {/* reCAPTCHA container for phone auth */}
+      <div id="recaptcha-container"></div>
     </div>
   );
 }

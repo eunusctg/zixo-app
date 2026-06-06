@@ -46,7 +46,7 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
   ];
 
   return (
-    <div className="glass-strong fixed bottom-0 left-0 right-0 z-50 safe-area-bottom">
+    <div className="bg-[#1F2C34] fixed bottom-0 left-0 right-0 z-50 safe-area-bottom border-t border-white/5">
       <div className="flex items-center justify-around h-16 max-w-lg mx-auto">
         {tabs.map((tab) => (
           <button
@@ -54,9 +54,17 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
             onClick={() => onTabChange(tab.id)}
             className={cn(
               'relative flex flex-col items-center justify-center gap-0.5 w-16 h-full transition-colors',
-              activeTab === tab.id ? 'text-zixo-primary' : 'text-zixo-text-secondary'
+              activeTab === tab.id ? 'text-[#25D366]' : 'text-zixo-text-secondary'
             )}
           >
+            {/* Active indicator line at top */}
+            {activeTab === tab.id && (
+              <motion.div
+                layoutId="activeTab"
+                className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-[3px] rounded-full bg-[#25D366]"
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+              />
+            )}
             <div className="relative">
               <motion.div
                 whileTap={{ scale: 0.9 }}
@@ -70,7 +78,7 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     exit={{ scale: 0 }}
-                    className="absolute -top-1 -right-2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-zixo-primary text-white text-[10px] font-bold px-1 glow-primary"
+                    className="absolute -top-1 -right-2 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-[#25D366] text-white text-[10px] font-bold px-1"
                   >
                     {tab.badge > 99 ? '99+' : tab.badge}
                   </motion.div>
@@ -78,13 +86,6 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
               </AnimatePresence>
             </div>
             <span className="text-[10px] font-medium">{tab.label}</span>
-            {activeTab === tab.id && (
-              <motion.div
-                layoutId="activeTab"
-                className="absolute -top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-full gradient-primary"
-                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-              />
-            )}
           </button>
         ))}
       </div>
@@ -143,21 +144,27 @@ export function FAB({ isOpen, onToggle, onNewChat, onNewGroup, onQuickCall }: FA
           'w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300',
           isOpen
             ? 'bg-zixo-error rotate-45 glow-error'
-            : 'gradient-primary glow-primary'
+            : 'bg-[#25D366]'
         )}
       >
-        <svg
-          width="24"
-          height="24"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="white"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-        >
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
+        {isOpen ? (
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        ) : (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        )}
       </motion.button>
     </div>
   );

@@ -202,7 +202,9 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
         </SettingRow>
       </SettingSection>
 
-      {/* Admin */}
+      {/* Admin Panel
+          Accessible via: Settings tab → scroll down to "Admin" section → click "Admin Panel"
+          The user eunus527@gmail.com has role: 'admin' in Firestore. */}
       {user.role === 'admin' && (
         <SettingSection title="Admin">
           <SettingRow label="Admin Panel" subtitle="Manage users & roles" onClick={onAdminPanel}>

@@ -76,10 +76,10 @@ export function MessageBubble({
         <div className="relative">
           <div
             className={cn(
-              'px-3.5 py-2 rounded-2xl text-sm leading-relaxed',
+              'px-3.5 py-2 rounded-lg text-sm leading-relaxed',
               isOwn
-                ? 'bg-gradient-to-br from-zixo-primary to-zixo-primary/80 text-white rounded-br-md'
-                : 'bg-zixo-surface text-zixo-text border border-white/5 rounded-bl-md'
+                ? 'bg-[#005C4B] text-[#E9EDEF] rounded-tr-none'
+                : 'bg-[#1F2C34] text-[#E9EDEF] border border-white/5 rounded-tl-none'
             )}
           >
             {message.type === 'text' && <p>{message.text}</p>}
@@ -388,7 +388,7 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload
   );
 
   return (
-    <div className="glass-strong safe-area-bottom">
+    <div className="bg-[#1F2C34] safe-area-bottom">
       {/* Upload Progress */}
       <AnimatePresence>
         {activeUploads.length > 0 && (
@@ -487,7 +487,7 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             rows={1}
-            className="w-full px-4 py-2.5 rounded-2xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none resize-none max-h-28 transition-colors"
+            className="w-full px-4 py-2.5 rounded-2xl bg-[#2A3942] text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-[#25D366]/30 focus:outline-none resize-none max-h-28 transition-colors"
             style={{ minHeight: '40px' }}
           />
         </div>
@@ -502,7 +502,7 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload
               exit={{ scale: 0, rotate: 180 }}
               whileTap={{ scale: 0.85 }}
               onClick={handleSend}
-              className="shrink-0 w-10 h-10 rounded-full gradient-primary flex items-center justify-center glow-primary"
+              className="shrink-0 w-10 h-10 rounded-full bg-[#25D366] flex items-center justify-center"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
                 <line x1="22" y1="2" x2="11" y2="13" stroke="white" strokeWidth="2" />

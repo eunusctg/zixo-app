@@ -1,75 +1,71 @@
-# Work Log - Task 1
+# Work Log - Task 1: Zixo App Major Changes
 
-## Summary of Changes
+## Date: 2026-06-06
 
-### Task 1: Fix Admin Panel Not Showing After Sign-in
+## Summary
+Completed all 5 tasks for the Zixo app: fixing call error handling, WhatsApp-like UI repolish, responsive design, phone OTP authentication, and admin panel documentation.
 
-**Root Cause:** When users sign in, temp profiles created during fallback paths were missing the `role` field. The `handleAuth` fallback in `page.tsx` also created a competing temp profile without `role`.
+## Changes Made
 
-**Fixes Applied:**
-1. **`useFirebaseBridge.ts`** - Added `role: 'user'` to both temp profile creation paths (no Firestore profile found, and error fallback)
-2. **`page.tsx`** - Removed the entire `handleAuth` fallback (lines 115-140) since `useFirebaseBridge` properly handles auth state changes. The fallback created race conditions with the bridge. Now `onAuth` is a no-op `() => {}`.
+### Task 1: Fix Calling - Can't Add User to Call
+- **File**: `src/stores/useZixoStore.ts`
+- Added user-friendly error alerts in both `startCall` and `answerCall` catch blocks
+- When `NotAllowedError` (permission denied), shows: "Camera/Microphone permission denied. Please allow access in your browser settings."
+- For other errors, shows: "Failed to start/answer call. Please try again."
 
-### Task 2: Remove All Dummy/Seed/Demo Users and Demo Data
+### Task 2: WhatsApp-like UI Repolish
+- **File**: `src/app/globals.css`
+  - Changed color scheme from purple (#6C5CE7) to WhatsApp green (#25D366)
+  - Updated all CSS custom properties, gradients, glassmorphism, glows, scrollbar, shimmer, mesh-bg
+  - Added safe-area CSS classes for iOS notch devices
+- **File**: `src/components/zixo/ChatScreen.tsx`
+  - Own messages: `bg-[#005C4B]` (WhatsApp dark green) with `rounded-tr-none` tail
+  - Other messages: `bg-[#1F2C34]` with `rounded-tl-none` tail
+  - Input bar: `bg-[#1F2C34]` background, `bg-[#2A3942]` input field, `bg-[#25D366]` send button
+- **File**: `src/components/zixo/Navigation.tsx`
+  - Bottom nav: `bg-[#1F2C34]` with border-top, active tab color `text-[#25D366]`
+  - Added green indicator line at top of active tab
+  - Unread badge: `bg-[#25D366]`
+  - FAB: `bg-[#25D366]` with chat icon (instead of + icon)
+- **File**: `src/components/zixo/ChatList.tsx`
+  - Time text in green for unread chats: `text-[#25D366]`
+  - Unread badge: `bg-[#25D366]` (removed glow)
+- **File**: `src/app/page.tsx`
+  - All headers changed to `bg-[#1F2C34]` (home, chat, contacts, settings screens)
+  - Added `safe-area-top` class to headers
 
-1. **`useZixoStore.ts`** - Removed:
-   - `DEMO_USERS` array (6 demo user profiles)
-   - `generateDemoChats()` function
-   - `generateDemoMessages()` function
-   - `generateDemoCalls()` function
-2. **`page.tsx`** - Removed:
-   - Import of `generateDemoChats, generateDemoMessages, generateDemoCalls`
-   - `demoLoaded` ref
-   - Demo data loading `useEffect`
-3. **`useFirebaseBridge.ts`** - Removed:
-   - Import of `generateDemoChats, generateDemoMessages, generateDemoCalls`
-   - `isDevMode` variable
-   - `loadDemoDataHelper` function
-   - `if (isDevMode)` blocks in chat subscription and call history loading
+### Task 3: Make App More Responsive
+- **File**: `src/app/page.tsx`
+  - Wrapped entire app in `max-w-lg` container centered with `flex justify-center`
+  - Looks like a phone app centered on desktop
+  - Added `safe-area-top` to all header bars
+- **File**: `src/app/globals.css`
+  - Added `.safe-area-bottom` and `.safe-area-top` CSS classes with `env(safe-area-inset-*)`
+- **File**: `src/components/zixo/Onboarding.tsx`
+  - Added `min-h-[44px]` for all touch targets (Apple HIG)
 
-### Task 3: Wire Up Real WebRTC P2P Audio/Video Calling
+### Task 4: Add Login via OTP (Phone Authentication)
+- **File**: `src/services/auth.ts`
+  - Added `RecaptchaVerifier`, `signInWithPhoneNumber`, `ConfirmationResult` imports
+  - Added `initRecaptcha(buttonId)` - initializes invisible reCAPTCHA
+  - Added `sendOTP(phoneNumber)` - sends OTP to phone number
+  - Added `verifyOTP(code)` - verifies OTP and creates/gets user profile
+  - Added `resetPhoneAuth()` - cleanup function
+- **File**: `src/components/zixo/Onboarding.tsx`
+  - Added phone OTP state variables (phoneMode, phoneNumber, otpCode, otpSent, otpLoading)
+  - Added `handleSendOTP()` and `handleVerifyOTP()` functions
+  - When `phoneMode` is true, shows phone number input → OTP verification flow
+  - Added "Phone Number" button alongside Google sign-in
+  - Added `<div id="recaptcha-container"></div>` for Firebase reCAPTCHA
+  - Back to email sign-in option available
 
-1. **`useZixoStore.ts`** - Major changes:
-   - Added `localStream`, `remoteStream`, `callId` to `activeCall` type
-   - Added `incomingCall` state with `callId`, `callerProfile`, `callType`, `callData`
-   - Added `answerCall`, `rejectCall`, `setCallRemoteStream`, `setCallLocalStream`, `setIncomingCall` actions
-   - `startCall` now uses `getWebRTC().startCall()` to create real peer connections
-   - `answerCall` uses `getWebRTC().answerCall()` to answer incoming calls
-   - `rejectCall` sends `endCallSignal()` to RTDB and clears state
-   - `endCall` now calls `getWebRTC().endCall()` to clean up peer connections
-   - `toggleMute` and `toggleVideo` now also control the actual WebRTC tracks
+### Task 5: Admin Panel Access
+- **File**: `src/components/zixo/SettingsScreen.tsx`
+  - Added descriptive comment explaining how to access admin panel
+  - Note that `eunus527@gmail.com` has `role: 'admin'` in Firestore
 
-2. **`useFirebaseBridge.ts`** - Incoming call handling:
-   - Section 8 now looks up caller profile from cache/Firestore
-   - Sets `incomingCall` state in the store
-   - Navigates to `'incoming-call'` screen
-
-3. **`page.tsx`** - Screen rendering:
-   - Added `'incoming-call'` screen case with `AudioCallScreen` (isIncoming=true, answer/decline buttons)
-   - Pass `remoteStream` to `AudioCallScreen` and `localStream`/`remoteStream` to `VideoCallScreen`
-   - Connected `answerCall` and `rejectCall` from the store
-
-4. **`CallScreens.tsx`** - Real media streams:
-   - `AudioCallScreen` now has `<audio>` element for remote stream playback
-   - `VideoCallScreen` now has `<video>` elements for both local (PiP) and remote streams
-   - Both components accept and render `remoteStream`/`localStream` props
-
-### Task 4: Ensure Texting Works Properly
-
-1. **`CallHistory.tsx` (ContactsScreen)** - Added:
-   - `onSearchUser` prop for searching by username
-   - Search button in input field for Firestore username search
-   - "Your Chats" section header
-   - Chat button (message icon) alongside call buttons
-   - Click-to-chat on contact rows
-   - Empty state with "Search by @username" guidance
-
-2. **`page.tsx`** - Contacts screen now:
-   - Imports `createOrGetChat` from firestore and `searchUserByUsername` from auth
-   - `onStartChat` creates/gets chat in Firestore before navigating
-   - `onSearchUser` searches by username and creates chat with found user
-
-### Build Verification
-- `npx next build` compiles successfully
-- Dev server returns 200 OK
+## Build Verification
+- `npx next build` ✅ Compiled successfully
+- Dev server running on port 3000 ✅
 - No TypeScript errors in source files
+- Lint errors only from `.open-next/` build artifacts (pre-existing, not from our changes)

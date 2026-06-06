@@ -333,8 +333,8 @@ export default function ZixoApp() {
     return (
       <div className="h-screen flex flex-col bg-zixo-bg">
         {/* Top Bar */}
-        <div className="shrink-0">
-          <div className="flex items-center justify-between px-4 py-3">
+        <div className="shrink-0 bg-[#1F2C34]">
+          <div className="flex items-center justify-between px-4 py-3 safe-area-top">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl gradient-primary flex items-center justify-center">
                 <span className="text-lg font-extrabold text-white font-heading">Z</span>
@@ -468,7 +468,7 @@ export default function ZixoApp() {
     return (
       <div className="h-screen flex flex-col bg-zixo-bg">
         {/* Chat Header */}
-        <div className="shrink-0 glass-strong z-10">
+        <div className="shrink-0 bg-[#1F2C34] z-10 safe-area-top">
           <div className="flex items-center gap-3 px-3 py-2.5">
             <motion.button
               whileTap={{ scale: 0.9 }}
@@ -601,7 +601,7 @@ export default function ZixoApp() {
 
     return (
       <div className="h-screen flex flex-col bg-zixo-bg">
-        <div className="shrink-0 flex items-center gap-3 px-4 py-3 glass-strong">
+        <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34] safe-area-top">
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={() => setScreen('home')}
@@ -665,7 +665,7 @@ export default function ZixoApp() {
     if (!currentUser) return null;
     return (
       <div className="h-screen flex flex-col bg-zixo-bg">
-        <div className="shrink-0 flex items-center gap-3 px-4 py-3 glass-strong">
+        <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34] safe-area-top">
           <motion.button
             whileTap={{ scale: 0.9 }}
             onClick={() => setActiveTab('settings')}
@@ -685,18 +685,20 @@ export default function ZixoApp() {
   };
 
   return (
-    <div className="min-h-screen bg-zixo-bg text-zixo-text">
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={currentScreen}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
-        >
-          {renderScreen()}
-        </motion.div>
-      </AnimatePresence>
+    <div className="min-h-screen bg-zixo-bg text-zixo-text flex justify-center">
+      <div className="w-full max-w-lg relative">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentScreen}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+          >
+            {renderScreen()}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

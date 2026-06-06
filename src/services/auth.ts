@@ -11,8 +11,11 @@ import {
   setPersistence,
   browserLocalPersistence,
   browserSessionPersistence,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
   type User,
   type AuthError,
+  type ConfirmationResult,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from './firebase';
@@ -326,4 +329,81 @@ export async function searchUserByUsername(username: string): Promise<ZixoUserPr
     };
   }
   return null;
+}
+
+// ==================== PHONE AUTH (OTP) ====================
+
+let recaptchaVerifier: RecaptchaVerifier | null = null;
+let confirmationResult: ConfirmationResult | null = null;
+
+/**
+ * Initialize the invisible reCAPTCHA verifier for phone auth
+ * @param buttonId - The ID of the container element for the reCAPTCHA
+ */
+export function initRecaptcha(buttonId: string): void {
+  if (recaptchaVerifier) return;
+  recaptchaVerifier = new RecaptchaVerifier(auth, buttonId, {
+    size: 'invisible',
+    callback: () => {
+      // reCAPTCHA solved
+    },
+  });
+}
+
+/**
+ * Send OTP to the given phone number
+ * @param phoneNumber - Phone number in +XX format (e.g., +1234567890)
+ */
+export async function sendOTP(phoneNumber: string): Promise<void> {
+  if (!recaptchaVerifier) {
+    throw new Error('Recaptcha not initialized. Call initRecaptcha first.');
+  }
+  confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+}
+
+/**
+ * Verify the OTP code sent to the user's phone
+ * @param code - The 6-digit OTP code
+ */
+export async function verifyOTP(code: string): Promise<{ user: User; profile: ZixoUserProfile }> {
+  if (!confirmationResult) {
+    throw new Error('No confirmation result. Send OTP first.');
+  }
+  const result = await confirmationResult.confirm(code);
+  const user = result.user;
+
+  // Get or create profile
+  let profile = await getUserProfile(user.uid);
+  if (!profile) {
+    profile = {
+      uid: user.uid,
+      displayName: user.displayName || user.phoneNumber || 'User',
+      email: user.email || '',
+      username: `@user${Math.floor(Math.random() * 10000)}`,
+      bio: '',
+      avatar: user.photoURL || '',
+      online: true,
+      lastSeen: Date.now(),
+      createdAt: Date.now(),
+      role: 'user',
+    };
+    // Create Firestore profile
+    await setDoc(doc(db, 'users', user.uid), {
+      ...profile,
+      createdAt: serverTimestamp(),
+      lastSeen: serverTimestamp(),
+    });
+  }
+  return { user, profile };
+}
+
+/**
+ * Reset phone auth state
+ */
+export function resetPhoneAuth(): void {
+  if (recaptchaVerifier) {
+    recaptchaVerifier.clear();
+    recaptchaVerifier = null;
+  }
+  confirmationResult = null;
 }
