@@ -1,0 +1,97 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==================== HELPERS ====================
+
+    // Check if the user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Check if the user ID matches the authenticated user
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // Check if the user is a participant in a chat
+    function isChatParticipant(chatData) {
+      return isAuth() && chatData.participants.hasAny([request.auth.uid]);
+    }
+
+    // ==================== USERS ====================
+
+    // Users can read any profile (needed for chat list display)
+    // Users can only write their own profile
+    match /users/{uid} {
+      allow read: if isAuth();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid);
+    }
+
+    // Username mappings - anyone authenticated can read
+    match /usernames/{username} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow delete: if isAuth() && request.auth.uid == resource.data.uid;
+    }
+
+    // ==================== CHATS ====================
+
+    // Chat collection - users can only access chats they participate in
+    match /chats/{chatId} {
+
+      // Chat metadata
+      allow read: if isAuth() && isChatParticipant(resource.data);
+      allow create: if isAuth() && request.resource.data.participants.hasAny([request.auth.uid]);
+      allow update: if isAuth() && isChatParticipant(resource.data)
+        && isChatParticipant(request.resource.data);
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read: if isAuth() && isChatParticipant(
+          get(/databases/$(database)/documents/chats/$(chatId)).data
+        );
+        allow create: if isAuth()
+          && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data)
+          && request.resource.data.senderId == request.auth.uid;
+        allow update: if isAuth()
+          && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data);
+        allow delete: if isAuth()
+          && request.resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    // ==================== CALLS ====================
+
+    // Call records - users can read their own calls, create new ones
+    match /calls/{callId} {
+      allow read: if isAuth()
+        && (resource.data.callerId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid);
+      allow create: if isAuth()
+        && (request.resource.data.callerId == request.auth.uid
+          || request.resource.data.receiverId == request.auth.uid);
+      allow delete: if isAuth()
+        && (resource.data.callerId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid);
+    }
+
+    // ==================== CALL SIGNALING ====================
+
+    // WebRTC signaling - temporary documents for call setup
+    match /calls_signaling/{callId} {
+      allow read: if isAuth()
+        && (resource.data.callerId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid);
+      allow create: if isAuth();
+      allow update: if isAuth()
+        && (resource.data.callerId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid);
+      allow delete: if isAuth()
+        && (resource.data.callerId == request.auth.uid
+          || resource.data.receiverId == request.auth.uid);
+    }
+  }
+}

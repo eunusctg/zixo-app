@@ -1,18 +1,8 @@
 import { create } from 'zustand';
+import type { ZixoUserProfile } from '@/services/auth';
+import type { FirestoreChat, FirestoreMessage, FirestoreCall } from '@/services/firestore';
 
-// Types
-export interface UserProfile {
-  uid: string;
-  displayName: string;
-  email: string;
-  username: string;
-  bio: string;
-  avatar: string;
-  online: boolean;
-  lastSeen: number;
-  publicKey?: string;
-}
-
+// Types for UI state (compatible with existing components)
 export interface Message {
   id: string;
   chatId: string;
@@ -32,7 +22,7 @@ export interface Message {
 export interface Chat {
   id: string;
   participants: string[];
-  participantProfiles: UserProfile[];
+  participantProfiles: ZixoUserProfile[];
   lastMessage?: Message;
   unreadCount: number;
   isGroup: boolean;
@@ -90,19 +80,23 @@ interface ZixoState {
 
   // Auth
   isAuthenticated: boolean;
-  currentUser: UserProfile | null;
+  isFirebaseReady: boolean;
+  currentUser: ZixoUserProfile | null;
 
   // Chats
   chats: Chat[];
   activeChatId: string | null;
   messages: Record<string, Message[]>;
 
+  // User profiles cache (for chat list display)
+  userProfiles: Record<string, ZixoUserProfile>;
+
   // Calls
   callHistory: CallRecord[];
   activeCall: {
     status: CallStatus;
     type: 'audio' | 'video';
-    remoteUser: UserProfile | null;
+    remoteUser: ZixoUserProfile | null;
     duration: number;
     isMuted: boolean;
     isSpeakerOn: boolean;
@@ -113,20 +107,28 @@ interface ZixoState {
   searchQuery: string;
   isSearching: boolean;
   showFABMenu: boolean;
+  authLoading: boolean;
+  authError: string | null;
 
-  // Demo data initialized flag
-  demoInitialized: boolean;
+  // Firebase unsubscribers
+  _unsubs: Array<() => void>;
 
   // Actions
   setScreen: (screen: Screen) => void;
   setActiveTab: (tab: Tab) => void;
   goBack: () => void;
-  login: (user: UserProfile) => void;
+  login: (user: ZixoUserProfile) => void;
   logout: () => void;
+  setFirebaseReady: () => void;
   setActiveChat: (chatId: string) => void;
-  sendMessage: (chatId: string, text: string, type?: Message['type']) => void;
+  setChats: (chats: Chat[]) => void;
+  setMessages: (chatId: string, messages: Message[]) => void;
+  addMessage: (chatId: string, message: Message) => void;
+  updateMessage: (chatId: string, messageId: string, updates: Partial<Message>) => void;
+  setUserProfiles: (profiles: Record<string, ZixoUserProfile>) => void;
+  setCallHistory: (calls: CallRecord[]) => void;
   setCallStatus: (status: CallStatus) => void;
-  startCall: (type: 'audio' | 'video', user: UserProfile) => void;
+  startCall: (type: 'audio' | 'video', user: ZixoUserProfile) => void;
   endCall: () => void;
   toggleMute: () => void;
   toggleSpeaker: () => void;
@@ -134,251 +136,12 @@ interface ZixoState {
   setSearchQuery: (query: string) => void;
   toggleSearching: () => void;
   toggleFABMenu: () => void;
-  initDemoData: () => void;
   markChatRead: (chatId: string) => void;
+  setAuthLoading: (loading: boolean) => void;
+  setAuthError: (error: string | null) => void;
+  addUnsub: (unsub: () => void) => void;
+  clearUnsubs: () => void;
 }
-
-const DEMO_CURRENT_USER: UserProfile = {
-  uid: 'user-me',
-  displayName: 'Alex Johnson',
-  email: 'alex@zixo.app',
-  username: '@alexiwe',
-  bio: 'Living free, connecting freely 🌍',
-  avatar: '',
-  online: true,
-  lastSeen: Date.now(),
-};
-
-const DEMO_USERS: UserProfile[] = [
-  {
-    uid: 'user-1',
-    displayName: 'Sarah Chen',
-    email: 'sarah@zixo.app',
-    username: '@sarahchen',
-    bio: 'Designer & dreamer',
-    avatar: '',
-    online: true,
-    lastSeen: Date.now(),
-  },
-  {
-    uid: 'user-2',
-    displayName: 'Marcus Rivera',
-    email: 'marcus@zixo.app',
-    username: '@marcusriv',
-    bio: 'Code. Coffee. Repeat.',
-    avatar: '',
-    online: false,
-    lastSeen: Date.now() - 3600000,
-  },
-  {
-    uid: 'user-3',
-    displayName: 'Yuki Tanaka',
-    email: 'yuki@zixo.app',
-    username: '@yukitan',
-    bio: 'Music lover & cat person 🐱',
-    avatar: '',
-    online: true,
-    lastSeen: Date.now(),
-  },
-  {
-    uid: 'user-4',
-    displayName: 'Priya Sharma',
-    email: 'priya@zixo.app',
-    username: '@priyash',
-    bio: 'Exploring the world one city at a time',
-    avatar: '',
-    online: false,
-    lastSeen: Date.now() - 7200000,
-  },
-  {
-    uid: 'user-5',
-    displayName: 'Jordan Blake',
-    email: 'jordan@zixo.app',
-    username: '@jblake',
-    bio: 'Photographer | Storyteller',
-    avatar: '',
-    online: true,
-    lastSeen: Date.now(),
-  },
-  {
-    uid: 'user-6',
-    displayName: 'Emma Wilson',
-    email: 'emma@zixo.app',
-    username: '@emmaw',
-    bio: 'Just here for the calls 😄',
-    avatar: '',
-    online: false,
-    lastSeen: Date.now() - 1800000,
-  },
-];
-
-const generateMessages = (chatId: string, otherUserId: string): Message[] => {
-  const now = Date.now();
-  const messages: Message[] = [
-    {
-      id: `${chatId}-1`,
-      chatId,
-      senderId: otherUserId,
-      text: 'Hey! How are you doing? 👋',
-      type: 'text',
-      timestamp: now - 86400000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-2`,
-      chatId,
-      senderId: 'user-me',
-      text: "I'm great! Just finished setting up Zixo 🚀",
-      type: 'text',
-      timestamp: now - 86300000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-3`,
-      chatId,
-      senderId: otherUserId,
-      text: "That's awesome! The app looks so clean and fast",
-      type: 'text',
-      timestamp: now - 86200000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-4`,
-      chatId,
-      senderId: 'user-me',
-      text: 'Right? No social clutter, just pure connection ✨',
-      type: 'text',
-      timestamp: now - 86100000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-5`,
-      chatId,
-      senderId: otherUserId,
-      text: 'Want to do a quick video call later?',
-      type: 'text',
-      timestamp: now - 3600000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-6`,
-      chatId,
-      senderId: 'user-me',
-      text: 'Sure! Let me know when you are free 😊',
-      type: 'text',
-      timestamp: now - 3500000,
-      status: 'delivered',
-    },
-  ];
-  return messages;
-};
-
-const generateDemoChats = (): Chat[] => {
-  const now = Date.now();
-  return DEMO_USERS.map((user, i) => ({
-    id: `chat-${i + 1}`,
-    participants: ['user-me', user.uid],
-    participantProfiles: [DEMO_CURRENT_USER, user],
-    lastMessage: {
-      id: `chat-${i + 1}-last`,
-      chatId: `chat-${i + 1}`,
-      senderId: user.uid,
-      text: ['Hey! How are you? 👋', 'Check this out!', 'Let me call you later', 'Thanks for sharing!', 'See you soon! ✨', 'Got it, thanks!'][i],
-      type: 'text' as const,
-      timestamp: now - [300000, 900000, 3600000, 7200000, 14400000, 86400000][i],
-      status: 'delivered' as const,
-    },
-    unreadCount: [3, 1, 0, 0, 2, 0][i],
-    isGroup: false,
-    typing: i === 0 ? [user.uid] : [],
-    createdAt: now - 86400000 * (i + 1),
-    updatedAt: now - [300000, 900000, 3600000, 7200000, 14400000, 86400000][i],
-  }));
-};
-
-const generateDemoCalls = (): CallRecord[] => {
-  const now = Date.now();
-  return [
-    {
-      id: 'call-1',
-      callerId: 'user-1',
-      callerName: 'Sarah Chen',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'Alex Johnson',
-      receiverAvatar: '',
-      type: 'video',
-      direction: 'incoming',
-      duration: 342,
-      timestamp: now - 1800000,
-    },
-    {
-      id: 'call-2',
-      callerId: 'user-me',
-      callerName: 'Alex Johnson',
-      callerAvatar: '',
-      receiverId: 'user-2',
-      receiverName: 'Marcus Rivera',
-      receiverAvatar: '',
-      type: 'audio',
-      direction: 'outgoing',
-      duration: 145,
-      timestamp: now - 5400000,
-    },
-    {
-      id: 'call-3',
-      callerId: 'user-3',
-      callerName: 'Yuki Tanaka',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'Alex Johnson',
-      receiverAvatar: '',
-      type: 'video',
-      direction: 'missed',
-      duration: 0,
-      timestamp: now - 10800000,
-    },
-    {
-      id: 'call-4',
-      callerId: 'user-me',
-      callerName: 'Alex Johnson',
-      callerAvatar: '',
-      receiverId: 'user-5',
-      receiverName: 'Jordan Blake',
-      receiverAvatar: '',
-      type: 'audio',
-      direction: 'outgoing',
-      duration: 523,
-      timestamp: now - 86400000,
-    },
-    {
-      id: 'call-5',
-      callerId: 'user-4',
-      callerName: 'Priya Sharma',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'Alex Johnson',
-      receiverAvatar: '',
-      type: 'video',
-      direction: 'incoming',
-      duration: 67,
-      timestamp: now - 172800000,
-    },
-    {
-      id: 'call-6',
-      callerId: 'user-6',
-      callerName: 'Emma Wilson',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'Alex Johnson',
-      receiverAvatar: '',
-      type: 'audio',
-      direction: 'missed',
-      duration: 0,
-      timestamp: now - 259200000,
-    },
-  ];
-};
 
 export const useZixoStore = create<ZixoState>((set, get) => ({
   // Navigation
@@ -388,12 +151,16 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
   // Auth
   isAuthenticated: false,
+  isFirebaseReady: false,
   currentUser: null,
 
   // Chats
   chats: [],
   activeChatId: null,
   messages: {},
+
+  // User profiles
+  userProfiles: {},
 
   // Calls
   callHistory: [],
@@ -403,9 +170,11 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   searchQuery: '',
   isSearching: false,
   showFABMenu: false,
+  authLoading: false,
+  authError: null,
 
-  // Demo
-  demoInitialized: false,
+  // Firebase unsubscribers
+  _unsubs: [],
 
   // Actions
   setScreen: (screen) =>
@@ -427,9 +196,14 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       isAuthenticated: true,
       currentUser: user,
       currentScreen: 'home',
+      userProfiles: { [user.uid]: user },
     }),
 
-  logout: () =>
+  logout: () => {
+    // Clean up all Firebase listeners
+    const unsubs = get()._unsubs;
+    unsubs.forEach((fn) => fn());
+
     set({
       isAuthenticated: false,
       currentUser: null,
@@ -439,111 +213,46 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       callHistory: [],
       activeCall: null,
       activeChatId: null,
-      demoInitialized: false,
-    }),
+      userProfiles: {},
+      _unsubs: [],
+    });
+  },
+
+  setFirebaseReady: () => set({ isFirebaseReady: true }),
 
   setActiveChat: (chatId) => set({ activeChatId: chatId, currentScreen: 'chat' }),
 
-  sendMessage: (chatId, text, type = 'text') => {
-    const newMsg: Message = {
-      id: `msg-${Date.now()}`,
-      chatId,
-      senderId: 'user-me',
-      text,
-      type,
-      timestamp: Date.now(),
-      status: 'sending',
-    };
+  setChats: (chats) => set({ chats }),
 
+  setMessages: (chatId, messages) =>
+    set((state) => ({
+      messages: { ...state.messages, [chatId]: messages },
+    })),
+
+  addMessage: (chatId, message) =>
     set((state) => ({
       messages: {
         ...state.messages,
-        [chatId]: [...(state.messages[chatId] || []), newMsg],
+        [chatId]: [...(state.messages[chatId] || []), message],
       },
-    }));
+    })),
 
-    // Simulate message delivery
-    setTimeout(() => {
-      set((state) => ({
-        messages: {
-          ...state.messages,
-          [chatId]: (state.messages[chatId] || []).map((m) =>
-            m.id === newMsg.id ? { ...m, status: 'delivered' as const } : m
-          ),
-        },
-      }));
-    }, 1000);
-
-    // Simulate read receipt
-    setTimeout(() => {
-      set((state) => ({
-        messages: {
-          ...state.messages,
-          [chatId]: (state.messages[chatId] || []).map((m) =>
-            m.id === newMsg.id ? { ...m, status: 'read' as const } : m
-          ),
-        },
-      }));
-    }, 2500);
-
-    // Simulate reply for demo
-    const chat = get().chats.find((c) => c.id === chatId);
-    if (chat && !chat.isGroup) {
-      const otherUser = chat.participantProfiles.find((p) => p.uid !== 'user-me');
-      if (otherUser) {
-        // Show typing indicator
-        setTimeout(() => {
-          set((state) => ({
-            chats: state.chats.map((c) =>
-              c.id === chatId ? { ...c, typing: [otherUser.uid] } : c
-            ),
-          }));
-        }, 1500);
-
-        // Send reply
-        setTimeout(() => {
-          const replies = [
-            'Sounds great! 😊',
-            'I love that idea!',
-            'Let me think about it...',
-            'Absolutely! Count me in 🙌',
-            'Haha, nice one! 😄',
-            "I'll get back to you on that",
-            'That works for me!',
-            'Perfect! Talk soon 🤙',
-          ];
-          const reply: Message = {
-            id: `msg-reply-${Date.now()}`,
-            chatId,
-            senderId: otherUser.uid,
-            text: replies[Math.floor(Math.random() * replies.length)],
-            type: 'text',
-            timestamp: Date.now(),
-            status: 'read',
-          };
-
-          set((state) => ({
-            messages: {
-              ...state.messages,
-              [chatId]: [...(state.messages[chatId] || []), reply],
-            },
-            chats: state.chats.map((c) =>
-              c.id === chatId
-                ? { ...c, typing: [], lastMessage: reply, updatedAt: Date.now() }
-                : c
-            ),
-          }));
-        }, 3500);
-      }
-    }
-
-    // Update chat last message
+  updateMessage: (chatId, messageId, updates) =>
     set((state) => ({
-      chats: state.chats.map((c) =>
-        c.id === chatId ? { ...c, lastMessage: newMsg, updatedAt: Date.now() } : c
-      ),
-    }));
-  },
+      messages: {
+        ...state.messages,
+        [chatId]: (state.messages[chatId] || []).map((m) =>
+          m.id === messageId ? { ...m, ...updates } : m
+        ),
+      },
+    })),
+
+  setUserProfiles: (profiles) =>
+    set((state) => ({
+      userProfiles: { ...state.userProfiles, ...profiles },
+    })),
+
+  setCallHistory: (calls) => set({ callHistory: calls }),
 
   setCallStatus: (status) =>
     set((state) => ({
@@ -623,23 +332,256 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       ),
     })),
 
-  initDemoData: () => {
-    if (get().demoInitialized) return;
+  setAuthLoading: (loading) => set({ authLoading: loading }),
+  setAuthError: (error) => set({ authError: error }),
 
-    const chats = generateDemoChats();
-    const messagesMap: Record<string, Message[]> = {};
-    chats.forEach((chat) => {
-      const otherUser = chat.participantProfiles.find((p) => p.uid !== 'user-me');
-      if (otherUser) {
-        messagesMap[chat.id] = generateMessages(chat.id, otherUser.uid);
-      }
-    });
+  addUnsub: (unsub) =>
+    set((state) => ({
+      _unsubs: [...state._unsubs, unsub],
+    })),
 
-    set({
-      chats,
-      messages: messagesMap,
-      callHistory: generateDemoCalls(),
-      demoInitialized: true,
-    });
+  clearUnsubs: () => {
+    const unsubs = get()._unsubs;
+    unsubs.forEach((fn) => fn());
+    set({ _unsubs: [] });
   },
 }));
+
+// ==================== DEMO DATA (Fallback when no Firebase connection) ====================
+// This is used when Firebase is not yet connected or for demo/preview mode
+
+export const DEMO_USERS: ZixoUserProfile[] = [
+  {
+    uid: 'demo-1',
+    displayName: 'Sarah Chen',
+    email: 'sarah@zixo.app',
+    username: '@sarahchen',
+    bio: 'Designer & dreamer',
+    avatar: '',
+    online: true,
+    lastSeen: Date.now(),
+    createdAt: Date.now(),
+  },
+  {
+    uid: 'demo-2',
+    displayName: 'Marcus Rivera',
+    email: 'marcus@zixo.app',
+    username: '@marcusriv',
+    bio: 'Code. Coffee. Repeat.',
+    avatar: '',
+    online: false,
+    lastSeen: Date.now() - 3600000,
+    createdAt: Date.now(),
+  },
+  {
+    uid: 'demo-3',
+    displayName: 'Yuki Tanaka',
+    email: 'yuki@zixo.app',
+    username: '@yukitan',
+    bio: 'Music lover & cat person 🐱',
+    avatar: '',
+    online: true,
+    lastSeen: Date.now(),
+    createdAt: Date.now(),
+  },
+  {
+    uid: 'demo-4',
+    displayName: 'Priya Sharma',
+    email: 'priya@zixo.app',
+    username: '@priyash',
+    bio: 'Exploring the world one city at a time',
+    avatar: '',
+    online: false,
+    lastSeen: Date.now() - 7200000,
+    createdAt: Date.now(),
+  },
+  {
+    uid: 'demo-5',
+    displayName: 'Jordan Blake',
+    email: 'jordan@zixo.app',
+    username: '@jblake',
+    bio: 'Photographer | Storyteller',
+    avatar: '',
+    online: true,
+    lastSeen: Date.now(),
+    createdAt: Date.now(),
+  },
+  {
+    uid: 'demo-6',
+    displayName: 'Emma Wilson',
+    email: 'emma@zixo.app',
+    username: '@emmaw',
+    bio: 'Just here for the calls 😄',
+    avatar: '',
+    online: false,
+    lastSeen: Date.now() - 1800000,
+    createdAt: Date.now(),
+  },
+];
+
+export function generateDemoChats(currentUser: ZixoUserProfile): Chat[] {
+  const now = Date.now();
+  return DEMO_USERS.map((user, i) => ({
+    id: `demo-chat-${i + 1}`,
+    participants: [currentUser.uid, user.uid],
+    participantProfiles: [currentUser, user],
+    lastMessage: {
+      id: `demo-msg-last-${i + 1}`,
+      chatId: `demo-chat-${i + 1}`,
+      senderId: user.uid,
+      text: ['Hey! How are you? 👋', 'Check this out!', 'Let me call you later', 'Thanks for sharing!', 'See you soon! ✨', 'Got it, thanks!'][i],
+      type: 'text' as const,
+      timestamp: now - [300000, 900000, 3600000, 7200000, 14400000, 86400000][i],
+      status: 'delivered' as const,
+    },
+    unreadCount: [3, 1, 0, 0, 2, 0][i],
+    isGroup: false,
+    typing: i === 0 ? [user.uid] : [],
+    createdAt: now - 86400000 * (i + 1),
+    updatedAt: now - [300000, 900000, 3600000, 7200000, 14400000, 86400000][i],
+  }));
+}
+
+export function generateDemoMessages(chatId: string, otherUserId: string): Message[] {
+  const now = Date.now();
+  return [
+    {
+      id: `${chatId}-1`,
+      chatId,
+      senderId: otherUserId,
+      text: 'Hey! How are you doing? 👋',
+      type: 'text',
+      timestamp: now - 86400000,
+      status: 'read',
+    },
+    {
+      id: `${chatId}-2`,
+      chatId,
+      senderId: 'user-me',
+      text: "I'm great! Just finished setting up Zixo 🚀",
+      type: 'text',
+      timestamp: now - 86300000,
+      status: 'read',
+    },
+    {
+      id: `${chatId}-3`,
+      chatId,
+      senderId: otherUserId,
+      text: "That's awesome! The app looks so clean and fast",
+      type: 'text',
+      timestamp: now - 86200000,
+      status: 'read',
+    },
+    {
+      id: `${chatId}-4`,
+      chatId,
+      senderId: 'user-me',
+      text: 'Right? No social clutter, just pure connection ✨',
+      type: 'text',
+      timestamp: now - 86100000,
+      status: 'read',
+    },
+    {
+      id: `${chatId}-5`,
+      chatId,
+      senderId: otherUserId,
+      text: 'Want to do a quick video call later?',
+      type: 'text',
+      timestamp: now - 3600000,
+      status: 'read',
+    },
+    {
+      id: `${chatId}-6`,
+      chatId,
+      senderId: 'user-me',
+      text: 'Sure! Let me know when you are free 😊',
+      type: 'text',
+      timestamp: now - 3500000,
+      status: 'delivered',
+    },
+  ];
+}
+
+export function generateDemoCalls(): CallRecord[] {
+  const now = Date.now();
+  return [
+    {
+      id: 'demo-call-1',
+      callerId: 'demo-1',
+      callerName: 'Sarah Chen',
+      callerAvatar: '',
+      receiverId: 'user-me',
+      receiverName: 'You',
+      receiverAvatar: '',
+      type: 'video',
+      direction: 'incoming',
+      duration: 342,
+      timestamp: now - 1800000,
+    },
+    {
+      id: 'demo-call-2',
+      callerId: 'user-me',
+      callerName: 'You',
+      callerAvatar: '',
+      receiverId: 'demo-2',
+      receiverName: 'Marcus Rivera',
+      receiverAvatar: '',
+      type: 'audio',
+      direction: 'outgoing',
+      duration: 145,
+      timestamp: now - 5400000,
+    },
+    {
+      id: 'demo-call-3',
+      callerId: 'demo-3',
+      callerName: 'Yuki Tanaka',
+      callerAvatar: '',
+      receiverId: 'user-me',
+      receiverName: 'You',
+      receiverAvatar: '',
+      type: 'video',
+      direction: 'missed',
+      duration: 0,
+      timestamp: now - 10800000,
+    },
+    {
+      id: 'demo-call-4',
+      callerId: 'user-me',
+      callerName: 'You',
+      callerAvatar: '',
+      receiverId: 'demo-5',
+      receiverName: 'Jordan Blake',
+      receiverAvatar: '',
+      type: 'audio',
+      direction: 'outgoing',
+      duration: 523,
+      timestamp: now - 86400000,
+    },
+    {
+      id: 'demo-call-5',
+      callerId: 'demo-4',
+      callerName: 'Priya Sharma',
+      callerAvatar: '',
+      receiverId: 'user-me',
+      receiverName: 'You',
+      receiverAvatar: '',
+      type: 'video',
+      direction: 'incoming',
+      duration: 67,
+      timestamp: now - 172800000,
+    },
+    {
+      id: 'demo-call-6',
+      callerId: 'demo-6',
+      callerName: 'Emma Wilson',
+      callerAvatar: '',
+      receiverId: 'user-me',
+      receiverName: 'You',
+      receiverAvatar: '',
+      type: 'audio',
+      direction: 'missed',
+      duration: 0,
+      timestamp: now - 259200000,
+    },
+  ];
+}

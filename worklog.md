@@ -1,32 +1,26 @@
 ---
-Task ID: 1
+Task ID: 2
 Agent: Main Agent
-Task: Build complete Zixo - Free Video and Audio Calling App
+Task: Integrate Firebase into Zixo app with real auth, Firestore, FCM, and WebRTC
 
 Work Log:
-- Initialized Next.js 16 project with fullstack-dev skill
-- Created comprehensive design system in globals.css with Zixo brand colors, glassmorphism, neumorphism, animations
-- Created root layout with Plus Jakarta Sans, Inter, and JetBrains Mono fonts
-- Built Zustand store with full state management (auth, chats, messages, calls, UI state) and demo data generators
-- Created utility functions (formatTime, formatCallDuration, getInitials, getAvatarColor, etc.)
-- Built Avatar component with gradient colors and online indicators
-- Built common components (TypingIndicator, EmptyState, EncryptionBadge, OnlineStatus)
-- Built navigation components (BottomNav with tabs, FAB with expand menu, SearchBar)
-- Built ChatList with ChatListItem components (unread badges, quick call, search)
-- Built ChatScreen components (MessageBubble, DateSeparator, ChatInputBar with attachment panel)
-- Built AudioCallScreen with ring animations, waveform visualization, call controls
-- Built VideoCallScreen with PiP self-view, floating controls, network quality indicator
-- Built CallHistoryList with filter tabs and ContactsScreen
-- Built SettingsScreen with all sections (Appearance, Privacy, Notifications, Data, Call Settings, About)
-- Built SplashScreen with animated particles, OnboardingScreen with 3 pages, AuthScreen with email/Google sign-in
-- Assembled all screens in page.tsx with client-side navigation
-- Fixed lint errors: SettingsScreen components moved outside render, export/import mismatches fixed, Math.random() hydration issues fixed
-- Browser verification: All 10 test steps passed (splash → onboarding → auth → home → chat → call → settings)
+- Installed firebase@12.14.0 SDK
+- Created /src/services/firebase.ts - Firebase client config with user's credentials (project: zixo-call)
+- Created /src/services/auth.ts - Full Firebase Auth service (registerWithEmail, loginWithEmail, loginWithGoogle, resetPassword, logoutUser, getUserProfile, updateOnlineStatus, searchUserByUsername)
+- Created /src/services/firestore.ts - Firestore service (createOrGetChat, sendMessage, markChatRead, setTyping, toggleStarMessage, deleteMessage, subscribeToUserChats, subscribeToChatMessages, subscribeToUserProfile, getUserProfiles, saveCallRecord, getCallHistory)
+- Created /src/services/messaging.ts - FCM push notifications (requestNotificationPermission, onForegroundMessage, saveFCMToken, initFCM, showInAppNotification)
+- Created /src/services/webrtc.ts - WebRTC calling with Firestore signaling (ZixoWebRTC class with startCall, answerCall, endCall, toggleMute, toggleVideo, switchCamera, ICE candidates via Firestore)
+- Updated /src/stores/useZixoStore.ts - Refactored to work with Firebase (removed mock initDemoData, added setUserProfiles, setChats, setMessages, addUnsub/clearUnsubs for cleanup, separate demo data generators as fallback)
+- Created /src/hooks/useFirebaseBridge.ts - Firebase-to-Zustand bridge hook (auth state listener, real-time chat subscriptions, message subscriptions, online status on visibility change, demo data fallback)
+- Updated /src/components/zixo/Onboarding.tsx - AuthScreen now uses real Firebase Auth (async handleSubmit with registerWithEmail/loginWithEmail/resetPassword, handleGoogleSignIn with loginWithGoogle, Firebase error code mapping for 9 error types, error display UI)
+- Updated /src/app/page.tsx - Uses useFirebaseBridge hook, real Firestore sendMessage with optimistic updates, Firestore markChatRead, Firebase logout via logoutUser, demo data fallback when no Firestore data
+- Created /firestore.rules - Security rules (users read any/write own, chats accessible by participants only, messages by participants, calls by caller/receiver, signaling by participants)
+- Created /.env.example - Environment variables template
+- Browser verification: All auth flows work, zero console errors, Google Sign-In button visible and wired
 
 Stage Summary:
-- Complete Zixo app built as Next.js 16 web application
-- All screens implemented: Splash, Onboarding (3 pages), Auth (Login/Signup/Forgot), Home (Chat List), Chat Screen, Audio Call, Video Call, Call History, Contacts, Settings
-- Design system: Dark theme with purple (#6C5CE7) primary, cyan secondary, glassmorphism effects, smooth Framer Motion animations
-- State management: Zustand with full demo data (6 users, 6 chats, call history, message conversations)
-- Features: Message sending with auto-reply simulation, read receipts, typing indicators, audio/video call UI, search, FAB menu, settings with toggles
-- Zero lint errors, all screens verified working in browser
+- Firebase fully integrated: Auth (email/password + Google), Firestore (real-time chats/messages), FCM (push notifications), WebRTC (signaling via Firestore)
+- App works with real Firebase project "zixo-call"
+- Demo data still works as fallback when no Firestore data exists
+- Firestore security rules created for production safety
+- FCM VAPID key configured: BFnV-bHlDzMT9eszuKzQMpsPhrlXx8ClrLRhXhYrLuu1wQ10GugFPYZL5Brn8xMoHNmb0JxTAEDwfwD9y6zj9xk

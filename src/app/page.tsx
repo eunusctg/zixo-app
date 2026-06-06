@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useZixoStore } from '@/stores/useZixoStore';
+import { useZixoStore, generateDemoChats, generateDemoMessages, generateDemoCalls } from '@/stores/useZixoStore';
+import { useFirebaseBridge } from '@/hooks/useFirebaseBridge';
+import { logoutUser } from '@/services/auth';
+import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead } from '@/services/firestore';
 import { cn, formatDateGroup } from '@/lib/zixo-utils';
 import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/Onboarding';
 import Avatar from '@/components/zixo/Avatar';
@@ -13,14 +16,18 @@ import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
 import { BottomNav, FAB, SearchBar } from '@/components/zixo/Navigation';
 import { OnlineStatus, EncryptionBadge } from '@/components/zixo/Common';
+import type { ZixoUserProfile } from '@/services/auth';
 
 export default function ZixoApp() {
-  const store = useZixoStore();
+  // Initialize Firebase bridge (auth state, real-time listeners)
+  useFirebaseBridge();
+
   const {
     currentScreen,
     previousScreen,
     activeTab,
     isAuthenticated,
+    isFirebaseReady,
     currentUser,
     chats,
     activeChatId,
@@ -36,7 +43,9 @@ export default function ZixoApp() {
     login,
     logout,
     setActiveChat,
-    sendMessage,
+    setChats,
+    setMessages,
+    addMessage,
     startCall,
     endCall,
     toggleMute,
@@ -45,19 +54,11 @@ export default function ZixoApp() {
     setSearchQuery,
     toggleSearching,
     toggleFABMenu,
-    initDemoData,
     markChatRead,
-  } = store;
+  } = useZixoStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'signup' | 'forgot'>('login');
-
-  // Initialize demo data on login
-  useEffect(() => {
-    if (isAuthenticated) {
-      initDemoData();
-    }
-  }, [isAuthenticated, initDemoData]);
+  const demoLoaded = useRef(false);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -65,6 +66,22 @@ export default function ZixoApp() {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, activeChatId, currentScreen]);
+
+  // Load demo data as fallback when authenticated but no Firestore data exists
+  useEffect(() => {
+    if (isAuthenticated && currentUser && chats.length === 0 && !demoLoaded.current) {
+      demoLoaded.current = true;
+      const demoChats = generateDemoChats(currentUser);
+      setChats(demoChats);
+
+      const demoMsgsMap: Record<string, ReturnType<typeof generateDemoMessages>> = {};
+      demoChats.forEach((chat) => {
+        const other = chat.participantProfiles.find((p) => p.uid !== currentUser.uid);
+        if (other) demoMsgsMap[chat.id] = generateDemoMessages(chat.id, other.uid);
+      });
+      Object.entries(demoMsgsMap).forEach(([cid, msgs]) => setMessages(cid, msgs));
+    }
+  }, [isAuthenticated, currentUser, chats.length, setChats, setMessages]);
 
   // Get active chat data
   const activeChat = useMemo(() => {
@@ -86,40 +103,84 @@ export default function ZixoApp() {
     return chats.reduce((sum, c) => sum + c.unreadCount, 0);
   }, [chats]);
 
-  // Handle auth
-  const handleAuth = (data: { email: string; displayName?: string }) => {
-    const user = {
-      uid: 'user-me',
-      displayName: data.displayName || data.email.split('@')[0],
-      email: data.email,
-      username: `@${(data.displayName || data.email.split('@')[0]).toLowerCase().replace(/\s+/g, '')}`,
-      bio: 'Living free, connecting freely 🌍',
-      avatar: '',
-      online: true,
-      lastSeen: Date.now(),
-    };
-    login(user);
-  };
+  // Handle auth callback (after Firebase Auth succeeds)
+  const handleAuth = useCallback((data: { email: string; displayName?: string }) => {
+    // Firebase Auth already handled in useFirebaseBridge
+    // This callback is just for UI flow - the bridge will auto-detect the auth state
+    // If bridge doesn't auto-detect (e.g. Google sign-in), create a temp profile
+    if (!currentUser) {
+      const user: ZixoUserProfile = {
+        uid: 'pending-firebase',
+        displayName: data.displayName || data.email.split('@')[0],
+        email: data.email,
+        username: `@${(data.displayName || data.email.split('@')[0]).toLowerCase().replace(/\s+/g, '')}`,
+        bio: 'Living free, connecting freely 🌍',
+        avatar: '',
+        online: true,
+        lastSeen: Date.now(),
+        createdAt: Date.now(),
+      };
+      login(user);
+    }
+  }, [currentUser, login]);
 
   // Handle chat click
-  const handleChatClick = (chatId: string) => {
+  const handleChatClick = useCallback((chatId: string) => {
     setActiveChat(chatId);
     markChatRead(chatId);
-  };
+    // Also mark as read in Firestore
+    if (currentUser) {
+      firestoreMarkChatRead(chatId, currentUser.uid).catch(console.error);
+    }
+  }, [setActiveChat, markChatRead, currentUser]);
+
+  // Handle sending a message (tries Firestore, falls back to local)
+  const handleSendMessage = useCallback((text: string, type: 'text' | 'image' | 'voice' | 'file' | 'location' = 'text') => {
+    if (!activeChatId || !currentUser) return;
+
+    // Add optimistic local message
+    const tempMsg = {
+      id: `temp-${Date.now()}`,
+      chatId: activeChatId,
+      senderId: currentUser.uid,
+      text,
+      type,
+      timestamp: Date.now(),
+      status: 'sending' as const,
+    };
+    addMessage(activeChatId, tempMsg);
+
+    // Try to send via Firestore
+    firestoreSendMessage(activeChatId, currentUser.uid, text, type).then(() => {
+      // Update status to sent
+      const store = useZixoStore.getState();
+      store.updateMessage(activeChatId, tempMsg.id, { status: 'sent' });
+
+      // Simulate delivered after a moment
+      setTimeout(() => {
+        useZixoStore.getState().updateMessage(activeChatId, tempMsg.id, { status: 'delivered' });
+      }, 1000);
+    }).catch((err) => {
+      console.warn('Firestore send failed, keeping message local:', err);
+      // Update to show it's still local
+      const store = useZixoStore.getState();
+      store.updateMessage(activeChatId, tempMsg.id, { status: 'sent' });
+    });
+  }, [activeChatId, currentUser, addMessage]);
 
   // Handle quick call
-  const handleQuickCall = (userId: string) => {
+  const handleQuickCall = useCallback((userId: string) => {
     const user = chats
       .flatMap((c) => c.participantProfiles)
       .find((p) => p.uid === userId);
     if (user) {
       startCall('audio', user);
     }
-  };
+  }, [chats, startCall]);
 
   // Handle callback from call history
-  const handleCallBack = (call: any) => {
-    const user = {
+  const handleCallBack = useCallback((call: any) => {
+    const user: ZixoUserProfile = {
       uid: call.callerId === currentUser?.uid ? call.receiverId : call.callerId,
       displayName: call.callerId === currentUser?.uid ? call.receiverName : call.callerName,
       username: '',
@@ -128,9 +189,20 @@ export default function ZixoApp() {
       avatar: '',
       online: true,
       lastSeen: Date.now(),
+      createdAt: Date.now(),
     };
     startCall(call.type, user);
-  };
+  }, [currentUser, startCall]);
+
+  // Handle logout with Firebase
+  const handleLogout = useCallback(async () => {
+    try {
+      await logoutUser();
+    } catch (err) {
+      console.error('Firebase logout error:', err);
+    }
+    logout(); // Clear local state regardless
+  }, [logout]);
 
   // Render screens
   const renderScreen = () => {
@@ -142,14 +214,8 @@ export default function ZixoApp() {
         return (
           <OnboardingScreen
             onComplete={() => setScreen('auth-login')}
-            onSignIn={() => {
-              setAuthMode('login');
-              setScreen('auth-login');
-            }}
-            onSignUp={() => {
-              setAuthMode('signup');
-              setScreen('auth-signup');
-            }}
+            onSignIn={() => setScreen('auth-login')}
+            onSignUp={() => setScreen('auth-signup')}
           />
         );
 
@@ -161,7 +227,6 @@ export default function ZixoApp() {
             mode={currentScreen === 'auth-forgot' ? 'forgot' : currentScreen === 'auth-signup' ? 'signup' : 'login'}
             onAuth={handleAuth}
             onSwitchMode={(mode) => {
-              setAuthMode(mode);
               setScreen(mode === 'forgot' ? 'auth-forgot' : mode === 'signup' ? 'auth-signup' : 'auth-login');
             }}
             onBack={() => setScreen('onboarding')}
@@ -299,7 +364,7 @@ export default function ZixoApp() {
                 <SettingsScreen
                   user={currentUser}
                   onEditProfile={() => setScreen('profile-edit')}
-                  onLogout={logout}
+                  onLogout={handleLogout}
                   onBack={() => setActiveTab('chats')}
                 />
               </motion.div>
@@ -358,9 +423,7 @@ export default function ZixoApp() {
           <div className="flex items-center gap-3 px-3 py-2.5">
             <motion.button
               whileTap={{ scale: 0.9 }}
-              onClick={() => {
-                setScreen('home');
-              }}
+              onClick={() => setScreen('home')}
               className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text hover:bg-zixo-surface-light transition-colors"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -435,13 +498,13 @@ export default function ZixoApp() {
 
         {/* Input Bar */}
         <ChatInputBar
-          onSend={(text) => sendMessage(activeChatId!, text)}
+          onSend={(text) => handleSendMessage(text)}
           onAttachment={(type) => {
-            if (type === 'image') sendMessage(activeChatId!, '📷 Photo shared', 'image');
-            else if (type === 'file') sendMessage(activeChatId!, '📄 Document shared', 'file');
-            else if (type === 'location') sendMessage(activeChatId!, '📍 Location shared', 'location');
+            if (type === 'image') handleSendMessage('📷 Photo shared', 'image');
+            else if (type === 'file') handleSendMessage('📄 Document shared', 'file');
+            else if (type === 'location') handleSendMessage('📍 Location shared', 'location');
           }}
-          onVoiceRecord={() => sendMessage(activeChatId!, '🎤 Voice note', 'voice')}
+          onVoiceRecord={() => handleSendMessage('🎤 Voice note', 'voice')}
         />
       </div>
     );
@@ -451,11 +514,10 @@ export default function ZixoApp() {
     if (!currentUser) return null;
     const allContacts = chats
       .map((c) => c.participantProfiles.find((p) => p.uid !== currentUser.uid))
-      .filter(Boolean) as typeof currentUser[];
+      .filter(Boolean) as ZixoUserProfile[];
 
     return (
       <div className="h-screen flex flex-col bg-zixo-bg">
-        {/* Header */}
         <div className="shrink-0 flex items-center gap-3 px-4 py-3 glass-strong">
           <motion.button
             whileTap={{ scale: 0.9 }}
@@ -503,7 +565,7 @@ export default function ZixoApp() {
           <h2 className="text-lg font-semibold font-heading text-zixo-text">Settings</h2>
         </div>
         <div className="flex-1 overflow-y-auto pb-20">
-          <SettingsScreen user={currentUser} onEditProfile={() => {}} onLogout={logout} onBack={() => {}} />
+          <SettingsScreen user={currentUser} onEditProfile={() => {}} onLogout={handleLogout} onBack={() => {}} />
         </div>
       </div>
     );

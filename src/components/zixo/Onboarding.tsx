@@ -264,6 +264,7 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
   const [displayName, setDisplayName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const passwordStrength = () => {
     if (!password) return 0;
@@ -278,13 +279,64 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
   const strengthColors = ['bg-zixo-error', 'bg-orange-500', 'bg-zixo-accent', 'bg-zixo-success'];
   const strengthLabels = ['Weak', 'Fair', 'Good', 'Strong'];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const getFirebaseErrorMessage = (code: string): string => {
+    switch (code) {
+      case 'auth/email-already-in-use': return 'This email is already registered. Try signing in instead.';
+      case 'auth/invalid-email': return 'Please enter a valid email address.';
+      case 'auth/weak-password': return 'Password is too weak. Use at least 6 characters.';
+      case 'auth/user-not-found': return 'No account found with this email.';
+      case 'auth/wrong-password': return 'Incorrect password. Please try again.';
+      case 'auth/invalid-credential': return 'Invalid email or password. Please try again.';
+      case 'auth/too-many-requests': return 'Too many attempts. Please try again later.';
+      case 'auth/network-request-failed': return 'Network error. Check your internet connection.';
+      case 'auth/popup-closed-by-user': return 'Sign-in was cancelled.';
+      default: return 'Something went wrong. Please try again.';
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     setIsLoading(true);
-    setTimeout(() => {
-      onAuth({ email, displayName: displayName || email.split('@')[0] });
+
+    try {
+      if (mode === 'signup') {
+        const { registerWithEmail } = await import('@/services/auth');
+        const result = await registerWithEmail(email, password, displayName || email.split('@')[0]);
+        onAuth({ email, displayName: result.profile.displayName });
+      } else if (mode === 'login') {
+        const { loginWithEmail } = await import('@/services/auth');
+        const result = await loginWithEmail(email, password);
+        onAuth({ email, displayName: result.profile.displayName });
+      } else if (mode === 'forgot') {
+        const { resetPassword } = await import('@/services/auth');
+        await resetPassword(email);
+        setError(null);
+        alert('Password reset email sent! Check your inbox.');
+      }
+    } catch (err: any) {
+      const errorCode = err?.code || '';
+      setError(getFirebaseErrorMessage(errorCode));
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      const { loginWithGoogle } = await import('@/services/auth');
+      const result = await loginWithGoogle();
+      onAuth({ email: result.profile.email, displayName: result.profile.displayName });
+    } catch (err: any) {
+      const errorCode = err?.code || '';
+      if (errorCode !== 'auth/popup-closed-by-user') {
+        setError(getFirebaseErrorMessage(errorCode));
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -442,6 +494,22 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
                 </>
               )}
             </motion.button>
+
+            {/* Error Display */}
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zixo-error/10 border border-zixo-error/20"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zixo-error shrink-0">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="15" y1="9" x2="9" y2="15" />
+                  <line x1="9" y1="9" x2="15" y2="15" />
+                </svg>
+                <p className="text-xs text-zixo-error">{error}</p>
+              </motion.div>
+            )}
           </motion.form>
 
           {/* Google Sign-In */}
@@ -460,8 +528,12 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
 
               <motion.button
                 whileTap={{ scale: 0.98 }}
-                onClick={() => onAuth({ email: 'user@google.com', displayName: 'Google User' })}
-                className="w-full py-3 rounded-xl bg-white/5 text-zixo-text font-medium text-sm border border-white/10 hover:bg-white/10 transition-colors flex items-center justify-center gap-3"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading}
+                className={cn(
+                  "w-full py-3 rounded-xl bg-white/5 text-zixo-text font-medium text-sm border border-white/10 hover:bg-white/10 transition-colors flex items-center justify-center gap-3",
+                  isLoading && "opacity-50 cursor-not-allowed"
+                )}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24">
                   <path
