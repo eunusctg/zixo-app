@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { OnlineStatus, EncryptionBadge } from './Common';
@@ -19,6 +19,7 @@ interface AudioCallScreenProps {
   onAnswer?: () => void;
   onDecline?: () => void;
   isIncoming?: boolean;
+  remoteStream?: MediaStream | null;
 }
 
 export function AudioCallScreen({
@@ -33,8 +34,10 @@ export function AudioCallScreen({
   onAnswer,
   onDecline,
   isIncoming = false,
+  remoteStream,
 }: AudioCallScreenProps) {
   const [callDuration, setCallDuration] = useState(duration);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
     if (callStatus === 'connected') {
@@ -45,24 +48,27 @@ export function AudioCallScreen({
     }
   }, [callStatus]);
 
+  // Play remote audio stream when connected
+  useEffect(() => {
+    if (audioRef.current && remoteStream) {
+      audioRef.current.srcObject = remoteStream;
+      audioRef.current.play().catch((err) => {
+        console.warn('[Zixo] Auto-play audio failed:', err);
+      });
+    }
+  }, [remoteStream]);
+
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const statusText = () => {
-    switch (callStatus) {
-      case 'ringing': return isIncoming ? 'Incoming call...' : 'Calling...';
-      case 'connecting': return 'Connecting...';
-      case 'connected': return formatDuration(callDuration);
-      case 'ended': return 'Call ended';
-      default: return '';
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 mesh-bg flex flex-col items-center justify-between py-16 px-6">
+      {/* Hidden audio element for remote stream */}
+      <audio ref={audioRef} autoPlay playsInline />
+
       {/* Contact Info */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -171,7 +177,7 @@ export function AudioCallScreen({
       )}
 
       {/* Active Call Controls */}
-      {(callStatus === 'connected' || callStatus === 'ringing') && !isIncoming && (
+      {(callStatus === 'connected' || (callStatus === 'ringing' && !isIncoming) || callStatus === 'connecting') && !isIncoming && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -260,6 +266,8 @@ interface VideoCallScreenProps {
   onToggleVideo: () => void;
   onFlipCamera: () => void;
   onEndCall: () => void;
+  localStream?: MediaStream | null;
+  remoteStream?: MediaStream | null;
 }
 
 export function VideoCallScreen({
@@ -272,9 +280,13 @@ export function VideoCallScreen({
   onToggleVideo,
   onFlipCamera,
   onEndCall,
+  localStream,
+  remoteStream,
 }: VideoCallScreenProps) {
   const [callDuration, setCallDuration] = useState(duration);
   const [showControls, setShowControls] = useState(true);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (callStatus === 'connected') {
@@ -292,6 +304,22 @@ export function VideoCallScreen({
     }
   }, [showControls, callStatus]);
 
+  // Play local video stream (PiP)
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(() => {});
+    }
+  }, [localStream]);
+
+  // Play remote video stream
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch(() => {});
+    }
+  }, [remoteStream]);
+
   const formatDuration = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
@@ -303,41 +331,60 @@ export function VideoCallScreen({
       className="fixed inset-0 z-50 bg-black"
       onClick={() => setShowControls(!showControls)}
     >
-      {/* Remote Video (Simulated) */}
-      <div className="absolute inset-0 bg-gradient-to-br from-zixo-bg via-zixo-surface to-zixo-primary/10 flex items-center justify-center">
-        {isVideoOn ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center"
-          >
-            <Avatar name={remoteUser.displayName} uid={remoteUser.uid} size="2xl" className="mx-auto breathe" />
-            <h3 className="text-xl font-semibold text-zixo-text mt-4">{remoteUser.displayName}</h3>
-          </motion.div>
-        ) : (
-          <div className="text-center">
-            <div className="w-24 h-24 rounded-full bg-zixo-surface-light flex items-center justify-center mx-auto">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zixo-text-secondary">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-              </svg>
+      {/* Remote Video */}
+      {remoteStream ? (
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-br from-zixo-bg via-zixo-surface to-zixo-primary/10 flex items-center justify-center">
+          {isVideoOn ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center"
+            >
+              <Avatar name={remoteUser.displayName} uid={remoteUser.uid} size="2xl" className="mx-auto breathe" />
+              <h3 className="text-xl font-semibold text-zixo-text mt-4">{remoteUser.displayName}</h3>
+            </motion.div>
+          ) : (
+            <div className="text-center">
+              <div className="w-24 h-24 rounded-full bg-zixo-surface-light flex items-center justify-center mx-auto">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zixo-text-secondary">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </div>
+              <p className="text-sm text-zixo-text-secondary mt-3">Camera off</p>
             </div>
-            <p className="text-sm text-zixo-text-secondary mt-3">Camera off</p>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
-      {/* Self View (PiP) */}
+      {/* Self View (PiP) - real local video */}
       <motion.div
         drag
         dragConstraints={{ top: 50, left: 20, right: window.innerWidth - 140, bottom: window.innerHeight - 200 }}
-        className="absolute top-12 right-4 w-28 h-40 rounded-2xl bg-gradient-to-br from-zixo-primary/30 to-zixo-secondary/30 overflow-hidden border-2 border-white/10 z-10 cursor-grab active:cursor-grabbing"
+        className="absolute top-12 right-4 w-28 h-40 rounded-2xl overflow-hidden border-2 border-white/10 z-10 cursor-grab active:cursor-grabbing"
       >
-        <div className="w-full h-full flex items-center justify-center">
-          <div className="w-12 h-12 rounded-full bg-zixo-primary flex items-center justify-center text-sm font-semibold text-white">
-            You
+        {localStream ? (
+          <video
+            ref={localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-zixo-primary/30 to-zixo-secondary/30 flex items-center justify-center">
+            <div className="w-12 h-12 rounded-full bg-zixo-primary flex items-center justify-center text-sm font-semibold text-white">
+              You
+            </div>
           </div>
-        </div>
+        )}
       </motion.div>
 
       {/* Top Bar */}

@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useZixoStore, generateDemoChats, generateDemoMessages, generateDemoCalls } from '@/stores/useZixoStore';
+import { useZixoStore } from '@/stores/useZixoStore';
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
 import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory } from '@/services/firestore';
 import { initFCM } from '@/services/messaging';
-import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToMultiplePresence } from '@/services/presence';
+import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToMultiplePresence, type RTDBCallSignal } from '@/services/presence';
 
 // ==================== RETRY LOGIC ====================
 
@@ -64,40 +64,6 @@ function retrySubscription<T>(
   };
 }
 
-// ==================== DEMO DATA ====================
-
-// Only load demo data if explicitly requested or in dev mode
-const isDevMode = process.env.NODE_ENV === 'development';
-
-function loadDemoDataHelper(
-  currentUser: ZixoUserProfile,
-  setChats: (chats: any[]) => void,
-  setMessages: (chatId: string, messages: any[]) => void,
-  setUserProfiles: (profiles: Record<string, ZixoUserProfile>) => void,
-  setCallHistory: (calls: any[]) => void,
-) {
-  const demoChats = generateDemoChats(currentUser);
-  setChats(demoChats);
-
-  const demoProfiles: Record<string, ZixoUserProfile> = { [currentUser.uid]: currentUser };
-  const demoMessagesMap: Record<string, ReturnType<typeof generateDemoMessages>> = {};
-
-  demoChats.forEach((chat) => {
-    const otherUser = chat.participantProfiles.find((p) => p.uid !== currentUser.uid);
-    if (otherUser) {
-      demoProfiles[otherUser.uid] = otherUser;
-      demoMessagesMap[chat.id] = generateDemoMessages(chat.id, otherUser.uid);
-    }
-  });
-
-  setUserProfiles(demoProfiles);
-  Object.entries(demoMessagesMap).forEach(([chatId, msgs]) => {
-    setMessages(chatId, msgs);
-  });
-
-  setCallHistory(generateDemoCalls());
-}
-
 /**
  * Hook that manages the Firebase <-> Zustand bridge
  * - Listens to auth state changes
@@ -105,10 +71,9 @@ function loadDemoDataHelper(
  * - Subscribes to real-time chat updates (Firestore)
  * - Subscribes to presence of chat participants
  * - Subscribes to typing indicators (RTDB)
- * - Listens for incoming calls (RTDB)
+ * - Listens for incoming calls (RTDB) and shows incoming call screen
  * - Loads call history from Firestore
  * - Initializes FCM push notifications
- * - Demo data only loads in dev mode or when explicitly requested
  */
 export function useFirebaseBridge() {
   const {
@@ -122,6 +87,7 @@ export function useFirebaseBridge() {
     setMessages,
     setUserProfiles,
     setCallHistory,
+    setIncomingCall,
     addUnsub,
   } = useZixoStore();
 
@@ -159,6 +125,7 @@ export function useFirebaseBridge() {
               online: true,
               lastSeen: Date.now(),
               createdAt: Date.now(),
+              role: 'user',
             };
             login(tempProfile);
           }
@@ -175,6 +142,7 @@ export function useFirebaseBridge() {
             online: true,
             lastSeen: Date.now(),
             createdAt: Date.now(),
+            role: 'user',
           };
           console.log('[Zixo Bridge] Using temp profile due to error');
           login(tempProfile);
@@ -248,7 +216,7 @@ export function useFirebaseBridge() {
                 id: fc.id,
                 participants: fc.participants,
                 participantProfiles: fc.participants.map(
-                  (uid) => profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now() }
+                  (uid) => profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now(), role: 'user' as const }
                 ),
                 lastMessage: fc.lastMessage
                   ? {
@@ -275,13 +243,8 @@ export function useFirebaseBridge() {
 
             uiChats.sort((a, b) => b.updatedAt - a.updatedAt);
             setChats(uiChats);
-          } else {
-            // Only load demo data in dev mode - NOT as a silent fallback
-            if (isDevMode) {
-              console.log('[Zixo] No Firestore chats found, loading demo data (dev mode)');
-              loadDemoDataHelper(currentUser, setChats, setMessages, setUserProfiles, setCallHistory);
-            }
           }
+          // No demo data fallback - only show real data
         });
 
         return unsub;
@@ -369,7 +332,7 @@ export function useFirebaseBridge() {
   }, [activeChatId, isAuthenticated, currentUser]);
 
   // 6. Subscribe to messages when active chat changes (Firestore)
-  //    With retry logic and no demo data fallback
+  //    With retry logic
   useEffect(() => {
     if (!activeChatId || !isAuthenticated) return;
 
@@ -398,7 +361,6 @@ export function useFirebaseBridge() {
             }));
             setMessages(activeChatId, uiMessages);
           }
-          // No demo data fallback for messages - only show real data
         });
 
         return unsub;
@@ -437,32 +399,59 @@ export function useFirebaseBridge() {
             timestamp: c.timestamp?.toMillis?.() || Date.now(),
           }));
           setCallHistory(uiCalls);
-        } else if (isDevMode) {
-          // Only load demo call data in dev mode
-          setCallHistory(generateDemoCalls());
         }
       })
       .catch((error) => {
         console.warn('[Zixo] Failed to load call history:', error);
-        if (isDevMode) {
-          setCallHistory(generateDemoCalls());
-        }
       });
   }, [isAuthenticated, currentUser, setCallHistory]);
 
-  // 8. Listen for incoming calls (RTDB)
+  // 8. Listen for incoming calls (RTDB) - show incoming call screen
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
     let unsub: (() => void) | null = null;
 
     try {
-      unsub = subscribeToIncomingCalls(currentUser.uid, (calls) => {
+      unsub = subscribeToIncomingCalls(currentUser.uid, async (calls) => {
         if (calls.length > 0) {
           const call = calls[0];
           console.log('[Zixo] Incoming call:', call);
-          // In a full implementation, this would show an incoming call screen
-          // For now, we just log it
+
+          // Look up the caller's profile from cache or Firestore
+          const store = useZixoStore.getState();
+          let callerProfile = store.userProfiles[call.data.callerId];
+
+          if (!callerProfile) {
+            try {
+              callerProfile = await getUserProfile(call.data.callerId);
+            } catch (err) {
+              console.warn('[Zixo] Failed to fetch caller profile:', err);
+              callerProfile = {
+                uid: call.data.callerId,
+                displayName: call.data.callerName || 'Unknown',
+                email: '',
+                username: '',
+                bio: '',
+                avatar: '',
+                online: false,
+                lastSeen: Date.now(),
+                createdAt: Date.now(),
+                role: 'user',
+              };
+            }
+          }
+
+          // Set incoming call state and navigate to incoming-call screen
+          if (callerProfile) {
+            setIncomingCall({
+              callId: call.id,
+              callerProfile,
+              callType: call.data.type,
+              callData: call.data,
+            });
+            useZixoStore.getState().setScreen('incoming-call');
+          }
         }
       });
     } catch (error) {
@@ -472,7 +461,7 @@ export function useFirebaseBridge() {
     return () => {
       if (unsub) unsub();
     };
-  }, [isAuthenticated, currentUser]);
+  }, [isAuthenticated, currentUser, setIncomingCall]);
 
   // 9. Update online status on visibility change (Firestore)
   useEffect(() => {

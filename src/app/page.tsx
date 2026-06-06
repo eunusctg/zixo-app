@@ -2,10 +2,11 @@
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useZixoStore, generateDemoChats, generateDemoMessages, generateDemoCalls } from '@/stores/useZixoStore';
+import { useZixoStore } from '@/stores/useZixoStore';
 import { useFirebaseBridge } from '@/hooks/useFirebaseBridge';
 import { logoutUser } from '@/services/auth';
-import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead, searchMessages as firestoreSearchMessages } from '@/services/firestore';
+import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead, searchMessages as firestoreSearchMessages, createOrGetChat } from '@/services/firestore';
+import { searchUserByUsername } from '@/services/auth';
 import { cn, formatDateGroup } from '@/lib/zixo-utils';
 import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/Onboarding';
 import Avatar from '@/components/zixo/Avatar';
@@ -35,6 +36,7 @@ export default function ZixoApp() {
     messages,
     callHistory,
     activeCall,
+    incomingCall,
     searchQuery,
     isSearching,
     showFABMenu,
@@ -48,6 +50,8 @@ export default function ZixoApp() {
     setMessages,
     addMessage,
     startCall,
+    answerCall,
+    rejectCall,
     endCall,
     toggleMute,
     toggleSpeaker,
@@ -60,7 +64,6 @@ export default function ZixoApp() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const demoLoaded = useRef(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
 
@@ -70,22 +73,6 @@ export default function ZixoApp() {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, activeChatId, currentScreen, isScrolledUp]);
-
-  // Load demo data as fallback when authenticated but no Firestore data exists
-  useEffect(() => {
-    if (isAuthenticated && currentUser && chats.length === 0 && !demoLoaded.current) {
-      demoLoaded.current = true;
-      const demoChats = generateDemoChats(currentUser);
-      setChats(demoChats);
-
-      const demoMsgsMap: Record<string, ReturnType<typeof generateDemoMessages>> = {};
-      demoChats.forEach((chat) => {
-        const other = chat.participantProfiles.find((p) => p.uid !== currentUser.uid);
-        if (other) demoMsgsMap[chat.id] = generateDemoMessages(chat.id, other.uid);
-      });
-      Object.entries(demoMsgsMap).forEach(([cid, msgs]) => setMessages(cid, msgs));
-    }
-  }, [isAuthenticated, currentUser, chats.length, setChats, setMessages]);
 
   // Get active chat data
   const activeChat = useMemo(() => {
@@ -106,38 +93,6 @@ export default function ZixoApp() {
   const totalUnread = useMemo(() => {
     return chats.reduce((sum, c) => sum + c.unreadCount, 0);
   }, [chats]);
-
-  // Handle auth callback (after Firebase Auth succeeds)
-  // Firebase Auth triggers onAuthStateChanged in useFirebaseBridge,
-  // which loads the user profile and calls login() -> transitions to 'home' screen.
-  // This callback is a fallback: if the bridge doesn't fire within 3 seconds
-  // (e.g. slow Firestore), create a temporary profile to unblock the UI.
-  const handleAuth = useCallback((data: { email: string; displayName?: string }) => {
-    if (currentUser) return; // Already logged in via bridge
-
-    // Set a fallback timer - if useFirebaseBridge doesn't log us in within 3s,
-    // create a temp profile so the user isn't stuck
-    const fallbackTimer = setTimeout(() => {
-      const store = useZixoStore.getState();
-      if (!store.currentUser) {
-        console.log('[Zixo] Bridge timeout, creating temp profile');
-        const user: ZixoUserProfile = {
-          uid: 'pending-firebase',
-          displayName: data.displayName || data.email.split('@')[0],
-          email: data.email,
-          username: `@${(data.displayName || data.email.split('@')[0]).toLowerCase().replace(/\s+/g, '')}`,
-          bio: 'Living free, connecting freely 🌍',
-          avatar: '',
-          online: true,
-          lastSeen: Date.now(),
-          createdAt: Date.now(),
-        };
-        store.login(user);
-      }
-    }, 3000);
-
-    return () => clearTimeout(fallbackTimer);
-  }, [currentUser]);
 
   // Handle chat click
   const handleChatClick = useCallback((chatId: string) => {
@@ -206,6 +161,7 @@ export default function ZixoApp() {
       online: true,
       lastSeen: Date.now(),
       createdAt: Date.now(),
+      role: 'user',
     };
     startCall(call.type, user);
   }, [currentUser, startCall]);
@@ -264,6 +220,13 @@ export default function ZixoApp() {
     logout(); // Clear local state regardless
   }, [logout]);
 
+  // Handle answering incoming call
+  const handleAnswerCall = useCallback(() => {
+    if (incomingCall) {
+      answerCall(incomingCall.callId, incomingCall.callerProfile, incomingCall.callType);
+    }
+  }, [incomingCall, answerCall]);
+
   // Render screens
   const renderScreen = () => {
     switch (currentScreen) {
@@ -285,11 +248,30 @@ export default function ZixoApp() {
         return (
           <AuthScreen
             mode={currentScreen === 'auth-forgot' ? 'forgot' : currentScreen === 'auth-signup' ? 'signup' : 'login'}
-            onAuth={handleAuth}
+            onAuth={() => {}} // Auth handled by useFirebaseBridge
             onSwitchMode={(mode) => {
               setScreen(mode === 'forgot' ? 'auth-forgot' : mode === 'signup' ? 'auth-signup' : 'auth-login');
             }}
             onBack={() => setScreen('onboarding')}
+          />
+        );
+
+      case 'incoming-call':
+        if (!incomingCall) return null;
+        return (
+          <AudioCallScreen
+            remoteUser={incomingCall.callerProfile}
+            callStatus="ringing"
+            duration={0}
+            isMuted={false}
+            isSpeakerOn={true}
+            onToggleMute={() => {}}
+            onToggleSpeaker={() => {}}
+            onEndCall={rejectCall}
+            onAnswer={handleAnswerCall}
+            onDecline={rejectCall}
+            isIncoming={true}
+            remoteStream={null}
           />
         );
 
@@ -307,6 +289,7 @@ export default function ZixoApp() {
               onToggleMute={toggleMute}
               onToggleSpeaker={toggleSpeaker}
               onEndCall={endCall}
+              remoteStream={activeCall.remoteStream}
             />
           );
         }
@@ -321,6 +304,8 @@ export default function ZixoApp() {
             onToggleVideo={toggleVideo}
             onFlipCamera={() => {}}
             onEndCall={endCall}
+            localStream={activeCall.localStream}
+            remoteStream={activeCall.remoteStream}
           />
         );
 
@@ -632,13 +617,33 @@ export default function ZixoApp() {
         <div className="flex-1 overflow-y-auto">
           <ContactsScreen
             contacts={allContacts}
-            onStartChat={(userId) => {
-              const chat = chats.find((c) => c.participants.includes(userId));
-              if (chat) handleChatClick(chat.id);
+            onStartChat={async (userId) => {
+              // Create or get chat in Firestore, then navigate
+              try {
+                const chatId = await createOrGetChat(currentUser.uid, userId);
+                handleChatClick(chatId);
+              } catch (err) {
+                console.error('[Zixo] Failed to create/get chat:', err);
+                // Fallback: try finding existing chat in local state
+                const chat = chats.find((c) => c.participants.includes(userId));
+                if (chat) handleChatClick(chat.id);
+              }
             }}
             onStartCall={(userId, type) => {
               const user = allContacts.find((c) => c.uid === userId);
               if (user) startCall(type, user);
+            }}
+            onSearchUser={async (username: string) => {
+              // Search by username in Firestore
+              try {
+                const foundUser = await searchUserByUsername(username);
+                if (foundUser) {
+                  const chatId = await createOrGetChat(currentUser.uid, foundUser.uid);
+                  handleChatClick(chatId);
+                }
+              } catch (err) {
+                console.error('[Zixo] User search failed:', err);
+              }
             }}
           />
         </div>

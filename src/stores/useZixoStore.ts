@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { ZixoUserProfile } from '@/services/auth';
 import type { FirestoreChat, FirestoreMessage, FirestoreCall } from '@/services/firestore';
 import type { UploadProgress } from '@/services/storage';
+import { getWebRTC, resetWebRTC } from '@/services/webrtc';
+import { endCallSignal, type RTDBCallSignal } from '@/services/presence';
 
 // Types for UI state (compatible with existing components)
 export interface Message {
@@ -112,6 +114,15 @@ interface ZixoState {
     isMuted: boolean;
     isSpeakerOn: boolean;
     isVideoOn: boolean;
+    localStream: MediaStream | null;
+    remoteStream: MediaStream | null;
+    callId: string | null;
+  } | null;
+  incomingCall: {
+    callId: string;
+    callerProfile: ZixoUserProfile;
+    callType: 'audio' | 'video';
+    callData: RTDBCallSignal;
   } | null;
 
   // UI
@@ -152,10 +163,16 @@ interface ZixoState {
   setCallHistory: (calls: CallRecord[]) => void;
   setCallStatus: (status: CallStatus) => void;
   startCall: (type: 'audio' | 'video', user: ZixoUserProfile) => void;
+  answerCall: (callId: string, callerProfile: ZixoUserProfile, callType: 'audio' | 'video') => void;
+  rejectCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
   toggleSpeaker: () => void;
   toggleVideo: () => void;
+  setCallRemoteStream: (stream: MediaStream) => void;
+  setCallLocalStream: (stream: MediaStream) => void;
+  setCallStatus: (status: CallStatus) => void;
+  setIncomingCall: (incoming: { callId: string; callerProfile: ZixoUserProfile; callType: 'audio' | 'video'; callData: RTDBCallSignal } | null) => void;
   setSearchQuery: (query: string) => void;
   toggleSearching: () => void;
   toggleFABMenu: () => void;
@@ -197,6 +214,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   // Calls
   callHistory: [],
   activeCall: null,
+  incomingCall: null,
 
   // UI
   searchQuery: '',
@@ -303,7 +321,27 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       activeCall: state.activeCall ? { ...state.activeCall, status } : null,
     })),
 
-  startCall: (type, user) =>
+  startCall: (type, user) => {
+    const currentUser = get().currentUser;
+    if (!currentUser) return;
+
+    // Reset any previous WebRTC instance
+    resetWebRTC();
+    const webrtc = getWebRTC();
+
+    // Set up callbacks
+    webrtc.onRemoteStream = (stream) => {
+      useZixoStore.getState().setCallRemoteStream(stream);
+      useZixoStore.getState().setCallStatus('connected');
+    };
+
+    webrtc.onConnectionStateChange = (state) => {
+      if (state === 'disconnected' || state === 'failed') {
+        useZixoStore.getState().endCall();
+      }
+    };
+
+    // Set initial UI state immediately
     set({
       activeCall: {
         status: 'ringing',
@@ -313,16 +351,110 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         isMuted: false,
         isSpeakerOn: type === 'audio',
         isVideoOn: type === 'video',
+        localStream: null,
+        remoteStream: null,
+        callId: null,
       },
       currentScreen: type === 'audio' ? 'audio-call' : 'video-call',
-    }),
+    });
+
+    // Initiate WebRTC call asynchronously
+    webrtc.startCall(currentUser.uid, currentUser.displayName, user.uid, type)
+      .then((callId) => {
+        // Update call with callId and local stream
+        const localStream = webrtc.getLocalStream();
+        set((state) => ({
+          activeCall: state.activeCall
+            ? { ...state.activeCall, callId, localStream, status: 'connecting' }
+            : null,
+        }));
+      })
+      .catch((err) => {
+        console.error('[Zixo] Failed to start call:', err);
+        // Clean up on failure
+        webrtc.endCall();
+        set({ activeCall: null, currentScreen: 'home' });
+      });
+  },
+
+  answerCall: (callId, callerProfile, callType) => {
+    const incoming = get().incomingCall;
+    if (!incoming) return;
+
+    // Reset any previous WebRTC instance
+    resetWebRTC();
+    const webrtc = getWebRTC();
+
+    // Set up callbacks
+    webrtc.onRemoteStream = (stream) => {
+      useZixoStore.getState().setCallRemoteStream(stream);
+      useZixoStore.getState().setCallStatus('connected');
+    };
+
+    webrtc.onConnectionStateChange = (state) => {
+      if (state === 'disconnected' || state === 'failed') {
+        useZixoStore.getState().endCall();
+      }
+    };
+
+    // Set initial UI state
+    set({
+      activeCall: {
+        status: 'connecting',
+        type: callType,
+        remoteUser: callerProfile,
+        duration: 0,
+        isMuted: false,
+        isSpeakerOn: callType === 'audio',
+        isVideoOn: callType === 'video',
+        localStream: null,
+        remoteStream: null,
+        callId,
+      },
+      incomingCall: null,
+      currentScreen: callType === 'audio' ? 'audio-call' : 'video-call',
+    });
+
+    // Answer the call via WebRTC
+    webrtc.answerCall(callId, incoming.callData)
+      .then(() => {
+        const localStream = webrtc.getLocalStream();
+        set((state) => ({
+          activeCall: state.activeCall
+            ? { ...state.activeCall, localStream, status: 'connecting' }
+            : null,
+        }));
+      })
+      .catch((err) => {
+        console.error('[Zixo] Failed to answer call:', err);
+        webrtc.endCall();
+        set({ activeCall: null, currentScreen: 'home' });
+      });
+  },
+
+  rejectCall: () => {
+    const incoming = get().incomingCall;
+    if (incoming) {
+      // End the call signal so the caller knows it was rejected
+      endCallSignal(incoming.callId);
+    }
+    set({ incomingCall: null, activeCall: null, currentScreen: 'home' });
+  },
 
   endCall: () => {
     const { activeCall } = get();
+
+    // End WebRTC connection
+    try {
+      getWebRTC().endCall();
+    } catch (e) {
+      // WebRTC might not be initialized
+    }
+
     if (activeCall && activeCall.remoteUser) {
       const newCall: CallRecord = {
-        id: `call-${Date.now()}`,
-        callerId: 'user-me',
+        id: activeCall.callId || `call-${Date.now()}`,
+        callerId: get().currentUser?.uid || 'user-me',
         callerName: get().currentUser?.displayName || 'You',
         callerAvatar: '',
         receiverId: activeCall.remoteUser.uid,
@@ -337,19 +469,22 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       set((state) => ({
         callHistory: [newCall, ...state.callHistory],
         activeCall: null,
+        incomingCall: null,
         currentScreen: 'home',
       }));
     } else {
-      set({ activeCall: null, currentScreen: 'home' });
+      set({ activeCall: null, incomingCall: null, currentScreen: 'home' });
     }
   },
 
-  toggleMute: () =>
-    set((state) => ({
-      activeCall: state.activeCall
-        ? { ...state.activeCall, isMuted: !state.activeCall.isMuted }
-        : null,
-    })),
+  toggleMute: () => {
+    const { activeCall } = get();
+    if (activeCall) {
+      const newMuted = !activeCall.isMuted;
+      try { getWebRTC().toggleMute(newMuted); } catch {}
+      set({ activeCall: { ...activeCall, isMuted: newMuted } });
+    }
+  },
 
   toggleSpeaker: () =>
     set((state) => ({
@@ -358,12 +493,31 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         : null,
     })),
 
-  toggleVideo: () =>
+  toggleVideo: () => {
+    const { activeCall } = get();
+    if (activeCall) {
+      const newVideoOn = !activeCall.isVideoOn;
+      try { getWebRTC().toggleVideo(newVideoOn); } catch {}
+      set({ activeCall: { ...activeCall, isVideoOn: newVideoOn } });
+    }
+  },
+
+  setCallRemoteStream: (stream) =>
     set((state) => ({
       activeCall: state.activeCall
-        ? { ...state.activeCall, isVideoOn: !state.activeCall.isVideoOn }
+        ? { ...state.activeCall, remoteStream: stream }
         : null,
     })),
+
+  setCallLocalStream: (stream) =>
+    set((state) => ({
+      activeCall: state.activeCall
+        ? { ...state.activeCall, localStream: stream }
+        : null,
+    })),
+
+  setIncomingCall: (incoming) =>
+    set({ incomingCall: incoming }),
 
   setSearchQuery: (query) => set({ searchQuery: query }),
   toggleSearching: () => set((state) => ({ isSearching: !state.isSearching, searchQuery: '' })),
@@ -450,242 +604,3 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       isLoadingMoreMessages: false,
     })),
 }));
-
-// ==================== DEMO DATA (Fallback when no Firebase connection) ====================
-// This is used when Firebase is not yet connected or for demo/preview mode
-
-export const DEMO_USERS: ZixoUserProfile[] = [
-  {
-    uid: 'demo-1',
-    displayName: 'Sarah Chen',
-    email: 'sarah@zixo.app',
-    username: '@sarahchen',
-    bio: 'Designer & dreamer',
-    avatar: '',
-    online: true,
-    lastSeen: Date.now(),
-    createdAt: Date.now(),
-  },
-  {
-    uid: 'demo-2',
-    displayName: 'Marcus Rivera',
-    email: 'marcus@zixo.app',
-    username: '@marcusriv',
-    bio: 'Code. Coffee. Repeat.',
-    avatar: '',
-    online: false,
-    lastSeen: Date.now() - 3600000,
-    createdAt: Date.now(),
-  },
-  {
-    uid: 'demo-3',
-    displayName: 'Yuki Tanaka',
-    email: 'yuki@zixo.app',
-    username: '@yukitan',
-    bio: 'Music lover & cat person 🐱',
-    avatar: '',
-    online: true,
-    lastSeen: Date.now(),
-    createdAt: Date.now(),
-  },
-  {
-    uid: 'demo-4',
-    displayName: 'Priya Sharma',
-    email: 'priya@zixo.app',
-    username: '@priyash',
-    bio: 'Exploring the world one city at a time',
-    avatar: '',
-    online: false,
-    lastSeen: Date.now() - 7200000,
-    createdAt: Date.now(),
-  },
-  {
-    uid: 'demo-5',
-    displayName: 'Jordan Blake',
-    email: 'jordan@zixo.app',
-    username: '@jblake',
-    bio: 'Photographer | Storyteller',
-    avatar: '',
-    online: true,
-    lastSeen: Date.now(),
-    createdAt: Date.now(),
-  },
-  {
-    uid: 'demo-6',
-    displayName: 'Emma Wilson',
-    email: 'emma@zixo.app',
-    username: '@emmaw',
-    bio: 'Just here for the calls 😄',
-    avatar: '',
-    online: false,
-    lastSeen: Date.now() - 1800000,
-    createdAt: Date.now(),
-  },
-];
-
-export function generateDemoChats(currentUser: ZixoUserProfile): Chat[] {
-  const now = Date.now();
-  return DEMO_USERS.map((user, i) => ({
-    id: `demo-chat-${i + 1}`,
-    participants: [currentUser.uid, user.uid],
-    participantProfiles: [currentUser, user],
-    lastMessage: {
-      id: `demo-msg-last-${i + 1}`,
-      chatId: `demo-chat-${i + 1}`,
-      senderId: user.uid,
-      text: ['Hey! How are you? 👋', 'Check this out!', 'Let me call you later', 'Thanks for sharing!', 'See you soon! ✨', 'Got it, thanks!'][i],
-      type: 'text' as const,
-      timestamp: now - [300000, 900000, 3600000, 7200000, 14400000, 86400000][i],
-      status: 'delivered' as const,
-    },
-    unreadCount: [3, 1, 0, 0, 2, 0][i],
-    isGroup: false,
-    typing: i === 0 ? [user.uid] : [],
-    createdAt: now - 86400000 * (i + 1),
-    updatedAt: now - [300000, 900000, 3600000, 7200000, 14400000, 86400000][i],
-  }));
-}
-
-export function generateDemoMessages(chatId: string, otherUserId: string): Message[] {
-  const now = Date.now();
-  return [
-    {
-      id: `${chatId}-1`,
-      chatId,
-      senderId: otherUserId,
-      text: 'Hey! How are you doing? 👋',
-      type: 'text',
-      timestamp: now - 86400000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-2`,
-      chatId,
-      senderId: 'user-me',
-      text: "I'm great! Just finished setting up Zixo 🚀",
-      type: 'text',
-      timestamp: now - 86300000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-3`,
-      chatId,
-      senderId: otherUserId,
-      text: "That's awesome! The app looks so clean and fast",
-      type: 'text',
-      timestamp: now - 86200000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-4`,
-      chatId,
-      senderId: 'user-me',
-      text: 'Right? No social clutter, just pure connection ✨',
-      type: 'text',
-      timestamp: now - 86100000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-5`,
-      chatId,
-      senderId: otherUserId,
-      text: 'Want to do a quick video call later?',
-      type: 'text',
-      timestamp: now - 3600000,
-      status: 'read',
-    },
-    {
-      id: `${chatId}-6`,
-      chatId,
-      senderId: 'user-me',
-      text: 'Sure! Let me know when you are free 😊',
-      type: 'text',
-      timestamp: now - 3500000,
-      status: 'delivered',
-    },
-  ];
-}
-
-export function generateDemoCalls(): CallRecord[] {
-  const now = Date.now();
-  return [
-    {
-      id: 'demo-call-1',
-      callerId: 'demo-1',
-      callerName: 'Sarah Chen',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'You',
-      receiverAvatar: '',
-      type: 'video',
-      direction: 'incoming',
-      duration: 342,
-      timestamp: now - 1800000,
-    },
-    {
-      id: 'demo-call-2',
-      callerId: 'user-me',
-      callerName: 'You',
-      callerAvatar: '',
-      receiverId: 'demo-2',
-      receiverName: 'Marcus Rivera',
-      receiverAvatar: '',
-      type: 'audio',
-      direction: 'outgoing',
-      duration: 145,
-      timestamp: now - 5400000,
-    },
-    {
-      id: 'demo-call-3',
-      callerId: 'demo-3',
-      callerName: 'Yuki Tanaka',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'You',
-      receiverAvatar: '',
-      type: 'video',
-      direction: 'missed',
-      duration: 0,
-      timestamp: now - 10800000,
-    },
-    {
-      id: 'demo-call-4',
-      callerId: 'user-me',
-      callerName: 'You',
-      callerAvatar: '',
-      receiverId: 'demo-5',
-      receiverName: 'Jordan Blake',
-      receiverAvatar: '',
-      type: 'audio',
-      direction: 'outgoing',
-      duration: 523,
-      timestamp: now - 86400000,
-    },
-    {
-      id: 'demo-call-5',
-      callerId: 'demo-4',
-      callerName: 'Priya Sharma',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'You',
-      receiverAvatar: '',
-      type: 'video',
-      direction: 'incoming',
-      duration: 67,
-      timestamp: now - 172800000,
-    },
-    {
-      id: 'demo-call-6',
-      callerId: 'demo-6',
-      callerName: 'Emma Wilson',
-      callerAvatar: '',
-      receiverId: 'user-me',
-      receiverName: 'You',
-      receiverAvatar: '',
-      type: 'audio',
-      direction: 'missed',
-      duration: 0,
-      timestamp: now - 259200000,
-    },
-  ];
-}

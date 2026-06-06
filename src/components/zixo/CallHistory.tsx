@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn, formatCallDuration, formatCallTime } from '@/lib/zixo-utils';
@@ -163,10 +163,12 @@ interface ContactsScreenProps {
   contacts: ZixoUserProfile[];
   onStartChat: (userId: string) => void;
   onStartCall: (userId: string, type: 'audio' | 'video') => void;
+  onSearchUser?: (username: string) => void;
 }
 
-export function ContactsScreen({ contacts, onStartChat, onStartCall }: ContactsScreenProps) {
+export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUser }: ContactsScreenProps) {
   const [search, setSearch] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   const filtered = search
     ? contacts.filter(
@@ -175,6 +177,19 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall }: ContactsS
           c.username.toLowerCase().includes(search.toLowerCase())
       )
     : contacts;
+
+  // Handle search submission - search by username on Firestore
+  const handleSearchSubmit = useCallback(async () => {
+    if (!search.trim() || !onSearchUser) return;
+    setIsSearching(true);
+    try {
+      await onSearchUser(search.trim());
+    } catch (err) {
+      console.error('[Zixo] Search failed:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [search, onSearchUser]);
 
   return (
     <div className="pb-4">
@@ -199,9 +214,19 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall }: ContactsS
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Find people on Zixo..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none transition-colors"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSearchSubmit(); }}
+            placeholder="Search by @username..."
+            className="w-full pl-10 pr-12 py-2.5 rounded-xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none transition-colors"
           />
+          {onSearchUser && search.trim() && (
+            <button
+              onClick={handleSearchSubmit}
+              disabled={isSearching}
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-lg gradient-primary text-white text-xs font-medium"
+            >
+              {isSearching ? '...' : 'Find'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -215,6 +240,15 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall }: ContactsS
         </button>
       </div>
 
+      {/* Existing Chats Header */}
+      {filtered.length > 0 && (
+        <div className="px-4 py-2">
+          <h3 className="text-xs font-semibold text-zixo-text-secondary uppercase tracking-wider">
+            Your Chats ({filtered.length})
+          </h3>
+        </div>
+      )}
+
       {/* Contact List */}
       <div className="divide-y divide-white/5">
         {filtered.map((contact, i) => (
@@ -223,7 +257,8 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall }: ContactsS
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.03 }}
-            className="flex items-center gap-3 px-4 py-3 hover:bg-zixo-surface/50 transition-colors"
+            className="flex items-center gap-3 px-4 py-3 hover:bg-zixo-surface/50 transition-colors cursor-pointer"
+            onClick={() => onStartChat(contact.uid)}
           >
             <Avatar name={contact.displayName} uid={contact.uid} size="lg" online={contact.online} />
 
@@ -232,7 +267,16 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall }: ContactsS
               <p className="text-xs text-zixo-text-secondary truncate">{contact.username}</p>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              <motion.button
+                whileTap={{ scale: 0.85 }}
+                onClick={() => onStartChat(contact.uid)}
+                className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-primary hover:bg-zixo-surface-light transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              </motion.button>
               <motion.button
                 whileTap={{ scale: 0.85 }}
                 onClick={() => onStartCall(contact.uid, 'audio')}
@@ -256,6 +300,20 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall }: ContactsS
           </motion.div>
         ))}
       </div>
+
+      {/* Empty state */}
+      {filtered.length === 0 && !isSearching && (
+        <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+          <div className="w-16 h-16 rounded-full bg-zixo-surface flex items-center justify-center mb-4">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zixo-text-secondary">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </div>
+          <h3 className="text-base font-semibold text-zixo-text mb-1">No contacts yet</h3>
+          <p className="text-sm text-zixo-text-secondary">Search by @username to find people on Zixo</p>
+        </div>
+      )}
     </div>
   );
 }
