@@ -1,18 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Do NOT use "standalone" for Cloudflare - opennextjs-cloudflare handles the output
   typescript: {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  // Cloudflare doesn't support sharp (native image processing)
+  // Cloudflare doesn't support Next.js image optimization
   images: {
     unoptimized: true,
   },
-  // Mark server-only packages as external for the edge runtime
-  serverExternalPackages: ["sharp"],
-  // Ensure static optimization works
   experimental: {
     serverActions: {
       bodySizeLimit: "10mb",

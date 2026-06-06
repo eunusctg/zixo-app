@@ -1,13 +1,8 @@
-import { PrismaClient } from '@prisma/client'
+/**
+ * Database stub - Zixo uses Firebase (Firestore + RTDB) for all data.
+ * Prisma/SQLite is not compatible with Cloudflare Workers.
+ */
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
-}
+export const db = null;
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: ['query'],
-  })
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+// This file is kept as a stub for any imports that may reference it.
