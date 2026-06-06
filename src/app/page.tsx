@@ -107,25 +107,36 @@ export default function ZixoApp() {
   }, [chats]);
 
   // Handle auth callback (after Firebase Auth succeeds)
+  // Firebase Auth triggers onAuthStateChanged in useFirebaseBridge,
+  // which loads the user profile and calls login() -> transitions to 'home' screen.
+  // This callback is a fallback: if the bridge doesn't fire within 3 seconds
+  // (e.g. slow Firestore), create a temporary profile to unblock the UI.
   const handleAuth = useCallback((data: { email: string; displayName?: string }) => {
-    // Firebase Auth already handled in useFirebaseBridge
-    // This callback is just for UI flow - the bridge will auto-detect the auth state
-    // If bridge doesn't auto-detect (e.g. Google sign-in), create a temp profile
-    if (!currentUser) {
-      const user: ZixoUserProfile = {
-        uid: 'pending-firebase',
-        displayName: data.displayName || data.email.split('@')[0],
-        email: data.email,
-        username: `@${(data.displayName || data.email.split('@')[0]).toLowerCase().replace(/\s+/g, '')}`,
-        bio: 'Living free, connecting freely 🌍',
-        avatar: '',
-        online: true,
-        lastSeen: Date.now(),
-        createdAt: Date.now(),
-      };
-      login(user);
-    }
-  }, [currentUser, login]);
+    if (currentUser) return; // Already logged in via bridge
+
+    // Set a fallback timer - if useFirebaseBridge doesn't log us in within 3s,
+    // create a temp profile so the user isn't stuck
+    const fallbackTimer = setTimeout(() => {
+      const store = useZixoStore.getState();
+      if (!store.currentUser) {
+        console.log('[Zixo] Bridge timeout, creating temp profile');
+        const user: ZixoUserProfile = {
+          uid: 'pending-firebase',
+          displayName: data.displayName || data.email.split('@')[0],
+          email: data.email,
+          username: `@${(data.displayName || data.email.split('@')[0]).toLowerCase().replace(/\s+/g, '')}`,
+          bio: 'Living free, connecting freely 🌍',
+          avatar: '',
+          online: true,
+          lastSeen: Date.now(),
+          createdAt: Date.now(),
+        };
+        store.login(user);
+      }
+    }, 3000);
+
+    return () => clearTimeout(fallbackTimer);
+  }, [currentUser]);
 
   // Handle chat click
   const handleChatClick = useCallback((chatId: string) => {

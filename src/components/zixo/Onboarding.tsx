@@ -282,6 +282,7 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
   const getFirebaseErrorMessage = (code: string): string => {
     switch (code) {
       case 'auth/email-already-in-use': return 'This email is already registered. Try signing in instead.';
+      case 'invalid-email': 
       case 'auth/invalid-email': return 'Please enter a valid email address.';
       case 'auth/weak-password': return 'Password is too weak. Use at least 6 characters.';
       case 'auth/user-not-found': return 'No account found with this email.';
@@ -290,7 +291,10 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
       case 'auth/too-many-requests': return 'Too many attempts. Please try again later.';
       case 'auth/network-request-failed': return 'Network error. Check your internet connection.';
       case 'auth/popup-closed-by-user': return 'Sign-in was cancelled.';
-      default: return 'Something went wrong. Please try again.';
+      case 'auth/unauthorized-domain': return 'This domain is not authorized for sign-in. Please contact support.';
+      case 'auth/operation-not-allowed': return 'This sign-in method is not enabled. Please contact support.';
+      case 'auth/popup-blocked': return 'Popup was blocked by your browser. Please allow popups and try again.';
+      default: return code ? `Error: ${code}` : 'Something went wrong. Please try again.';
     }
   };
 
@@ -301,14 +305,19 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
 
     try {
       if (mode === 'signup') {
+        console.log('[Zixo Auth] Signing up with email:', email);
         const { registerWithEmail } = await import('@/services/auth');
         const result = await registerWithEmail(email, password, displayName || email.split('@')[0]);
+        console.log('[Zixo Auth] Sign up successful:', result.profile.displayName);
         onAuth({ email, displayName: result.profile.displayName });
       } else if (mode === 'login') {
+        console.log('[Zixo Auth] Logging in with email:', email);
         const { loginWithEmail } = await import('@/services/auth');
         const result = await loginWithEmail(email, password);
+        console.log('[Zixo Auth] Login successful:', result.profile.displayName);
         onAuth({ email, displayName: result.profile.displayName });
       } else if (mode === 'forgot') {
+        console.log('[Zixo Auth] Sending password reset to:', email);
         const { resetPassword } = await import('@/services/auth');
         await resetPassword(email);
         setError(null);
@@ -316,6 +325,7 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
       }
     } catch (err: any) {
       const errorCode = err?.code || '';
+      console.error('[Zixo Auth] Error:', errorCode, err?.message);
       setError(getFirebaseErrorMessage(errorCode));
     } finally {
       setIsLoading(false);
@@ -326,11 +336,14 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     setError(null);
     setIsLoading(true);
     try {
+      console.log('[Zixo Auth] Starting Google sign-in');
       const { loginWithGoogle } = await import('@/services/auth');
       const result = await loginWithGoogle();
+      console.log('[Zixo Auth] Google sign-in successful:', result.profile.displayName);
       onAuth({ email: result.profile.email, displayName: result.profile.displayName });
     } catch (err: any) {
       const errorCode = err?.code || '';
+      console.error('[Zixo Auth] Google sign-in error:', errorCode, err?.message);
       if (errorCode !== 'auth/popup-closed-by-user') {
         setError(getFirebaseErrorMessage(errorCode));
       }

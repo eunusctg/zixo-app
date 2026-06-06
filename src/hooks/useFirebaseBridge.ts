@@ -137,14 +137,18 @@ export function useFirebaseBridge() {
 
     const unsub = onAuthChange(async (firebaseUser) => {
       setFirebaseReady();
+      console.log('[Zixo Bridge] Auth state changed:', firebaseUser ? `uid=${firebaseUser.uid}` : 'null');
 
       if (firebaseUser) {
         try {
           const profile = await getUserProfile(firebaseUser.uid);
           if (profile) {
+            console.log('[Zixo Bridge] User profile loaded, logging in');
             login(profile);
             initFCM(firebaseUser.uid).catch(console.error);
           } else {
+            console.log('[Zixo Bridge] No Firestore profile, creating temp profile');
+            // User exists in Auth but not in Firestore yet (e.g. first sign-in)
             const tempProfile: ZixoUserProfile = {
               uid: firebaseUser.uid,
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
@@ -159,16 +163,32 @@ export function useFirebaseBridge() {
             login(tempProfile);
           }
         } catch (error) {
-          console.error('[Zixo] Error loading user profile:', error);
-          // Error recovery: retry once after a delay
+          console.error('[Zixo Bridge] Error loading user profile:', error);
+          // Still log in with a temp profile so user isn't stuck
+          const tempProfile: ZixoUserProfile = {
+            uid: firebaseUser.uid,
+            displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+            email: firebaseUser.email || '',
+            username: `@${(firebaseUser.displayName || 'user').toLowerCase().replace(/\s+/g, '')}`,
+            bio: 'Living free, connecting freely',
+            avatar: firebaseUser.photoURL || '',
+            online: true,
+            lastSeen: Date.now(),
+            createdAt: Date.now(),
+          };
+          console.log('[Zixo Bridge] Using temp profile due to error');
+          login(tempProfile);
+
+          // Error recovery: retry once after a delay to get real profile
           setTimeout(async () => {
             try {
               const profile = await getUserProfile(firebaseUser.uid);
               if (profile) {
+                console.log('[Zixo Bridge] Profile loaded on retry');
                 login(profile);
               }
             } catch (retryError) {
-              console.error('[Zixo] Profile load retry also failed:', retryError);
+              console.error('[Zixo Bridge] Profile load retry also failed:', retryError);
             }
           }, 2000);
         }
