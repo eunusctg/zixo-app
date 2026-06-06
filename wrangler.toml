@@ -10,10 +10,18 @@ pages_build_output_dir = ".vercel/output/static"
 binding = "R2_BUCKET"
 bucket_name = "zixocall"
 
-# Environment variables
+# Environment variables (non-secret - set secrets via Cloudflare Dashboard)
 [vars]
 FIREBASE_PROJECT_ID = "zixo-call"
 FIREBASE_DATABASE_SECRET = "rGYDgKhd17onhPLaVg3t7nTLoNak6dbMAsJV1AvP"
+FIREBASE_SERVICE_ACCOUNT_EMAIL = "firebase-adminsdk-fbsvc@zixo-call.iam.gserviceaccount.com"
+R2_ACCOUNT_ID = "704489378006d2bed6a45de180f6679f"
+R2_ACCESS_KEY_ID = "8438e3f2537b01b1f0978365cef05f61"
+R2_BUCKET_NAME = "zixocall"
+
+# Secret variables (set via `wrangler pages secret put`):
+# - FIREBASE_PRIVATE_KEY: Firebase service account private key
+# - R2_SECRET_ACCESS_KEY: Cloudflare R2 secret access key
 
 [placement]
 mode = "smart"
