@@ -1,49 +1,45 @@
 {
   "rules": {
-    // ==================== PRESENCE ====================
-    // Users can write their own presence, anyone authenticated can read
     "presence": {
       "$uid": {
         ".read": "auth != null",
-        ".write": "auth != null && auth.uid == $uid",
-        ".validate": "newData.hasChildren(['online', 'lastSeen'])"
+        ".write": "auth != null && auth.uid == $uid"
       }
     },
-
-    // ==================== TYPING INDICATORS ====================
-    // Users can write their own typing status, participants can read
     "typing": {
       "$chatId": {
         ".read": "auth != null",
         "$uid": {
-          ".write": "auth != null && auth.uid == $uid",
-          ".validate": "newData.isNumber()"
+          ".write": "auth != null && auth.uid == $uid"
         }
       }
     },
-
-    // ==================== CALL SIGNALING ====================
-    // Used for WebRTC offer/answer/ICE exchange
     "calls": {
       ".read": "auth != null",
       "$callId": {
         ".read": "auth != null",
-        ".write": "auth != null && (data.child('callerId').val() == auth.uid || data.child('receiverId').val() == auth.uid || newData.child('callerId').val() == auth.uid || newData.child('receiverId').val() == auth.uid)",
-        "callerId": {
-          ".validate": "newData.isString()"
-        },
-        "receiverId": {
-          ".validate": "newData.isString()"
-        },
-        "status": {
-          ".validate": "newData.isString() && (newData.val() == 'ringing' || newData.val() == 'connected' || newData.val() == 'ended')"
+        ".write": "auth != null && (data.child('callerId').val() == auth.uid || data.child('receiverId').val() == auth.uid || newData.child('callerId').val() == auth.uid || newData.child('receiverId').val() == auth.uid)"
+      }
+    },
+    "notifications": {
+      "$tokenPrefix": {
+        ".read": "auth != null",
+        "$notifId": {
+          ".write": "auth != null"
         }
       }
     },
-
-    // ==================== CONNECTED STATE ====================
-    ".info": {
-      ".read": "auth != null"
+    "users": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    },
+    "usernames": {
+      ".read": "auth != null",
+      "$username": {
+        ".write": "auth != null"
+      }
     }
   }
 }
