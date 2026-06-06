@@ -306,7 +306,7 @@ export function onAuthChange(callback: (user: User | null) => void) {
 }
 
 /**
- * Search for a user by username
+ * Search for a user by username (exact match)
  */
 export async function searchUserByUsername(username: string): Promise<ZixoUserProfile | null> {
   const { collection, query, where, getDocs } = await import('firebase/firestore');
@@ -329,6 +329,143 @@ export async function searchUserByUsername(username: string): Promise<ZixoUserPr
     };
   }
   return null;
+}
+
+/**
+ * Search for users by display name or username (prefix match)
+ * Returns multiple results sorted by displayName
+ */
+export async function searchUsers(searchText: string, maxResults: number = 20): Promise<ZixoUserProfile[]> {
+  const { collection, query, where, getDocs, limit: firestoreLimit } = await import('firebase/firestore');
+  const searchLower = searchText.toLowerCase().replace(/^@/, '');
+  const searchUpper = searchLower + '\uf8ff';
+  const results: Map<string, ZixoUserProfile> = new Map();
+
+  try {
+    // Search by username prefix
+    const q1 = query(
+      collection(db, 'users'),
+      where('username', '>=', `@${searchLower}`),
+      where('username', '<', `@${searchUpper}`),
+      firestoreLimit(maxResults)
+    );
+    const snap1 = await getDocs(q1);
+    snap1.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (!results.has(data.uid)) {
+        results.set(data.uid, {
+          uid: data.uid,
+          displayName: data.displayName || '',
+          email: data.email || '',
+          username: data.username || '',
+          bio: data.bio || '',
+          avatar: data.avatar || '',
+          online: data.online || false,
+          lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
+          createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+          role: data.role || 'user',
+        });
+      }
+    });
+  } catch (err) {
+    console.warn('[Zixo] Username prefix search failed:', err);
+  }
+
+  try {
+    // Search by displayName prefix (case-sensitive, uses lowercase)
+    const q2 = query(
+      collection(db, 'users'),
+      where('displayName', '>=', searchLower.charAt(0).toUpperCase() + searchLower.slice(1)),
+      where('displayName', '<', searchLower.charAt(0).toUpperCase() + searchLower.slice(1) + '\uf8ff'),
+      firestoreLimit(maxResults)
+    );
+    const snap2 = await getDocs(q2);
+    snap2.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (!results.has(data.uid)) {
+        results.set(data.uid, {
+          uid: data.uid,
+          displayName: data.displayName || '',
+          email: data.email || '',
+          username: data.username || '',
+          bio: data.bio || '',
+          avatar: data.avatar || '',
+          online: data.online || false,
+          lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
+          createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+          role: data.role || 'user',
+        });
+      }
+    });
+  } catch (err) {
+    console.warn('[Zixo] DisplayName prefix search failed:', err);
+  }
+
+  // If no prefix results, try client-side filtering of recent users
+  if (results.size === 0) {
+    try {
+      const q3 = query(collection(db, 'users'), firestoreLimit(50));
+      const snap3 = await getDocs(q3);
+      snap3.forEach((docSnap) => {
+        const data = docSnap.data();
+        const nameMatch = (data.displayName || '').toLowerCase().includes(searchLower);
+        const unameMatch = (data.username || '').toLowerCase().includes(searchLower);
+        if ((nameMatch || unameMatch) && !results.has(data.uid)) {
+          results.set(data.uid, {
+            uid: data.uid,
+            displayName: data.displayName || '',
+            email: data.email || '',
+            username: data.username || '',
+            bio: data.bio || '',
+            avatar: data.avatar || '',
+            online: data.online || false,
+            lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
+            createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+            role: data.role || 'user',
+          });
+        }
+      });
+    } catch (err) {
+      console.warn('[Zixo] Client-side user search failed:', err);
+    }
+  }
+
+  return Array.from(results.values()).slice(0, maxResults);
+}
+
+/**
+ * Get all users on Zixo (for browsing/discovery)
+ * Returns up to maxResults users, excluding the current user
+ */
+export async function getAllUsers(currentUid: string, maxResults: number = 50): Promise<ZixoUserProfile[]> {
+  const { collection, query, getDocs, limit: firestoreLimit } = await import('firebase/firestore');
+  const users: ZixoUserProfile[] = [];
+
+  try {
+    const q = query(collection(db, 'users'), firestoreLimit(maxResults + 1));
+    const snapshot = await getDocs(q);
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data.uid !== currentUid) {
+        users.push({
+          uid: data.uid,
+          displayName: data.displayName || '',
+          email: data.email || '',
+          username: data.username || '',
+          bio: data.bio || '',
+          avatar: data.avatar || '',
+          online: data.online || false,
+          lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
+          createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+          role: data.role || 'user',
+        });
+      }
+    });
+  } catch (err) {
+    console.warn('[Zixo] Failed to fetch all users:', err);
+  }
+
+  return users.slice(0, maxResults);
 }
 
 // ==================== PHONE AUTH (OTP) ====================

@@ -311,24 +311,67 @@ export async function deleteChat(chatId: string): Promise<void> {
 
 /**
  * Listen to all chats for a user
+ * Tries indexed query first, falls back to unindexed query
  */
 export function subscribeToUserChats(
   uid: string,
   callback: (chats: FirestoreChat[]) => void
 ): Unsubscribe {
+  // Try the indexed query first (participants + updatedAt)
   const q = query(
     collection(db, 'chats'),
     where('participants', 'array-contains', uid),
     orderBy('updatedAt', 'desc')
   );
 
-  return onSnapshot(q, (snapshot) => {
+  let usingFallback = false;
+
+  const unsub = onSnapshot(q, (snapshot) => {
     const chats: FirestoreChat[] = [];
     snapshot.forEach((docSnap) => {
       chats.push({ id: docSnap.id, ...docSnap.data() } as FirestoreChat);
     });
+    // Sort by updatedAt desc in case we're using fallback without orderBy
+    chats.sort((a, b) => {
+      const ta = a.updatedAt?.toMillis?.() || 0;
+      const tb = b.updatedAt?.toMillis?.() || 0;
+      return tb - ta;
+    });
     callback(chats);
+  }, async (error) => {
+    // If indexed query fails (missing index), fall back to simple query
+    console.warn('[Zixo] Indexed chats query failed, using fallback:', error?.message);
+    if (!usingFallback) {
+      usingFallback = true;
+      try {
+        const fallbackQ = query(
+          collection(db, 'chats'),
+          where('participants', 'array-contains', uid)
+        );
+        const fallbackUnsub = onSnapshot(fallbackQ, (fallbackSnap) => {
+          const chats: FirestoreChat[] = [];
+          fallbackSnap.forEach((docSnap) => {
+            chats.push({ id: docSnap.id, ...docSnap.data() } as FirestoreChat);
+          });
+          // Sort client-side since we can't use orderBy without the index
+          chats.sort((a, b) => {
+            const ta = a.updatedAt?.toMillis?.() || 0;
+            const tb = b.updatedAt?.toMillis?.() || 0;
+            return tb - ta;
+          });
+          callback(chats);
+        });
+        // Return the fallback unsubscribe instead
+        // Note: we can't easily replace the outer unsub, but the fallback
+        // listener will continue working independently
+        return fallbackUnsub;
+      } catch (fallbackErr) {
+        console.error('[Zixo] Fallback chat query also failed:', fallbackErr);
+      }
+    }
   });
+
+  return unsub;
 }
 
 /**

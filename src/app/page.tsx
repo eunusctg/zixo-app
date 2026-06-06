@@ -6,7 +6,7 @@ import { useZixoStore } from '@/stores/useZixoStore';
 import { useFirebaseBridge } from '@/hooks/useFirebaseBridge';
 import { logoutUser } from '@/services/auth';
 import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead, searchMessages as firestoreSearchMessages, createOrGetChat } from '@/services/firestore';
-import { searchUserByUsername } from '@/services/auth';
+import { searchUserByUsername, searchUsers, getAllUsers } from '@/services/auth';
 import { cn, formatDateGroup } from '@/lib/zixo-utils';
 import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/Onboarding';
 import Avatar from '@/components/zixo/Avatar';
@@ -282,7 +282,7 @@ export default function ZixoApp() {
           return (
             <AudioCallScreen
               remoteUser={activeCall.remoteUser}
-              callStatus={activeCall.status}
+              callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
               duration={activeCall.duration}
               isMuted={activeCall.isMuted}
               isSpeakerOn={activeCall.isSpeakerOn}
@@ -296,7 +296,7 @@ export default function ZixoApp() {
         return (
           <VideoCallScreen
             remoteUser={activeCall.remoteUser}
-            callStatus={activeCall.status}
+            callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
             duration={activeCall.duration}
             isMuted={activeCall.isMuted}
             isVideoOn={activeCall.isVideoOn}
@@ -593,6 +593,22 @@ export default function ZixoApp() {
     );
   };
 
+  const [allUsers, setAllUsers] = useState<ZixoUserProfile[]>([]);
+  const [usersLoaded, setUsersLoaded] = useState(false);
+
+  // Load all users for the contacts screen when navigating to it
+  useEffect(() => {
+    if (currentScreen === 'contacts' && currentUser && !usersLoaded) {
+      getAllUsers(currentUser.uid).then((users) => {
+        setAllUsers(users);
+        setUsersLoaded(true);
+      }).catch(console.error);
+    }
+    if (currentScreen !== 'contacts') {
+      setUsersLoaded(false);
+    }
+  }, [currentScreen, currentUser, usersLoaded]);
+
   const renderContactsScreen = () => {
     if (!currentUser) return null;
     const allContacts = chats
@@ -617,6 +633,7 @@ export default function ZixoApp() {
         <div className="flex-1 overflow-y-auto">
           <ContactsScreen
             contacts={allContacts}
+            allUsers={allUsers}
             onStartChat={async (userId) => {
               // Create or get chat in Firestore, then navigate
               try {
@@ -630,19 +647,17 @@ export default function ZixoApp() {
               }
             }}
             onStartCall={(userId, type) => {
-              const user = allContacts.find((c) => c.uid === userId);
+              // Find user from all loaded profiles or create a minimal profile
+              const user = allUsers.find((c) => c.uid === userId)
+                || chats.flatMap((c) => c.participantProfiles).find((p) => p.uid === userId);
               if (user) startCall(type, user);
             }}
-            onSearchUser={async (username: string) => {
-              // Search by username in Firestore
+            onSearchUsers={async (query: string) => {
               try {
-                const foundUser = await searchUserByUsername(username);
-                if (foundUser) {
-                  const chatId = await createOrGetChat(currentUser.uid, foundUser.uid);
-                  handleChatClick(chatId);
-                }
+                return await searchUsers(query);
               } catch (err) {
                 console.error('[Zixo] User search failed:', err);
+                return [];
               }
             }}
           />

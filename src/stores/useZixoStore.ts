@@ -117,6 +117,8 @@ interface ZixoState {
     localStream: MediaStream | null;
     remoteStream: MediaStream | null;
     callId: string | null;
+    startedAt: number | null; // Track when the call connected for duration
+    isIncoming: boolean; // Track if this was an incoming call
   } | null;
   incomingCall: {
     callId: string;
@@ -171,7 +173,6 @@ interface ZixoState {
   toggleVideo: () => void;
   setCallRemoteStream: (stream: MediaStream) => void;
   setCallLocalStream: (stream: MediaStream) => void;
-  setCallStatus: (status: CallStatus) => void;
   setIncomingCall: (incoming: { callId: string; callerProfile: ZixoUserProfile; callType: 'audio' | 'video'; callData: RTDBCallSignal } | null) => void;
   setSearchQuery: (query: string) => void;
   toggleSearching: () => void;
@@ -318,7 +319,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
   setCallStatus: (status) =>
     set((state) => ({
-      activeCall: state.activeCall ? { ...state.activeCall, status } : null,
+      activeCall: state.activeCall ? { ...state.activeCall, status, startedAt: status === 'connected' && !state.activeCall.startedAt ? Date.now() : state.activeCall.startedAt } : null,
     })),
 
   startCall: (type, user) => {
@@ -354,6 +355,8 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         localStream: null,
         remoteStream: null,
         callId: null,
+        startedAt: null,
+        isIncoming: false,
       },
       currentScreen: type === 'audio' ? 'audio-call' : 'video-call',
     });
@@ -371,9 +374,8 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       })
       .catch((err) => {
         console.error('[Zixo] Failed to start call:', err);
-        webrtc.endCall();
+        try { webrtc.endCall(); } catch {}
         set({ activeCall: null, currentScreen: 'home' });
-        // Show user-friendly error
         if (err?.name === 'NotAllowedError') {
           alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
         } else {
@@ -415,6 +417,8 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         localStream: null,
         remoteStream: null,
         callId,
+        startedAt: null,
+        isIncoming: true,
       },
       incomingCall: null,
       currentScreen: callType === 'audio' ? 'audio-call' : 'video-call',
@@ -426,15 +430,14 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         const localStream = webrtc.getLocalStream();
         set((state) => ({
           activeCall: state.activeCall
-            ? { ...state.activeCall, localStream, status: 'connecting' }
+            ? { ...state.activeCall, localStream, status: 'connecting', startedAt: Date.now() }
             : null,
         }));
       })
       .catch((err) => {
         console.error('[Zixo] Failed to answer call:', err);
-        webrtc.endCall();
+        try { webrtc.endCall(); } catch {}
         set({ activeCall: null, currentScreen: 'home' });
-        // Show user-friendly error
         if (err?.name === 'NotAllowedError') {
           alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
         } else {
@@ -453,7 +456,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   },
 
   endCall: () => {
-    const { activeCall } = get();
+    const { activeCall, currentUser } = get();
 
     // End WebRTC connection
     try {
@@ -463,17 +466,27 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     }
 
     if (activeCall && activeCall.remoteUser) {
+      // Calculate actual duration from startedAt
+      const actualDuration = activeCall.startedAt
+        ? Math.floor((Date.now() - activeCall.startedAt) / 1000)
+        : activeCall.duration;
+
+      // Determine direction based on isIncoming flag
+      const direction: 'incoming' | 'outgoing' | 'missed' = activeCall.isIncoming
+        ? 'incoming'
+        : 'outgoing';
+
       const newCall: CallRecord = {
         id: activeCall.callId || `call-${Date.now()}`,
-        callerId: get().currentUser?.uid || 'user-me',
-        callerName: get().currentUser?.displayName || 'You',
+        callerId: activeCall.isIncoming ? activeCall.remoteUser.uid : (currentUser?.uid || 'user-me'),
+        callerName: activeCall.isIncoming ? activeCall.remoteUser.displayName : (currentUser?.displayName || 'You'),
         callerAvatar: '',
-        receiverId: activeCall.remoteUser.uid,
-        receiverName: activeCall.remoteUser.displayName,
+        receiverId: activeCall.isIncoming ? (currentUser?.uid || 'user-me') : activeCall.remoteUser.uid,
+        receiverName: activeCall.isIncoming ? (currentUser?.displayName || 'You') : activeCall.remoteUser.displayName,
         receiverAvatar: '',
         type: activeCall.type,
-        direction: 'outgoing',
-        duration: activeCall.duration,
+        direction,
+        duration: actualDuration,
         timestamp: Date.now(),
       };
 
