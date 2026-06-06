@@ -67,7 +67,8 @@ export type Screen =
   | 'profile-edit'
   | 'starred-messages'
   | 'media-gallery'
-  | 'new-chat';
+  | 'new-chat'
+  | 'admin-panel';
 
 export type Tab = 'chats' | 'calls' | 'settings';
 

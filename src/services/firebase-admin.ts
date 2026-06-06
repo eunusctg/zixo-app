@@ -469,6 +469,7 @@ export const adminOperations = {
   queryCollection,
   deleteDocument,
   firestoreRequest,
+  firestoreDocumentToJs,
 
   // FCM operations
   sendFCMMessage,

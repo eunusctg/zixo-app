@@ -62,9 +62,10 @@ interface SettingsScreenProps {
   onEditProfile: () => void;
   onLogout: () => void;
   onBack: () => void;
+  onAdminPanel?: () => void;
 }
 
-export default function SettingsScreen({ user, onEditProfile, onLogout, onBack }: SettingsScreenProps) {
+export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, onAdminPanel }: SettingsScreenProps) {
   const [theme, setTheme] = useState<'dark' | 'amoled' | 'system'>('dark');
   const [lastSeen, setLastSeen] = useState<'everyone' | 'contacts' | 'nobody'>('everyone');
   const [onlineStatus, setOnlineStatus] = useState(true);
@@ -82,7 +83,12 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack }
         <div className="bg-zixo-surface rounded-2xl p-4 flex items-center gap-4">
           <Avatar name={user.displayName} uid={user.uid} size="xl" online={user.online} />
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-zixo-text truncate">{user.displayName}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-zixo-text truncate">{user.displayName}</h3>
+              {user.role === 'admin' && (
+                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">ADMIN</span>
+              )}
+            </div>
             <p className="text-sm text-zixo-text-secondary truncate">{user.username}</p>
             <p className="text-xs text-zixo-text-secondary truncate mt-0.5">{user.bio}</p>
           </div>
@@ -195,6 +201,18 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack }
           <Toggle value={true} onToggle={() => {}} />
         </SettingRow>
       </SettingSection>
+
+      {/* Admin */}
+      {user.role === 'admin' && (
+        <SettingSection title="Admin">
+          <SettingRow label="Admin Panel" subtitle="Manage users & roles" onClick={onAdminPanel}>
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/20 text-amber-400">Admin</span>
+              <ChevronRight />
+            </div>
+          </SettingRow>
+        </SettingSection>
+      )}
 
       {/* About */}
       <SettingSection title="About">

@@ -14,6 +14,7 @@ import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToB
 import { AudioCallScreen, VideoCallScreen } from '@/components/zixo/CallScreens';
 import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
+import AdminPanel from '@/components/zixo/AdminPanel';
 import { BottomNav, FAB, SearchBar } from '@/components/zixo/Navigation';
 import { OnlineStatus, EncryptionBadge } from '@/components/zixo/Common';
 import type { ZixoUserProfile } from '@/services/auth';
@@ -329,6 +330,9 @@ export default function ZixoApp() {
       case 'contacts':
         return renderContactsScreen();
 
+      case 'admin-panel':
+        return renderAdminPanelScreen();
+
       case 'settings':
         return renderSettingsScreen();
 
@@ -425,6 +429,7 @@ export default function ZixoApp() {
                   onEditProfile={() => setScreen('profile-edit')}
                   onLogout={handleLogout}
                   onBack={() => setActiveTab('chats')}
+                  onAdminPanel={() => setScreen('admin-panel')}
                 />
               </motion.div>
             )}
@@ -641,6 +646,16 @@ export default function ZixoApp() {
     );
   };
 
+  const renderAdminPanelScreen = () => {
+    if (!currentUser || currentUser.role !== 'admin') return null;
+    return (
+      <AdminPanel
+        currentUser={currentUser}
+        onBack={() => setScreen('settings')}
+      />
+    );
+  };
+
   const renderSettingsScreen = () => {
     if (!currentUser) return null;
     return (
@@ -658,7 +673,7 @@ export default function ZixoApp() {
           <h2 className="text-lg font-semibold font-heading text-zixo-text">Settings</h2>
         </div>
         <div className="flex-1 overflow-y-auto pb-20">
-          <SettingsScreen user={currentUser} onEditProfile={() => {}} onLogout={handleLogout} onBack={() => {}} />
+          <SettingsScreen user={currentUser} onEditProfile={() => {}} onLogout={handleLogout} onBack={() => {}} onAdminPanel={() => setScreen('admin-panel')} />
         </div>
       </div>
     );

@@ -118,6 +118,14 @@ export interface ZixoUserProfile {
   lastSeen: number;
   createdAt: number;
   publicKey?: string;
+  role?: 'admin' | 'user';
+}
+
+/**
+ * Check if a user profile has admin role
+ */
+export function isAdmin(user: ZixoUserProfile | null): boolean {
+  return user?.role === 'admin';
 }
 
 /**
@@ -254,6 +262,7 @@ export async function getUserProfile(uid: string): Promise<ZixoUserProfile | nul
       lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
       createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
       publicKey: data.publicKey,
+      role: data.role || 'user',
     };
   }
   return null;
@@ -313,6 +322,7 @@ export async function searchUserByUsername(username: string): Promise<ZixoUserPr
       online: data.online || false,
       lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
       createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+      role: data.role || 'user',
     };
   }
   return null;

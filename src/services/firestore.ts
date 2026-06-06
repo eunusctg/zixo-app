@@ -493,6 +493,7 @@ export function subscribeToUserProfile(
         online: data.online || false,
         lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
         createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+        role: data.role || 'user',
       });
     } else {
       callback(null);
@@ -523,6 +524,7 @@ export async function getUserProfiles(uids: string[]): Promise<Record<string, Zi
         online: data.online || false,
         lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
         createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
+        role: data.role || 'user',
       };
     }
   });

@@ -360,6 +360,176 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ==================== ADMIN: GRANT ADMIN ROLE ====================
+      case 'grantAdmin': {
+        const { targetUid, requesterUid } = body;
+
+        if (!targetUid || !requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required fields: targetUid, requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can grant admin role' },
+              { status: 403 }
+            );
+          }
+
+          // Grant admin role to target user
+          await adminOperations.setDocument('users', targetUid, { role: 'admin' }, true);
+
+          return NextResponse.json({
+            success: true,
+            message: `Admin role granted to ${targetUid}`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Grant admin error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to grant admin role', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: REVOKE ADMIN ROLE ====================
+      case 'revokeAdmin': {
+        const { targetUid, requesterUid } = body;
+
+        if (!targetUid || !requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required fields: targetUid, requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can revoke admin role' },
+              { status: 403 }
+            );
+          }
+
+          // Revoke admin role from target user
+          await adminOperations.setDocument('users', targetUid, { role: 'user' }, true);
+
+          return NextResponse.json({
+            success: true,
+            message: `Admin role revoked from ${targetUid}`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Revoke admin error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to revoke admin role', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: LIST ALL USERS ====================
+      case 'listUsers': {
+        const { requesterUid } = body;
+
+        if (!requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required field: requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can list all users' },
+              { status: 403 }
+            );
+          }
+
+          // List all users from Firestore (using admin API which bypasses rules)
+          // Use listDocuments instead of query to avoid needing indexes
+          let users: any[] = [];
+          try {
+            const listResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/users?pageSize=100`
+            );
+            if (listResult?.documents) {
+              users = listResult.documents.map((doc: any) => ({
+                id: doc.name.split('/').pop(),
+                ...adminOperations.firestoreDocumentToJs(doc),
+              }));
+            }
+          } catch (listErr: any) {
+            console.warn('[Zixo API] List documents failed, trying query:', listErr.message);
+            // Fallback to query
+            try {
+              users = await adminOperations.queryCollection('users', 'username', 'IS_NOT_NULL', '');
+            } catch (queryErr: any) {
+              console.warn('[Zixo API] Query also failed:', queryErr.message);
+            }
+          }
+          return NextResponse.json({
+            success: true,
+            users: users || [],
+            count: users?.length || 0,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] List users error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to list users', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: DELETE USER ====================
+      case 'adminDeleteUser': {
+        const { targetUid, requesterUid } = body;
+
+        if (!targetUid || !requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required fields: targetUid, requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can delete users' },
+              { status: 403 }
+            );
+          }
+
+          // Delete user data from Firestore and RTDB
+          await adminOperations.deleteDocument('users', targetUid);
+          await rtdbSet(`/presence/${targetUid}`, 'DELETE');
+
+          return NextResponse.json({
+            success: true,
+            message: `User ${targetUid} data deleted`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Admin delete user error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to delete user', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: `Unknown action: ${action}` },
