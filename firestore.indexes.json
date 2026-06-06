@@ -10,7 +10,15 @@
     },
     {
       "collectionGroup": "messages",
-      "queryScope": "COLLECTION_GROUP",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "text", "order": "ASCENDING" },
+        { "fieldPath": "timestamp", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "timestamp", "order": "ASCENDING" }
       ]
