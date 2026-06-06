@@ -2,7 +2,7 @@
 
 ## Session 1: Initial OpenNext Cloudflare Build Fix
 
-**Date:** 2026-06-06  
+**Date:** 2026-06-06
 **Commit:** 1339609
 
 - Fixed `next.config.ts` — removed `serverExternalPackages: ["sharp"]`
@@ -15,7 +15,7 @@
 
 ## Session 2: Switch to @cloudflare/next-on-pages (SUCCESSFUL)
 
-**Date:** 2026-06-06  
+**Date:** 2026-06-06
 **Commit:** b81c5df
 
 ### Problem
@@ -45,12 +45,12 @@ instead of Workers. This adapter properly handles the `new Function()` issue.
 
 ### Deployment Result
 
-**LIVE at https://zixo-app.pages.dev** ✅
+**LIVE at https://zixo-app-cfy.pages.dev** ✅
 
 - Static pages served correctly
 - API routes working:
   - `GET /api` → `{"message":"Hello, world!"}`
-  - `GET /api/zixo` → `{"status":"ok","app":"Zixo","version":"1.0.0","firebase":{"projectId":"zixo-call","region":"us-central1"}}`
+  - `GET /api/zixo` → `{"status":"ok","app":"Zixo","version":"1.0.0","firebase":{"projectId":"zixo-call","region":"us-central1","adminEnabled":false,"rtdbEnabled":true}}`
 - R2 bucket binding configured for `zixocall`
 - Environment variables set for Firebase
 
@@ -76,3 +76,79 @@ Set these environment variables in Cloudflare Pages project settings:
 - Bucket: `zixocall` (Asia-Pacific)
 - Binding: `R2_BUCKET` in wrangler.toml
 - S3 API: `https://704489378006d2bed6a45de180f6679f.r2.cloudflarestorage.com/zixocall`
+
+---
+
+## Session 3: R2 Storage Integration + Firebase Admin JWT Auth
+
+**Date:** 2026-06-06
+**Commit:** 8efdbe1
+
+### Task 1: Cloudflare Pages Deployment + R2 Storage
+
+#### R2 Upload API Route (`src/app/api/upload/route.ts`)
+- Implemented full S3-compatible REST API authentication (AWS Signature V4) using Web Crypto API
+- Supports file upload (POST), presigned URL generation (GET), and file deletion (DELETE)
+- All crypto operations use `crypto.subtle` — fully compatible with Cloudflare Workers edge runtime
+- R2 credentials configured:
+  - Access Key ID: `8438e3f2537b01b1f0978365cef05f61`
+  - Bucket: `zixocall` (APAC)
+  - Endpoint: `https://704489378006d2bed6a45de180f6679f.r2.cloudflarestorage.com`
+
+#### R2 Client Service (`src/services/r2-storage.ts`)
+- Client-side upload with XHR progress tracking
+- `uploadToR2()` — generic file upload with progress
+- `uploadAvatarToR2()` — avatar upload with compression
+- `uploadChatMediaToR2()` — chat media upload (images, voice, files) with compression
+- `getR2DownloadUrl()` — generate presigned download URLs
+- `deleteFromR2()` — delete files from R2
+- `compressImage()` — client-side image compression before upload
+
+#### Deployment
+- Created Cloudflare Pages project `zixo-app` via wrangler CLI
+- Deployed with all 3 API routes: `/api`, `/api/upload`, `/api/zixo`
+- Set secret `R2_SECRET_ACCESS_KEY` via `wrangler pages secret put`
+- Set secret `FIREBASE_PRIVATE_KEY` placeholder via `wrangler pages secret put`
+- Updated `wrangler.toml` with R2 and Firebase env vars
+- **LIVE at https://zixo-app-cfy.pages.dev**
+
+### Task 3: Firebase Admin Private Key + JWT Auth
+
+#### Firebase Admin Service (`src/services/firebase-admin.ts`)
+- Replaced stub `getAccessToken()` with full JWT-based OAuth2 implementation
+- Uses Web Crypto API (`crypto.subtle`) for RS256 JWT signing — Workers-compatible
+- Imports PEM private key via `crypto.subtle.importKey('pkcs8', ...)`
+- Creates signed JWTs and exchanges them for Google OAuth2 access tokens
+- Access tokens cached for 1 hour with automatic refresh
+
+#### Supported Admin Operations
+- **Firestore REST API**: `getDocument`, `setDocument`, `queryCollection`, `deleteDocument`
+  - Full CRUD with proper Firestore value conversion (JS ↔ Firestore format)
+- **FCM v1 API**: `sendFCMMessage` with high-priority Android/iOS config
+  - Falls back to RTDB notification storage if no OAuth2 token available
+- **Custom Auth Tokens**: `createCustomToken` for custom authentication flows
+- **RTDB**: All existing operations continue to work with database secret
+
+#### API Route Updates (`src/app/api/zixo/route.ts`)
+- All actions now try Firestore (with admin credentials) first, fall back to RTDB
+- New `sendPush` action: look up user's FCM token from Firestore, then send push
+- Health check now reports `adminEnabled` and `rtdbEnabled` status
+
+#### Environment Configuration
+- Updated `.env.local` with R2 credentials and Firebase admin setup
+- Updated `.env.example` with complete documentation
+- Set `FIREBASE_PRIVATE_KEY` as Cloudflare secret (user needs to update with real key)
+
+### How to Set Firebase Private Key (Manual Step)
+
+1. Go to [Firebase Console](https://console.firebase.google.com/) > Project Settings > Service Accounts
+2. Click **"Generate New Private Key"** to download the JSON file
+3. Copy the `private_key` value from the JSON
+4. Set it as a Cloudflare secret:
+   ```bash
+   echo "-----BEGIN PRIVATE KEY-----\nMIIEv...\n-----END PRIVATE KEY-----\n" | \
+     CLOUDFLARE_API_TOKEN=your_token npx wrangler pages secret put FIREBASE_PRIVATE_KEY --project-name zixo-app
+   ```
+5. Redeploy: `CLOUDFLARE_API_TOKEN=your_token npx wrangler pages deploy .vercel/output/static --project-name zixo-app`
+
+Once set, the health endpoint will report `"adminEnabled": true` and all Firestore/FCM admin operations will work.
