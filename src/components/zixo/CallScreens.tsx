@@ -69,7 +69,26 @@ export function AudioCallScreen({
   useEffect(() => {
     if (audioRef.current && remoteStream) {
       audioRef.current.srcObject = remoteStream;
-      audioRef.current.play().catch(() => {});
+      // Try to play immediately; if autoplay is blocked, set a flag
+      // to play on next user interaction (required by mobile browsers)
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('[Zixo] Audio autoplay blocked, will retry on user interaction:', err.message);
+          // Try again on any user interaction
+          const retryOnInteraction = () => {
+            if (audioRef.current && audioRef.current.paused) {
+              audioRef.current.play().catch(() => {});
+            }
+            document.removeEventListener('click', retryOnInteraction);
+            document.removeEventListener('touchstart', retryOnInteraction);
+            document.removeEventListener('keydown', retryOnInteraction);
+          };
+          document.addEventListener('click', retryOnInteraction, { once: true });
+          document.addEventListener('touchstart', retryOnInteraction, { once: true });
+          document.addEventListener('keydown', retryOnInteraction, { once: true });
+        });
+      }
     }
   }, [remoteStream]);
 
@@ -453,7 +472,7 @@ export function AudioCallScreen({
         )}
 
         {/* Active Call Controls */}
-        {isActive && !isIncoming && (
+        {isActive && (callStatus !== 'ringing' || !isIncoming) && (
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
@@ -584,6 +603,31 @@ export function AudioCallScreen({
             </div>
           </motion.div>
         )}
+
+        {/* Call Ended - Dismiss button */}
+        {callStatus === 'ended' && (
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+            className="flex items-center justify-center px-8"
+          >
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={onEndCall}
+              className="w-16 h-16 rounded-full flex items-center justify-center"
+              style={{
+                background: 'linear-gradient(135deg, #EA4335, #c62828)',
+                boxShadow: glowRed,
+              }}
+            >
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </motion.button>
+          </motion.div>
+        )}
       </div>
 
       {/* Shimmer animation keyframes */}
@@ -657,7 +701,21 @@ export function VideoCallScreen({
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
-      remoteVideoRef.current.play().catch(() => {});
+      const playPromise = remoteVideoRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('[Zixo] Remote video autoplay blocked:', err.message);
+          const retryOnInteraction = () => {
+            if (remoteVideoRef.current && remoteVideoRef.current.paused) {
+              remoteVideoRef.current.play().catch(() => {});
+            }
+            document.removeEventListener('click', retryOnInteraction);
+            document.removeEventListener('touchstart', retryOnInteraction);
+          };
+          document.addEventListener('click', retryOnInteraction, { once: true });
+          document.addEventListener('touchstart', retryOnInteraction, { once: true });
+        });
+      }
     }
   }, [remoteStream]);
 
@@ -923,6 +981,267 @@ export function VideoCallScreen({
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ==================== INCOMING CALL SCREEN ====================
+
+interface IncomingCallScreenProps {
+  remoteUser: ZixoUserProfile;
+  callType: 'audio' | 'video';
+  onAnswer: () => void;
+  onDecline: () => void;
+}
+
+export function IncomingCallScreen({
+  remoteUser,
+  callType,
+  onAnswer,
+  onDecline,
+}: IncomingCallScreenProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-between overflow-hidden safe-area-top safe-area-bottom"
+      style={{
+        background: callType === 'video'
+          ? 'radial-gradient(ellipse at 50% 30%, #0a1628 0%, #0a0f14 50%, #050809 100%)'
+          : 'radial-gradient(ellipse at 50% 30%, #0d2818 0%, #0a0f14 50%, #050809 100%)',
+      }}
+    >
+      {/* Animated particle field */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {PARTICLES.map((p) => (
+          <motion.div
+            key={p.id}
+            className="absolute rounded-full"
+            style={{
+              left: `${p.x}%`,
+              top: `${p.y}%`,
+              width: p.size,
+              height: p.size,
+              background: callType === 'video'
+                ? `rgba(52, 183, 241, ${p.opacity})`
+                : `rgba(37, 211, 102, ${p.opacity})`,
+              boxShadow: callType === 'video'
+                ? `0 0 ${p.size * 3}px rgba(52, 183, 241, ${p.opacity * 0.5})`
+                : `0 0 ${p.size * 3}px rgba(37, 211, 102, ${p.opacity * 0.5})`,
+            }}
+            animate={{
+              y: [0, -80, -40, -120, 0],
+              x: [0, 20, -20, 10, 0],
+              opacity: [p.opacity, p.opacity * 2, p.opacity, p.opacity * 1.5, p.opacity],
+            }}
+            transition={{
+              duration: p.dur,
+              repeat: Infinity,
+              delay: p.delay,
+              ease: 'easeInOut',
+            }}
+          />
+        ))}
+
+        {/* Large ambient glow orbs */}
+        <motion.div
+          className="absolute rounded-full"
+          style={{
+            width: 400,
+            height: 400,
+            left: '50%',
+            top: '30%',
+            marginLeft: -200,
+            marginTop: -200,
+            background: callType === 'video'
+              ? 'radial-gradient(circle, rgba(52, 183, 241, 0.08), transparent 70%)'
+              : 'radial-gradient(circle, rgba(37, 211, 102, 0.08), transparent 70%)',
+          }}
+          animate={{
+            scale: [1, 1.3, 1],
+            opacity: [0.5, 0.8, 0.5],
+          }}
+          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      </div>
+
+      {/* Top area - Contact Info */}
+      <div className="relative z-10 flex flex-col items-center pt-12 sm:pt-20 pb-4">
+        <motion.div
+          initial={{ opacity: 0, y: -30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 150, damping: 20 }}
+          className="flex flex-col items-center gap-5"
+        >
+          {/* Avatar with pulsing neon rings */}
+          <div className="relative">
+            {/* Pulsing rings for incoming call */}
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0.6 }}
+              animate={{ scale: 2.5, opacity: 0 }}
+              transition={{ duration: 2.5, repeat: Infinity, ease: 'easeOut' }}
+              className="absolute inset-0 rounded-full"
+              style={{
+                border: `2px solid ${callType === 'video' ? 'rgba(52, 183, 241, 0.5)' : 'rgba(37, 211, 102, 0.5)'}`,
+                boxShadow: callType === 'video'
+                  ? '0 0 20px rgba(52, 183, 241, 0.3)'
+                  : '0 0 20px rgba(37, 211, 102, 0.3)',
+              }}
+            />
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0.5 }}
+              animate={{ scale: 2, opacity: 0 }}
+              transition={{ duration: 2.5, repeat: Infinity, ease: 'easeOut', delay: 0.7 }}
+              className="absolute inset-0 rounded-full"
+              style={{
+                border: `2px solid ${callType === 'video' ? 'rgba(52, 183, 241, 0.4)' : 'rgba(37, 211, 102, 0.4)'}`,
+                boxShadow: callType === 'video'
+                  ? '0 0 20px rgba(52, 183, 241, 0.2)'
+                  : '0 0 20px rgba(37, 211, 102, 0.2)',
+              }}
+            />
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0.4 }}
+              animate={{ scale: 1.6, opacity: 0 }}
+              transition={{ duration: 2.5, repeat: Infinity, ease: 'easeOut', delay: 1.4 }}
+              className="absolute inset-0 rounded-full"
+              style={{
+                border: `2px solid ${callType === 'video' ? 'rgba(52, 183, 241, 0.3)' : 'rgba(37, 211, 102, 0.3)'}`,
+              }}
+            />
+
+            <Avatar
+              name={remoteUser.displayName}
+              uid={remoteUser.uid}
+              size="2xl"
+            />
+          </div>
+
+          {/* Name and call type */}
+          <div className="text-center">
+            <motion.h2
+              className="text-2xl font-bold text-white tracking-tight"
+            >
+              {remoteUser.displayName}
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0.5 }}
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ duration: 1.5, repeat: Infinity }}
+              className="text-sm mt-2 font-semibold"
+              style={{
+                color: callType === 'video' ? '#34B7F1' : '#25D366',
+                textShadow: callType === 'video'
+                  ? '0 0 10px rgba(52, 183, 241, 0.5)'
+                  : '0 0 10px rgba(37, 211, 102, 0.5)',
+              }}
+            >
+              {callType === 'video' ? 'Incoming Video Call...' : 'Incoming Audio Call...'}
+            </motion.p>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* Center area - Call type icon */}
+      <div className="relative z-10 flex-1 flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex flex-col items-center gap-4"
+        >
+          {/* Call type indicator */}
+          <motion.div
+            className="w-16 h-16 rounded-full flex items-center justify-center"
+            style={{
+              background: callType === 'video'
+                ? 'rgba(52, 183, 241, 0.15)'
+                : 'rgba(37, 211, 102, 0.15)',
+              border: `1px solid ${callType === 'video' ? 'rgba(52, 183, 241, 0.3)' : 'rgba(37, 211, 102, 0.3)'}`,
+            }}
+          >
+            {callType === 'video' ? (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={callType === 'video' ? '#34B7F1' : '#25D366'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+            ) : (
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={callType === 'video' ? '#34B7F1' : '#25D366'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            )}
+          </motion.div>
+          <p className="text-[10px] text-zixo-text-secondary/50 tracking-[0.2em] uppercase">
+            Swipe up to answer
+          </p>
+        </motion.div>
+      </div>
+
+      {/* Bottom area - Answer/Decline Buttons */}
+      <div className="relative z-10 w-full pb-8 sm:pb-14 pt-4 safe-area-bottom">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+          className="flex items-center justify-center gap-16 px-8"
+        >
+          {/* Decline */}
+          <div className="flex flex-col items-center gap-2">
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={onDecline}
+              className="w-20 h-20 rounded-full flex items-center justify-center relative"
+              style={{
+                background: 'linear-gradient(135deg, #EA4335, #c62828)',
+                boxShadow: glowRed,
+              }}
+            >
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" transform="rotate(135 12 12)" />
+              </svg>
+            </motion.button>
+            <span className="text-[10px] text-zixo-text-secondary tracking-wider uppercase">Decline</span>
+          </div>
+
+          {/* Answer */}
+          <div className="flex flex-col items-center gap-2">
+            <motion.button
+              whileTap={{ scale: 0.85 }}
+              onClick={onAnswer}
+              className="w-20 h-20 rounded-full flex items-center justify-center relative"
+              style={{
+                background: callType === 'video'
+                  ? 'linear-gradient(135deg, #34B7F1, #1a8fc4)'
+                  : 'linear-gradient(135deg, #25D366, #128C7E)',
+                boxShadow: callType === 'video' ? glowBlue : glowGreen,
+              }}
+            >
+              <motion.div
+                animate={{
+                  boxShadow: [
+                    `0 0 0 0 ${callType === 'video' ? 'rgba(52, 183, 241, 0.5)' : 'rgba(37, 211, 102, 0.5)'}`,
+                    `0 0 0 20px ${callType === 'video' ? 'rgba(52, 183, 241, 0)' : 'rgba(37, 211, 102, 0)'}`,
+                  ],
+                }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+                className="absolute inset-0 rounded-full"
+              />
+              <motion.div
+                animate={{
+                  boxShadow: [
+                    `0 0 0 0 ${callType === 'video' ? 'rgba(52, 183, 241, 0.3)' : 'rgba(37, 211, 102, 0.3)'}`,
+                    `0 0 0 35px ${callType === 'video' ? 'rgba(52, 183, 241, 0)' : 'rgba(37, 211, 102, 0)'}`,
+                  ],
+                }}
+                transition={{ duration: 1.5, repeat: Infinity, delay: 0.5 }}
+                className="absolute inset-0 rounded-full"
+              />
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            </motion.button>
+            <span className={`text-[10px] tracking-wider uppercase font-medium ${callType === 'video' ? 'text-zixo-accent' : 'text-zixo-primary'}`}>
+              Answer
+            </span>
+          </div>
+        </motion.div>
+      </div>
     </div>
   );
 }

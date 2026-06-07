@@ -774,12 +774,40 @@ export function useFirebaseBridge() {
                 duration: actualDuration,
                 timestamp: Date.now(),
               };
-              useZixoStore.setState((state: any) => ({
-                callHistory: [newCall, ...state.callHistory],
-                activeCall: null,
+
+              // Show 'ended' status briefly so user sees "Call ended" feedback
+              useZixoStore.setState({
+                activeCall: store.activeCall ? { ...store.activeCall, status: 'ended' as const } : null,
                 incomingCall: null,
-                currentScreen: 'home',
-              }));
+              });
+
+              // Dismiss after a brief delay
+              setTimeout(() => {
+                const currentState = useZixoStore.getState();
+                if (currentState.activeCall?.status === 'ended') {
+                  useZixoStore.setState((state: any) => ({
+                    callHistory: [newCall, ...state.callHistory],
+                    activeCall: null,
+                    incomingCall: null,
+                    currentScreen: 'home',
+                  }));
+                }
+              }, 1500);
+
+              // Save call record to Firestore for call history persistence
+              import('@/services/firestore').then(({ saveCallRecord }) => {
+                saveCallRecord({
+                  callerId: newCall.callerId,
+                  callerName: newCall.callerName,
+                  callerAvatar: newCall.callerAvatar,
+                  receiverId: newCall.receiverId,
+                  receiverName: newCall.receiverName,
+                  receiverAvatar: newCall.receiverAvatar,
+                  type: newCall.type,
+                  direction: newCall.direction,
+                  duration: newCall.duration,
+                }).catch(console.error);
+              }).catch(console.error);
             } else {
               useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
             }

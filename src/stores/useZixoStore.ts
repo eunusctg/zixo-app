@@ -876,12 +876,25 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         timestamp: Date.now(),
       };
 
+      // Show 'ended' status briefly before dismissing, so user sees "Call ended" feedback
       set((state) => ({
-        callHistory: [newCall, ...state.callHistory],
-        activeCall: null,
+        activeCall: state.activeCall ? { ...state.activeCall, status: 'ended' as const } : null,
         incomingCall: null,
-        currentScreen: 'home',
       }));
+
+      // Dismiss after a brief delay
+      setTimeout(() => {
+        const currentState = useZixoStore.getState();
+        // Only dismiss if still in ended state (not re-entered a new call)
+        if (currentState.activeCall?.status === 'ended') {
+          useZixoStore.setState((state: any) => ({
+            callHistory: [newCall, ...state.callHistory],
+            activeCall: null,
+            incomingCall: null,
+            currentScreen: 'home',
+          }));
+        }
+      }, 1500);
 
       // Save call record to Firestore for call history persistence
       import('@/services/firestore').then(({ saveCallRecord }) => {

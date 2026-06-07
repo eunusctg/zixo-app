@@ -179,6 +179,17 @@ export class ZixoWebRTC {
     this.isCaller = false;
     this.callId = callId;
 
+    // If the offer is not in callData yet, wait for it from RTDB
+    // (race condition: caller may not have written the offer yet)
+    let offer = callData.offer;
+    if (!offer) {
+      console.log('[Zixo] Offer not in callData, waiting for it from RTDB...');
+      offer = await this.waitForOffer(callId, 10000); // 10s timeout
+    }
+    if (!offer) {
+      throw new Error('No offer received from caller. The call may have ended.');
+    }
+
     // Get local media stream
     this.localStream = await navigator.mediaDevices.getUserMedia({
       audio: true,
@@ -188,9 +199,7 @@ export class ZixoWebRTC {
     this.peerConnection = this.createPeerConnection();
 
     // Set remote description (offer)
-    if (callData.offer) {
-      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(callData.offer));
-    }
+    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
 
     // Create answer
     const answer = await this.peerConnection.createAnswer();
@@ -204,6 +213,38 @@ export class ZixoWebRTC {
 
     // Listen for remote ICE candidates
     this.listenForSignaling(callId);
+  }
+
+  /**
+   * Wait for the caller's offer to appear in RTDB.
+   * Polls the call node every 300ms until the offer field exists or timeout.
+   */
+  private waitForOffer(callId: string, timeoutMs: number): Promise<RTCSessionDescriptionInit | null> {
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      const poll = async () => {
+        try {
+          const callRef = ref(rtdb, `calls/${callId}`);
+          const snap = await get(callRef);
+          if (snap.exists()) {
+            const data = snap.val();
+            if (data.offer) {
+              resolve(data.offer as RTCSessionDescriptionInit);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('[Zixo] Error polling for offer:', err);
+        }
+        if (Date.now() - startTime > timeoutMs) {
+          console.error('[Zixo] Timed out waiting for offer');
+          resolve(null);
+          return;
+        }
+        setTimeout(poll, 300);
+      };
+      poll();
+    });
   }
 
   /**

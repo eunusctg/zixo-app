@@ -73,3 +73,27 @@ Stage Summary:
 - Call history loading is more robust with retry mechanism
 - Profile edits are preserved for 5 seconds to prevent stale Firestore overwrites
 - New Zixo header logo with signal/broadcast arcs
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix incoming call black screen and properly implement incoming/outgoing call logic
+
+Work Log:
+- Read and analyzed all call-related source files: CallScreens.tsx, useZixoStore.ts, useFirebaseBridge.ts, webrtc.ts, presence.ts, page.tsx
+- Identified root cause of incoming call black screen: incoming-call screen always used AudioCallScreen even for video calls, with remoteStream={null}
+- Created new IncomingCallScreen component that handles both audio and video incoming calls with proper UI (pulsing rings, avatar, call type indicator, Answer/Decline buttons)
+- Fixed WebRTC answerCall to wait for offer from RTDB if not yet available (race condition fix) - added waitForOffer polling method with 10s timeout
+- Fixed audio autoplay policy - added retry on user interaction when autoplay is blocked by mobile browsers
+- Fixed video call remote stream autoplay - same retry mechanism
+- Fixed critical bug: AudioCallScreen active call controls were hidden for incoming calls (condition `isActive && !isIncoming` excluded answered incoming calls from seeing controls)
+- Added proper 'ended' state transition - calls now briefly show "Call ended" before dismissing, with a close button
+- Updated useFirebaseBridge to show 'ended' status for 1.5s before transitioning to home when remote party ends call
+- Deployed to Cloudflare Pages: https://05ccce7a.zixo.pages.dev
+
+Stage Summary:
+- Created IncomingCallScreen component (handles audio + video incoming calls)
+- Fixed WebRTC answerCall offer race condition
+- Fixed audio/video autoplay on mobile browsers
+- Fixed active call controls not showing for answered incoming calls
+- Added proper call end UX with brief "Call ended" feedback
+- All changes deployed to production

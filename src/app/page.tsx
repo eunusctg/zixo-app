@@ -13,7 +13,7 @@ import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/On
 import Avatar from '@/components/zixo/Avatar';
 import { ChatList } from '@/components/zixo/ChatList';
 import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToBottomFAB, RecordingOverlay } from '@/components/zixo/ChatScreen';
-import { AudioCallScreen, VideoCallScreen, PermissionModal } from '@/components/zixo/CallScreens';
+import { AudioCallScreen, VideoCallScreen, IncomingCallScreen, PermissionModal } from '@/components/zixo/CallScreens';
 import { GroupAudioCallScreen, GroupVideoCallScreen, IncomingGroupCallScreen } from '@/components/zixo/GroupCallScreens';
 import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
@@ -562,19 +562,11 @@ export default function ZixoApp() {
       case 'incoming-call':
         if (!incomingCall) return null;
         return (
-          <AudioCallScreen
+          <IncomingCallScreen
             remoteUser={incomingCall.callerProfile}
-            callStatus="ringing"
-            duration={0}
-            isMuted={false}
-            isSpeakerOn={true}
-            onToggleMute={() => {}}
-            onToggleSpeaker={() => {}}
-            onEndCall={rejectCall}
+            callType={incomingCall.callType}
             onAnswer={handleAnswerCall}
             onDecline={rejectCall}
-            isIncoming={true}
-            remoteStream={null}
           />
         );
 
