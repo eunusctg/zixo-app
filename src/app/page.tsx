@@ -979,6 +979,7 @@ export default function ZixoApp() {
 
   const renderContactsScreen = () => {
     if (!currentUser) return null;
+    try {
     const allContacts = chats
       .map((c) => c.participantProfiles.find((p) => p.uid !== currentUser.uid))
       .filter(Boolean) as ZixoUserProfile[];
@@ -1066,6 +1067,25 @@ export default function ZixoApp() {
         </div>
       </div>
     );
+    } catch (err) {
+      console.error('[Zixo] Contacts screen render error:', err);
+      return (
+        <div className="h-screen flex flex-col bg-zixo-bg">
+          <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34]">
+            <motion.button whileTap={{ scale: 0.9 }} onClick={() => setScreen('home')} className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text transition-colors">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
+            </motion.button>
+            <h2 className="text-lg font-semibold text-zixo-text">Find People</h2>
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center px-6">
+              <p className="text-zixo-text-secondary text-sm mb-4">Failed to load contacts</p>
+              <button onClick={() => setScreen('home')} className="px-4 py-2 rounded-lg gradient-primary text-white text-sm">Go Back</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
   };
 
   const renderAdminPanelScreen = () => {

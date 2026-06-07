@@ -1,13 +1,18 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn, formatCallDuration, formatCallTime } from '@/lib/zixo-utils';
 import type { CallRecord } from '@/stores/useZixoStore';
 import type { ZixoUserProfile } from '@/services/auth';
-import { QRCodeSVG } from 'qrcode.react';
-import jsQR from 'jsqr';
+
+// Dynamic import to avoid SSR issues on Cloudflare Pages / edge runtime
+const QRCodeSVG = dynamic(
+  () => import('qrcode.react').then((mod) => ({ default: mod.QRCodeSVG })),
+  { ssr: false, loading: () => <div className="w-[180px] h-[180px] bg-white/10 rounded-xl" /> }
+);
 
 // ==================== HAVERSINE FORMULA ====================
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -216,6 +221,12 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scanAnimFrameRef = useRef<number | null>(null);
+  const jsqrRef = useRef<any>(null);
+
+  // Dynamically load jsQR at mount time (avoids SSR issues on Cloudflare Pages)
+  useEffect(() => {
+    import('jsqr').then((mod) => { jsqrRef.current = mod.default; }).catch(console.error);
+  }, []);
 
   // Nearby state
   const [showNearby, setShowNearby] = useState(false);
@@ -313,7 +324,11 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
           if (!ctx) return;
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          if (!jsqrRef.current) {
+            scanAnimFrameRef.current = requestAnimationFrame(scanFrame);
+            return;
+          }
+          const code = jsqrRef.current(imageData.data, imageData.width, imageData.height, {
             inversionAttempts: 'dontInvert',
           });
           if (code && code.data) {
