@@ -562,18 +562,39 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          // Verify requester is admin — try admin API first, fall back to Firestore client
+          let isAdmin = false;
+          try {
+            const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+            if (requesterProfile && requesterProfile.role === 'admin') {
+              isAdmin = true;
+            }
+          } catch (adminErr: any) {
+            console.warn('[Zixo API] Admin verification via REST API failed:', adminErr.message);
+            // Fallback: verify admin using Firestore client SDK
+            try {
+              const { getDoc, doc } = await import('firebase/firestore');
+              const { db } = await import('@/services/firebase');
+              const docSnap = await getDoc(doc(db, 'users', requesterUid));
+              if (docSnap.exists() && docSnap.data().role === 'admin') {
+                isAdmin = true;
+              }
+            } catch (clientErr: any) {
+              console.warn('[Zixo API] Admin verification via client SDK also failed:', clientErr.message);
+            }
+          }
+
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can list all users' },
               { status: 403 }
             );
           }
 
-          // List all users from Firestore (using admin API which bypasses rules)
-          // Use listDocuments instead of query to avoid needing indexes
+          // List all users — try multiple methods
           let users: any[] = [];
+
+          // Method 1: Firestore REST API listDocuments
           try {
             const listResult = await adminOperations.firestoreRequest(
               'GET',
@@ -586,14 +607,58 @@ export async function POST(request: NextRequest) {
               }));
             }
           } catch (listErr: any) {
-            console.warn('[Zixo API] List documents failed, trying query:', listErr.message);
-            // Fallback to query
+            console.warn('[Zixo API] List documents failed:', listErr.message);
+
+            // Method 2: Firestore REST API runQuery (using a query that works)
             try {
-              users = await adminOperations.queryCollection('users', 'username', 'IS_NOT_NULL', '');
+              const queryBody = {
+                structuredQuery: {
+                  from: [{ collectionId: 'users' }],
+                  limit: 100,
+                },
+              };
+              const queryResult = await adminOperations.firestoreRequest(
+                'POST',
+                '/documents:runQuery',
+                queryBody
+              );
+              if (Array.isArray(queryResult)) {
+                users = queryResult
+                  .filter((item: any) => item.document)
+                  .map((item: any) => ({
+                    id: item.document.name.split('/').pop(),
+                    ...adminOperations.firestoreDocumentToJs(item.document),
+                  }));
+              }
             } catch (queryErr: any) {
               console.warn('[Zixo API] Query also failed:', queryErr.message);
+
+              // Method 3: Firestore client SDK (works without admin token)
+              try {
+                const { collection, getDocs, limit: firestoreLimit } = await import('firebase/firestore');
+                const { db } = await import('@/services/firebase');
+                const snapshot = await getDocs(collection(db, 'users'));
+                snapshot.forEach((docSnap: any) => {
+                  const data = docSnap.data();
+                  users.push({
+                    id: docSnap.id,
+                    uid: data.uid || docSnap.id,
+                    displayName: data.displayName || '',
+                    email: data.email || '',
+                    username: data.username || '',
+                    bio: data.bio || '',
+                    avatar: data.avatar || '',
+                    online: data.online || false,
+                    role: data.role || 'user',
+                    zixoNumber: data.zixoNumber || '',
+                  });
+                });
+              } catch (sdkErr: any) {
+                console.warn('[Zixo API] Client SDK also failed:', sdkErr.message);
+              }
             }
           }
+
           return NextResponse.json({
             success: true,
             users: users || [],

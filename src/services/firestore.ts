@@ -538,6 +538,8 @@ export function subscribeToUserProfile(
         lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
         createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
         role: data.role || 'user',
+        zixoNumber: data.zixoNumber || '',
+        phoneNumber: data.phoneNumber || '',
       });
     } else {
       callback(null);

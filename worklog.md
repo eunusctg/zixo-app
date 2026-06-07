@@ -146,3 +146,38 @@ Stage Summary:
 - Group calls now also respect the one-time-grant behavior (previously always showed modal)
 - Cache invalidation on NotAllowedError ensures the permission modal shows again if something goes wrong
 - All 4 call types (1:1 audio, 1:1 video, group audio, group video) now use consistent permission flow
+
+---
+Task ID: 2
+Agent: main
+Task: Fix auto-logout, profile picture not showing on home screen, and admin panel "Failed to list users"
+
+Work Log:
+- Investigated all three issues by reading source code across 6+ files
+- Identified root causes for each issue and implemented fixes
+
+1. AUTO-LOGOUT FIX (useFirebaseBridge.ts):
+   - Root cause: When onAuthStateChanged fires with null (during token refresh, network interruption), the bridge did nothing — didn't call logout() or preserve state. This created a zombie state where Firestore reads failed.
+   - Fix: Added debounced logout — when Firebase reports null, wait 5 seconds before checking if auth is truly gone. If Firebase restores within that window, no logout occurs. Added nullAuthTimerRef for the debounce timer with proper cleanup on unmount.
+
+2. PROFILE PICTURE FIX (multiple files):
+   - Root cause 1: subscribeToUserProfile in firestore.ts was missing zixoNumber and phoneNumber fields, causing incomplete profile data on every Firestore snapshot update.
+   - Root cause 2: The merge logic { ...profile, ...current } gave current priority, but Firestore should be the source of truth for most fields (especially avatar after profile edits). When Firestore had empty avatar but local had Google photoURL, the empty avatar from Firestore could overwrite.
+   - Fix A: Added zixoNumber and phoneNumber to subscribeToUserProfile callback in firestore.ts.
+   - Fix B: Changed merge strategy to { ...current, ...profile } with smart preservation: Firestore takes priority for non-empty fields, but local avatar is preserved if Firestore avatar is empty.
+   - Fix C: When getUserProfile returns a profile without avatar but Firebase Auth has photoURL (Google login), automatically save the photoURL as the avatar in Firestore so it persists.
+
+3. ADMIN PANEL FIX (api/zixo/route.ts):
+   - Root cause: The listUsers endpoint relied solely on the Firestore REST API with admin OAuth2 token. If FIREBASE_PRIVATE_KEY was misconfigured or the token exchange failed, the entire operation failed with no fallback.
+   - Fix: Added 3-tier fallback for admin verification and user listing:
+     - Method 1: Firestore REST API listDocuments (fastest, bypasses security rules)
+     - Method 2: Firestore REST API runQuery with simple collection scan (no WHERE clause)
+     - Method 3: Firestore client SDK (works without admin token, uses Firebase client credentials)
+   - Also added fallback for admin verification using Firestore client SDK if REST API fails.
+
+- Built and deployed to Cloudflare Pages: https://015be830.zixo.pages.dev
+
+Stage Summary:
+- Auto-logout: Now debounced with 5-second window — prevents false logouts during token refresh/network issues
+- Profile picture: Google photoURL now auto-saved to Firestore; merge logic properly preserves avatars
+- Admin panel: 3-tier fallback ensures user listing works even when admin REST API is unavailable

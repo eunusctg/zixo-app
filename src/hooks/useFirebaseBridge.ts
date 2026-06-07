@@ -125,9 +125,48 @@ export function useFirebaseBridge() {
   // Use useRef for the callback to avoid stale closures and dependency issues
   const authCallbackRef = useRef<(firebaseUser: any) => void>();
 
+  // Debounce timer for null auth state — prevents false logouts during token refresh
+  const nullAuthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   authCallbackRef.current = async (firebaseUser: any) => {
     setFirebaseReady();
     console.log('[Zixo Bridge] Auth state changed:', firebaseUser ? `uid=${firebaseUser.uid}` : 'null');
+
+    // When Firebase reports null (which can happen briefly during token refresh or
+    // network interruption), debounce before logging out. This prevents false logouts.
+    if (!firebaseUser) {
+      const store = useZixoStore.getState();
+      // Only trigger logout if we were previously authenticated
+      if (store.isAuthenticated && store.currentUser) {
+        console.log('[Zixo Bridge] Auth state is null, debouncing before potential logout...');
+        // Clear any existing timer
+        if (nullAuthTimerRef.current) clearTimeout(nullAuthTimerRef.current);
+        // Wait 5 seconds — if Firebase restores auth within this window, no logout
+        nullAuthTimerRef.current = setTimeout(async () => {
+          const currentStore = useZixoStore.getState();
+          // Check if Firebase still reports null by trying to get the current user
+          try {
+            const { auth } = await import('@/services/firebase');
+            if (!auth.currentUser) {
+              console.log('[Zixo Bridge] Firebase still null after debounce, logging out');
+              currentStore.logout();
+            } else {
+              console.log('[Zixo Bridge] Firebase auth restored during debounce, staying logged in');
+            }
+          } catch {
+            // If we can't check, don't logout — prefer staying in over false logout
+            console.log('[Zixo Bridge] Cannot verify auth state, staying logged in');
+          }
+        }, 5000);
+      }
+      return;
+    }
+
+    // Firebase user is valid — clear any pending logout timer
+    if (nullAuthTimerRef.current) {
+      clearTimeout(nullAuthTimerRef.current);
+      nullAuthTimerRef.current = null;
+    }
 
     if (firebaseUser) {
       try {
@@ -149,6 +188,19 @@ export function useFirebaseBridge() {
             return;
           }
           console.log('[Zixo Bridge] User profile loaded, logging in');
+          // If Firestore profile has no avatar but Firebase Auth has a photoURL, use it
+          if (!profile.avatar && firebaseUser.photoURL) {
+            profile.avatar = firebaseUser.photoURL;
+            // Also save it to Firestore so it persists
+            try {
+              const { setDoc: setDocFn } = await import('firebase/firestore');
+              const { db } = await import('@/services/firebase');
+              const { doc: docFn } = await import('firebase/firestore');
+              await setDocFn(docFn(db, 'users', firebaseUser.uid), { avatar: firebaseUser.photoURL }, { merge: true });
+            } catch (e) {
+              console.warn('[Zixo Bridge] Failed to save Google photoURL to Firestore:', e);
+            }
+          }
           login(profile);
           initFCM(firebaseUser.uid).catch(console.error);
 
@@ -238,7 +290,14 @@ export function useFirebaseBridge() {
       authCallbackRef.current?.(firebaseUser);
     });
 
-    return () => unsub();
+    return () => {
+      unsub();
+      // Clean up any pending logout timer
+      if (nullAuthTimerRef.current) {
+        clearTimeout(nullAuthTimerRef.current);
+        nullAuthTimerRef.current = null;
+      }
+    };
   }, []);
 
   // 2. Set up RTDB presence when authenticated
@@ -760,7 +819,19 @@ export function useFirebaseBridge() {
           const store = useZixoStore.getState();
           const current = store.currentUser;
           if (current && current.uid === profile.uid) {
-            const merged = { ...profile, ...current };
+            // Merge strategy: Firestore profile takes priority for most fields
+            // (it's the source of truth for displayName, bio, avatar, online, etc.)
+            // but preserve local-only fields that Firestore might not have.
+            // Important: if Firestore has a non-empty avatar, use it (it's the latest).
+            // If Firestore has empty avatar but local has one, preserve local.
+            const merged = {
+              ...current,     // Start with all current fields
+              ...profile,     // Overlay with Firestore fields (source of truth)
+              // Preserve local avatar if Firestore avatar is empty but local has one
+              ...(profile.avatar ? {} : current.avatar ? { avatar: current.avatar } : {}),
+              // Preserve local zixoNumber if Firestore is missing it
+              ...(profile.zixoNumber ? {} : current.zixoNumber ? { zixoNumber: current.zixoNumber } : {}),
+            };
             const changed = Object.keys(profile).some(
               (key) => (current as any)[key] !== (merged as any)[key]
             );
