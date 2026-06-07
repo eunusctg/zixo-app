@@ -92,6 +92,10 @@ export function useFirebaseBridge() {
     addUnsub,
   } = useZixoStore();
 
+  // Reactive selector for activeCall.callId — ensures the component re-renders
+  // when a call starts/ends, so the call status subscription (section 8b) is properly established.
+  const activeCallId = useZixoStore((s) => s.activeCall?.callId);
+
   const initialized = useRef(false);
   const chatUnsubs = useRef<Record<string, () => void>>({});
   const presenceUnsubs = useRef<Record<string, () => void>>({});
@@ -229,6 +233,10 @@ export function useFirebaseBridge() {
             const profiles = await getUserProfiles(Array.from(allUids));
             setUserProfiles(profiles);
 
+            // Use the latest currentUser from the store as the source of truth
+            // for the current user's profile (avoids stale Firestore reads)
+            const latestCurrentUser = useZixoStore.getState().currentUser;
+
             const uiChats = firestoreChats.map((fc) => {
               const myUnread = fc.unreadCount?.[currentUser.uid] || 0;
 
@@ -254,7 +262,13 @@ export function useFirebaseBridge() {
                 id: fc.id,
                 participants: fc.participants,
                 participantProfiles: fc.participants.map(
-                  (uid) => profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now(), role: 'user' as const, zixoNumber: '' }
+                  (uid) => {
+                    // Always use latest store currentUser for self (source of truth)
+                    if (latestCurrentUser && uid === latestCurrentUser.uid) {
+                      return latestCurrentUser;
+                    }
+                    return profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now(), role: 'user' as const, zixoNumber: '' };
+                  }
                 ),
                 lastMessage: fc.lastMessage
                   ? {
@@ -512,18 +526,25 @@ export function useFirebaseBridge() {
   }, [isAuthenticated, currentUser, setIncomingCall]);
 
   // 8b. Watch active call status - end call on receiver side when caller hangs up
+  // Uses the reactive `activeCallId` selector so this effect re-runs whenever
+  // activeCall.callId changes (call started / ended). The previous implementation
+  // used `useZixoStore.getState().activeCall?.callId` as a dependency, which is a
+  // non-reactive snapshot and never caused the effect to re-run.
   useEffect(() => {
-    const { activeCall } = useZixoStore.getState();
-    if (!activeCall?.callId || !isAuthenticated) return;
+    if (!activeCallId || !isAuthenticated) return;
 
     let unsub: (() => void) | null = null;
 
     try {
-      unsub = subscribeToCallStatus(activeCall.callId, (callData) => {
+      unsub = subscribeToCallStatus(activeCallId, (callData) => {
         if (!callData) {
-          // Call data was removed or status is 'ended' - remote party hung up
+          // Call data was removed or status is 'ended' — remote party hung up
           console.log('[Zixo] Active call ended by remote party');
-          useZixoStore.getState().endCall();
+          const store = useZixoStore.getState();
+          // Guard: only end the call if it's still the same call (avoids double-cleanup)
+          if (store.activeCall?.callId === activeCallId) {
+            store.endCall();
+          }
         }
       });
     } catch (error) {
@@ -533,7 +554,7 @@ export function useFirebaseBridge() {
     return () => {
       if (unsub) unsub();
     };
-  }, [useZixoStore.getState().activeCall?.callId, isAuthenticated]);
+  }, [activeCallId, isAuthenticated]);
 
   // 9. Listen for incoming group calls (RTDB) - show incoming group call screen
   useEffect(() => {

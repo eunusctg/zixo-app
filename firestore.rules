@@ -42,6 +42,14 @@ service cloud.firestore {
       allow delete: if isAuth() && request.auth.uid == resource.data.uid;
     }
 
+    // Zixo Number mappings - anyone authenticated can read
+    match /zixoNumbers/{zixoNumber} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isAuth();
+    }
+
     // ==================== CHATS ====================
 
     // Chat collection - users can only access chats they participate in

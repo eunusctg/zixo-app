@@ -404,9 +404,18 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     })),
 
   setUserProfiles: (profiles) =>
-    set((state) => ({
-      userProfiles: { ...state.userProfiles, ...profiles },
-    })),
+    set((state) => {
+      const merged = { ...state.userProfiles, ...profiles };
+      // Always preserve the current user's profile from currentUser (source of truth)
+      // so that stale Firestore reads don't overwrite an in-flight profile update
+      if (state.currentUser) {
+        merged[state.currentUser.uid] = {
+          ...merged[state.currentUser.uid],
+          ...state.currentUser,
+        };
+      }
+      return { userProfiles: merged };
+    }),
 
   setCallHistory: (calls) => set({ callHistory: calls }),
 

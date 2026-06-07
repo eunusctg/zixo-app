@@ -569,6 +569,8 @@ export async function getUserProfiles(uids: string[]): Promise<Record<string, Zi
         lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
         createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
         role: data.role || 'user',
+        phoneNumber: data.phoneNumber || '',
+        zixoNumber: data.zixoNumber || '',
       };
     }
   });

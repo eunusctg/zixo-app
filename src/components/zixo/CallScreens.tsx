@@ -712,7 +712,7 @@ export function VideoCallScreen({
                 className="absolute inset-0 rounded-full"
                 style={{ border: '1px solid rgba(37, 211, 102, 0.2)' }}
               />
-              <Avatar name={remoteUser.displayName} uid={remoteUser.uid} size="2xl" className="mx-auto breathe" />
+              <Avatar name={remoteUser.displayName} uid={remoteUser.uid} avatarUrl={remoteUser.avatar} size="2xl" className="mx-auto breathe" />
             </div>
             <motion.h3
               className="text-xl font-semibold text-white mt-6"

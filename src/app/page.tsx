@@ -674,7 +674,7 @@ export default function ZixoApp() {
                   <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
               </motion.button>
-              <Avatar name={currentUser.displayName} uid={currentUser.uid} size="sm" online={currentUser.online} />
+              <Avatar name={currentUser.displayName} uid={currentUser.uid} avatarUrl={currentUser.avatar} size="sm" online={currentUser.online} />
             </div>
           </div>
 
@@ -846,7 +846,7 @@ export default function ZixoApp() {
               </svg>
             </motion.button>
 
-            <Avatar name={otherUser.displayName} uid={otherUser.uid} size="sm" online={otherUser.online} />
+            <Avatar name={otherUser.displayName} uid={otherUser.uid} avatarUrl={otherUser.avatar} size="sm" online={otherUser.online} />
 
             <div className="flex-1 min-w-0">
               <h3 className="text-sm font-semibold text-zixo-text truncate">{otherUser.displayName}</h3>
@@ -1105,7 +1105,7 @@ export default function ZixoApp() {
         <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34] safe-area-top">
           <motion.button
             whileTap={{ scale: 0.9 }}
-            onClick={() => setActiveTab('settings')}
+            onClick={() => setScreen('home')}
             className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text transition-colors"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1115,7 +1115,7 @@ export default function ZixoApp() {
           <h2 className="text-lg font-semibold font-heading text-zixo-text">Settings</h2>
         </div>
         <div className="flex-1 overflow-y-auto pb-20">
-          <SettingsScreen user={currentUser} onEditProfile={() => setScreen('profile-edit')} onLogout={handleLogout} onBack={() => {}} onAdminPanel={() => setScreen('admin-panel')} />
+          <SettingsScreen user={currentUser} onEditProfile={() => setScreen('profile-edit')} onLogout={handleLogout} onBack={() => setScreen('home')} onAdminPanel={() => setScreen('admin-panel')} />
         </div>
       </div>
     );
@@ -1232,7 +1232,7 @@ export default function ZixoApp() {
                           : 'hover:bg-white/5'
                       )}
                     >
-                      <Avatar name={user.displayName} uid={user.uid} size="sm" online={user.online} />
+                      <Avatar name={user.displayName} uid={user.uid} avatarUrl={user.avatar} size="sm" online={user.online} />
                       <span className="flex-1 text-left text-sm text-white truncate">{user.displayName}</span>
                       {selectedParticipants.has(user.uid) && (
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#25D366" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

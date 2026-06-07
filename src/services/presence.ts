@@ -247,11 +247,21 @@ export function updateCallSignal(callId: string, updates: Partial<RTDBCallSignal
 }
 
 /**
- * End a call (remove signal)
+ * End a call signal.
+ * Uses a two-phase approach for reliability:
+ *   1. Set status to 'ended' — this immediately triggers the receiver's
+ *      subscribeToCallStatus callback (which watches for status === 'ended').
+ *   2. Remove the call data after a short delay so both parties have time to
+ *      process the 'ended' status before the node is deleted.
+ * This mirrors the pattern already used by endGroupCallSignal.
  */
 export function endCallSignal(callId: string): void {
   const callRef = ref(rtdb, `calls/${callId}`);
-  remove(callRef);
+  update(callRef, { status: 'ended' });
+  // Remove after a short delay to let the receiver see the 'ended' status
+  setTimeout(() => {
+    remove(callRef);
+  }, 3000);
 }
 
 /**

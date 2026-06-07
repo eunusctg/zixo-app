@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { getInitials, getAvatarColor, cn } from '@/lib/zixo-utils';
 
 interface AvatarProps {
@@ -8,6 +8,7 @@ interface AvatarProps {
   uid: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   online?: boolean;
+  avatarUrl?: string;
   className?: string;
 }
 
@@ -27,9 +28,19 @@ const onlineSizeMap = {
   '2xl': 'w-5 h-5 border-3',
 };
 
-export default function Avatar({ name, uid, size = 'md', online, className }: AvatarProps) {
+export default function Avatar({ name, uid, size = 'md', online, avatarUrl, className }: AvatarProps) {
   const initials = getInitials(name);
   const gradient = getAvatarColor(uid);
+  const [imgError, setImgError] = useState(false);
+  const [lastAvatarUrl, setLastAvatarUrl] = useState(avatarUrl);
+
+  // Reset error state when avatarUrl changes (e.g. user uploads new avatar)
+  if (avatarUrl !== lastAvatarUrl) {
+    setLastAvatarUrl(avatarUrl);
+    setImgError(false);
+  }
+
+  const showImage = avatarUrl && !imgError;
 
   return (
     <div className={cn('relative inline-flex shrink-0', className)}>
@@ -40,7 +51,16 @@ export default function Avatar({ name, uid, size = 'md', online, className }: Av
           sizeMap[size]
         )}
       >
-        {initials}
+        {showImage ? (
+          <img
+            src={avatarUrl}
+            alt={name}
+            className="w-full h-full object-cover"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          initials
+        )}
       </div>
       {online !== undefined && (
         <div

@@ -29,7 +29,7 @@ export default function ChatListItem({ chat, currentUserId, onClick, onQuickCall
       onClick={() => onClick(chat.id)}
       className="flex items-center gap-3 px-4 py-3 hover:bg-zixo-surface/50 active:bg-zixo-surface/80 transition-colors cursor-pointer"
     >
-      <Avatar name={name} uid={otherUser.uid} size="lg" online={isOnline} />
+      <Avatar name={name} uid={otherUser.uid} avatarUrl={otherUser.avatar} size="lg" online={isOnline} />
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">

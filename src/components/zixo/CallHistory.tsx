@@ -103,6 +103,7 @@ export function CallHistoryList({ calls, currentUserId, onCallBack }: CallHistor
             const isMissed = call.direction === 'missed';
             const otherName = call.callerId === currentUserId ? call.receiverName : call.callerName;
             const otherUid = call.callerId === currentUserId ? call.receiverId : call.callerId;
+            const otherAvatar = call.callerId === currentUserId ? call.receiverAvatar : call.callerAvatar;
 
             return (
               <motion.div
@@ -112,7 +113,7 @@ export function CallHistoryList({ calls, currentUserId, onCallBack }: CallHistor
                 transition={{ delay: i * 0.03 }}
                 className="flex items-center gap-3 px-4 py-3 hover:bg-zixo-surface/50 transition-colors"
               >
-                <Avatar name={otherName} uid={otherUid} size="lg" />
+                <Avatar name={otherName} uid={otherUid} avatarUrl={otherAvatar} size="lg" />
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -536,7 +537,7 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
       className="flex items-center gap-3 px-4 py-3 hover:bg-zixo-surface/50 transition-colors cursor-pointer"
       onClick={() => onStartChat(contact.uid)}
     >
-      <Avatar name={contact.displayName} uid={contact.uid} size="lg" online={contact.online} />
+      <Avatar name={contact.displayName} uid={contact.uid} avatarUrl={contact.avatar} size="lg" online={contact.online} />
 
       <div className="flex-1 min-w-0">
         <h4 className="text-sm font-medium text-zixo-text truncate">{contact.displayName}</h4>

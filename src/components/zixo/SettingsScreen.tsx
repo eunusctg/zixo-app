@@ -82,7 +82,7 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
         className="p-4"
       >
         <div className="bg-zixo-surface rounded-2xl p-4 flex items-center gap-4">
-          <Avatar name={user.displayName} uid={user.uid} size="xl" online={user.online} />
+          <Avatar name={user.displayName} uid={user.uid} avatarUrl={user.avatar} size="xl" online={user.online} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="font-semibold text-zixo-text truncate">{user.displayName}</h3>
