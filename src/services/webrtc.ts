@@ -580,6 +580,8 @@ export function getWebRTC(): ZixoWebRTC {
 
 export function resetWebRTC(): void {
   if (webrtcInstance) {
+    // Synchronous cleanup: stop tracks, close peer connection, unsubscribe
+    // Don't await — endCall's async parts (RTDB cleanup) are non-blocking
     webrtcInstance.endCall();
   }
   webrtcInstance = new ZixoWebRTC();

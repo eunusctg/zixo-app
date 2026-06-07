@@ -617,6 +617,11 @@ export function useFirebaseBridge() {
   }, [isAuthenticated, currentUser, setCallHistory]);
 
   // 8. Listen for incoming calls (RTDB) - show incoming call screen with enhanced notifications
+  // Track the last processed incoming callId to prevent duplicate processing
+  // (subscribeToIncomingCalls uses onValue which fires on EVERY data change in the
+  // calls node, including ICE candidate additions and offer/answer updates)
+  const lastProcessedIncomingCallId = useRef<string | null>(null);
+
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -626,9 +631,27 @@ export function useFirebaseBridge() {
       unsub = subscribeToIncomingCalls(currentUser.uid, async (calls) => {
         if (calls.length > 0) {
           const call = calls[0];
-          console.log('[Zixo] Incoming call:', call);
 
+          // DEDUPLICATION: Skip if we've already processed this exact callId
+          // This prevents re-showing the incoming call screen, re-playing
+          // the ringing sound, and re-sending notifications every time
+          // the calls node data changes (ICE candidates, etc.)
           const store = useZixoStore.getState();
+
+          // If we already have this call as our incomingCall, skip re-processing
+          if (store.incomingCall?.callId === call.id) {
+            return; // Already showing this incoming call
+          }
+
+          // If we're in an active call, skip incoming call processing
+          if (store.activeCall) {
+            return;
+          }
+
+          // New incoming call - process it
+          console.log('[Zixo] New incoming call:', call.id);
+          lastProcessedIncomingCallId.current = call.id;
+
           let callerProfile = store.userProfiles[call.data.callerId];
 
           if (!callerProfile) {
@@ -651,6 +674,13 @@ export function useFirebaseBridge() {
                 zixoNumber: '',
               };
             }
+          }
+
+          // Re-check state after async profile fetch (user may have answered/declined already)
+          const currentState = useZixoStore.getState();
+          if (currentState.incomingCall || currentState.activeCall) {
+            console.log('[Zixo] Skipping incoming call - already in call or already showing incoming');
+            return;
           }
 
           if (callerProfile) {
@@ -694,6 +724,7 @@ export function useFirebaseBridge() {
           const store = useZixoStore.getState();
           if (store.incomingCall && !store.activeCall) {
             console.log('[Zixo] Incoming call was cancelled by caller, clearing incomingCall');
+            lastProcessedIncomingCallId.current = null;
             setIncomingCall(null);
             if (store.currentScreen === 'incoming-call') {
               useZixoStore.getState().setScreen('home');
@@ -739,78 +770,117 @@ export function useFirebaseBridge() {
     };
   }, [incomingCallId, isAuthenticated, setIncomingCall]);
 
-  // 8c. Watch active call status
+  // 8c. Watch active call status — detect when the remote party ends the call.
+  // Uses a debounce to avoid false triggers from brief RTDB data flickers.
+  const activeCallEndDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (!activeCallId || !isAuthenticated) return;
+
+    // Clear any pending debounce from a previous call
+    if (activeCallEndDebounceRef.current) {
+      clearTimeout(activeCallEndDebounceRef.current);
+      activeCallEndDebounceRef.current = null;
+    }
 
     let unsub: (() => void) | null = null;
 
     try {
       unsub = subscribeToCallStatus(activeCallId, (callData) => {
         if (!callData) {
-          console.log('[Zixo] Active call ended by remote party');
-          const store = useZixoStore.getState();
-          if (store.activeCall?.callId === activeCallId) {
-            try { getWebRTC().endCall(); } catch {}
-            const call = store.activeCall;
-            if (call?.remoteUser) {
-              const currentUser = store.currentUser;
-              const actualDuration = call.startedAt
-                ? Math.floor((Date.now() - call.startedAt) / 1000)
-                : call.duration;
-              const direction: 'incoming' | 'outgoing' | 'missed' = call.isIncoming
-                ? 'incoming'
-                : 'outgoing';
-              const newCall: any = {
-                id: call.callId || `call-${Date.now()}`,
-                callerId: call.isIncoming ? call.remoteUser.uid : (currentUser?.uid || 'user-me'),
-                callerName: call.isIncoming ? call.remoteUser.displayName : (currentUser?.displayName || 'You'),
-                callerAvatar: '',
-                receiverId: call.isIncoming ? (currentUser?.uid || 'user-me') : call.remoteUser.uid,
-                receiverName: call.isIncoming ? (currentUser?.displayName || 'You') : call.remoteUser.displayName,
-                receiverAvatar: '',
-                type: call.type,
-                direction,
-                duration: actualDuration,
-                timestamp: Date.now(),
-              };
+          // The call data was deleted or status changed to 'ended'.
+          // Debounce: wait 1.5 seconds before actually ending the call locally.
+          // This prevents false call ends from brief RTDB data flickers
+          // (e.g., during ICE restart or signaling updates).
+          if (activeCallEndDebounceRef.current) return; // Already debouncing
 
-              // Show 'ended' status briefly so user sees "Call ended" feedback
-              useZixoStore.setState({
-                activeCall: store.activeCall ? { ...store.activeCall, status: 'ended' as const } : null,
-                incomingCall: null,
-              });
+          activeCallEndDebounceRef.current = setTimeout(() => {
+            activeCallEndDebounceRef.current = null;
 
-              // Dismiss after a brief delay
-              setTimeout(() => {
-                const currentState = useZixoStore.getState();
-                if (currentState.activeCall?.status === 'ended') {
-                  useZixoStore.setState((state: any) => ({
-                    callHistory: [newCall, ...state.callHistory],
-                    activeCall: null,
-                    incomingCall: null,
-                    currentScreen: 'home',
-                  }));
-                }
-              }, 1500);
-
-              // Save call record to Firestore for call history persistence
-              import('@/services/firestore').then(({ saveCallRecord }) => {
-                saveCallRecord({
-                  callerId: newCall.callerId,
-                  callerName: newCall.callerName,
-                  callerAvatar: newCall.callerAvatar,
-                  receiverId: newCall.receiverId,
-                  receiverName: newCall.receiverName,
-                  receiverAvatar: newCall.receiverAvatar,
-                  type: newCall.type,
-                  direction: newCall.direction,
-                  duration: newCall.duration,
-                }).catch(console.error);
-              }).catch(console.error);
-            } else {
-              useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
+            // Re-check: if the call is still active, verify RTDB is still null
+            const store = useZixoStore.getState();
+            if (!store.activeCall || store.activeCall.callId !== activeCallId) {
+              return; // Call already ended locally
             }
+
+            // Check if the call status is still indicating ended
+            // (the call may have been re-established by ICE restart)
+            if (store.activeCall.status === 'connected') {
+              // Still connected — don't end. The RTDB data may have been
+              // briefly unavailable. Re-subscribe to verify.
+              console.log('[Zixo] Active call still connected, ignoring brief RTDB null');
+              return;
+            }
+
+            console.log('[Zixo] Active call ended by remote party (debounced)');
+            if (store.activeCall?.callId === activeCallId) {
+              try { getWebRTC().endCall(); } catch {}
+              const call = store.activeCall;
+              if (call?.remoteUser) {
+                const currentUser = store.currentUser;
+                const actualDuration = call.startedAt
+                  ? Math.floor((Date.now() - call.startedAt) / 1000)
+                  : call.duration;
+                const direction: 'incoming' | 'outgoing' | 'missed' = call.isIncoming
+                  ? 'incoming'
+                  : 'outgoing';
+                const newCall: any = {
+                  id: call.callId || `call-${Date.now()}`,
+                  callerId: call.isIncoming ? call.remoteUser.uid : (currentUser?.uid || 'user-me'),
+                  callerName: call.isIncoming ? call.remoteUser.displayName : (currentUser?.displayName || 'You'),
+                  callerAvatar: '',
+                  receiverId: call.isIncoming ? (currentUser?.uid || 'user-me') : call.remoteUser.uid,
+                  receiverName: call.isIncoming ? (currentUser?.displayName || 'You') : call.remoteUser.displayName,
+                  receiverAvatar: '',
+                  type: call.type,
+                  direction,
+                  duration: actualDuration,
+                  timestamp: Date.now(),
+                };
+
+                // Show 'ended' status briefly so user sees "Call ended" feedback
+                useZixoStore.setState({
+                  activeCall: store.activeCall ? { ...store.activeCall, status: 'ended' as const } : null,
+                  incomingCall: null,
+                });
+
+                // Dismiss after a brief delay
+                setTimeout(() => {
+                  const currentState = useZixoStore.getState();
+                  if (currentState.activeCall?.status === 'ended') {
+                    useZixoStore.setState((state: any) => ({
+                      callHistory: [newCall, ...state.callHistory],
+                      activeCall: null,
+                      incomingCall: null,
+                      currentScreen: 'home',
+                    }));
+                  }
+                }, 1500);
+
+                // Save call record to Firestore for call history persistence
+                import('@/services/firestore').then(({ saveCallRecord }) => {
+                  saveCallRecord({
+                    callerId: newCall.callerId,
+                    callerName: newCall.callerName,
+                    callerAvatar: newCall.callerAvatar,
+                    receiverId: newCall.receiverId,
+                    receiverName: newCall.receiverName,
+                    receiverAvatar: newCall.receiverAvatar,
+                    type: newCall.type,
+                    direction: newCall.direction,
+                    duration: newCall.duration,
+                  }).catch(console.error);
+                }).catch(console.error);
+              } else {
+                useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
+              }
+            }
+          }, 1500);
+        } else {
+          // Call data exists — cancel any pending end-call debounce
+          if (activeCallEndDebounceRef.current) {
+            clearTimeout(activeCallEndDebounceRef.current);
+            activeCallEndDebounceRef.current = null;
           }
         }
       });
@@ -820,6 +890,10 @@ export function useFirebaseBridge() {
 
     return () => {
       if (unsub) unsub();
+      if (activeCallEndDebounceRef.current) {
+        clearTimeout(activeCallEndDebounceRef.current);
+        activeCallEndDebounceRef.current = null;
+      }
     };
   }, [activeCallId, isAuthenticated]);
 

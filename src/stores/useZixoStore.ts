@@ -651,7 +651,12 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       };
 
       webrtc.onConnectionStateChange = (connState) => {
-        if (connState === 'disconnected' || connState === 'failed') {
+        console.log('[Zixo] WebRTC connection state:', connState);
+        // Only end call on 'failed' state. 'disconnected' can be temporary
+        // during ICE renegotiation and the connection may recover.
+        // The subscribeToCallStatus listener handles detecting when the
+        // remote party actually ends the call.
+        if (connState === 'failed') {
           useZixoStore.getState().endCall();
         }
       };
@@ -754,7 +759,10 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       };
 
       webrtc.onConnectionStateChange = (connState) => {
-        if (connState === 'disconnected' || connState === 'failed') {
+        console.log('[Zixo] WebRTC connection state (answer):', connState);
+        // Only end call on 'failed' state. 'disconnected' can be temporary
+        // during ICE renegotiation and the connection may recover.
+        if (connState === 'failed') {
           useZixoStore.getState().endCall();
         }
       };
@@ -792,7 +800,12 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         .catch((err: any) => {
           console.error('[Zixo] Failed to answer call:', err);
           try { webrtc.endCall(); } catch {}
-          useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
+          // If we had an incoming call, signal rejection to the caller
+          const currentIncoming = useZixoStore.getState().incomingCall;
+          if (currentIncoming) {
+            try { endCallSignal(currentIncoming.callId); } catch {}
+          }
+          useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
           if (err?.name === 'NotAllowedError') {
             try { localStorage.removeItem('zixo_call_permissions'); } catch {}
             try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
