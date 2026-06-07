@@ -181,3 +181,33 @@ Stage Summary:
 - Auto-logout: Now debounced with 5-second window — prevents false logouts during token refresh/network issues
 - Profile picture: Google photoURL now auto-saved to Firestore; merge logic properly preserves avatars
 - Admin panel: 3-tier fallback ensures user listing works even when admin REST API is unavailable
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix Admin Panel "Failed to list users", auto-logout, profile picture, and New Chat errors
+
+Work Log:
+- Diagnosed root cause: getDocument() throws on 404, breaking admin verification flow
+- Diagnosed: Client SDK fallback (firebase/firestore import) doesn't work in Edge runtime
+- Fixed getDocument() to return null for 404 instead of throwing
+- Created verifyAdmin() helper with Firestore REST + RTDB dual fallback
+- Added RTDB fallback for all admin actions (listUsers, getAppStats, assignZixoNumbers, broadcastNotification)
+- Added discoverUsers API endpoint (no admin role required) for New Chat screen
+- Removed broken client SDK fallback from Edge runtime API route
+- Enhanced getAllUsers() with API fallback using discoverUsers endpoint
+- Fixed auto-logout: increased debounce from 5s to 10s, added double-check before logout
+- Fixed login() to not reset screen to 'home' on re-auth (prevents token refresh from kicking users out of current screen)
+- Fixed AdminPanel apiCall to handle HTTP errors before JSON parse
+- Fixed ContactsScreen searchResults.length undefined error
+- Discovered custom domain (zixocall.eu.cc) is in "pending" state with "CNAME record not set" - secrets not injected for that domain
+- Production URL (zixo.pages.dev) works correctly with all fixes
+
+Stage Summary:
+- Admin Panel listUsers API: WORKING (6 users returned)
+- discoverUsers API: WORKING (no admin required)
+- getAppStats API: WORKING (6 users, 3 chats, 4 calls)
+- Auto-logout fix: 10s debounce + safe default (stay logged in if can't verify)
+- New Chat: Fixed undefined .length error + added API fallback
+- Custom domain: zixocall.eu.cc has DNS misconfiguration (CNAME not set properly) - user needs to fix from Cloudflare dashboard
+- Deployed to: https://zixo.pages.dev (production)
