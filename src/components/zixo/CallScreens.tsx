@@ -6,6 +6,25 @@ import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
 import type { ZixoUserProfile } from '@/services/auth';
 
+// ==================== SHARED STYLES ====================
+
+const glowGreen = '0 0 40px rgba(37, 211, 102, 0.6), 0 0 80px rgba(37, 211, 102, 0.3), 0 0 120px rgba(37, 211, 102, 0.1)';
+const glowRed = '0 0 40px rgba(234, 67, 53, 0.6), 0 0 80px rgba(234, 67, 53, 0.3), 0 0 120px rgba(234, 67, 53, 0.1)';
+const glowBlue = '0 0 40px rgba(52, 183, 241, 0.6), 0 0 80px rgba(52, 183, 241, 0.3), 0 0 120px rgba(52, 183, 241, 0.1)';
+
+// Floating particles for background
+const PARTICLES = Array.from({ length: 30 }, (_, i) => ({
+  id: i,
+  x: Math.random() * 100,
+  y: Math.random() * 100,
+  size: Math.random() * 4 + 1,
+  dur: Math.random() * 6 + 4,
+  delay: Math.random() * 3,
+  opacity: Math.random() * 0.3 + 0.05,
+}));
+
+// ==================== AUDIO CALL SCREEN ====================
+
 interface AudioCallScreenProps {
   remoteUser: ZixoUserProfile;
   callStatus: 'ringing' | 'connecting' | 'connected' | 'ended';
@@ -20,14 +39,6 @@ interface AudioCallScreenProps {
   isIncoming?: boolean;
   remoteStream?: MediaStream | null;
 }
-
-// Floating orb data for background
-const ORBS = [
-  { x: 20, y: 30, size: 200, color: 'rgba(37, 211, 102, 0.08)', dur: 8 },
-  { x: 70, y: 60, size: 280, color: 'rgba(18, 140, 126, 0.06)', dur: 12 },
-  { x: 40, y: 80, size: 160, color: 'rgba(52, 183, 241, 0.05)', dur: 10 },
-  { x: 80, y: 20, size: 220, color: 'rgba(37, 211, 102, 0.04)', dur: 14 },
-];
 
 export function AudioCallScreen({
   remoteUser,
@@ -73,49 +84,72 @@ export function AudioCallScreen({
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-between overflow-hidden"
       style={{
-        background: 'linear-gradient(180deg, #0a0f14 0%, #111B21 30%, #0d1a14 70%, #0a0f14 100%)',
+        background: 'radial-gradient(ellipse at 50% 30%, #0d2818 0%, #0a0f14 50%, #050809 100%)',
       }}
     >
       {/* Hidden audio element */}
       <audio ref={audioRef} autoPlay playsInline />
 
-      {/* Animated background orbs */}
+      {/* Animated particle field */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {ORBS.map((orb, i) => (
+        {PARTICLES.map((p) => (
           <motion.div
-            key={i}
+            key={p.id}
             className="absolute rounded-full"
             style={{
-              left: `${orb.x}%`,
-              top: `${orb.y}%`,
-              width: orb.size,
-              height: orb.size,
-              background: `radial-gradient(circle, ${orb.color}, transparent 70%)`,
-              marginLeft: -orb.size / 2,
-              marginTop: -orb.size / 2,
+              left: `${p.x}%`,
+              top: `${p.y}%`,
+              width: p.size,
+              height: p.size,
+              background: `rgba(37, 211, 102, ${p.opacity})`,
+              boxShadow: `0 0 ${p.size * 3}px rgba(37, 211, 102, ${p.opacity * 0.5})`,
             }}
             animate={{
-              x: [0, 30, -20, 10, 0],
-              y: [0, -40, 20, -10, 0],
-              scale: [1, 1.2, 0.9, 1.1, 1],
+              y: [0, -80, -40, -120, 0],
+              x: [0, 20, -20, 10, 0],
+              opacity: [p.opacity, p.opacity * 2, p.opacity, p.opacity * 1.5, p.opacity],
             }}
             transition={{
-              duration: orb.dur,
+              duration: p.dur,
               repeat: Infinity,
+              delay: p.delay,
               ease: 'easeInOut',
             }}
           />
         ))}
 
-        {/* Mesh grid lines for depth */}
-        <div className="absolute inset-0 opacity-[0.03]"
+        {/* Large ambient glow orbs */}
+        <motion.div
+          className="absolute rounded-full"
           style={{
-            backgroundImage: `
-              linear-gradient(rgba(37, 211, 102, 0.5) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(37, 211, 102, 0.5) 1px, transparent 1px)
-            `,
-            backgroundSize: '60px 60px',
+            width: 400,
+            height: 400,
+            left: '50%',
+            top: '30%',
+            marginLeft: -200,
+            marginTop: -200,
+            background: 'radial-gradient(circle, rgba(37, 211, 102, 0.08), transparent 70%)',
           }}
+          animate={{
+            scale: [1, 1.3, 1],
+            opacity: [0.5, 0.8, 0.5],
+          }}
+          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="absolute rounded-full"
+          style={{
+            width: 300,
+            height: 300,
+            left: '20%',
+            top: '60%',
+            background: 'radial-gradient(circle, rgba(52, 183, 241, 0.06), transparent 70%)',
+          }}
+          animate={{
+            scale: [1.2, 1, 1.2],
+            opacity: [0.3, 0.6, 0.3],
+          }}
+          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
         />
       </div>
 
@@ -127,47 +161,64 @@ export function AudioCallScreen({
           transition={{ type: 'spring', stiffness: 150, damping: 20 }}
           className="flex flex-col items-center gap-5"
         >
-          {/* Avatar with rings */}
+          {/* Avatar with neon rings */}
           <div className="relative">
-            {/* Outer pulsing rings */}
+            {/* Pulsing neon rings for ringing state */}
             <AnimatePresence>
               {(callStatus === 'ringing' || callStatus === 'connecting') && (
                 <>
                   <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 2.2, opacity: 0 }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
-                    className="absolute inset-0 rounded-full border border-zixo-primary/40"
+                    initial={{ scale: 0.8, opacity: 0.6 }}
+                    animate={{ scale: 2.5, opacity: 0 }}
+                    transition={{ duration: 2.5, repeat: Infinity, ease: 'easeOut' }}
+                    className="absolute inset-0 rounded-full"
+                    style={{ border: '2px solid rgba(37, 211, 102, 0.5)', boxShadow: '0 0 20px rgba(37, 211, 102, 0.3)' }}
                   />
                   <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1.8, opacity: 0 }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 0.6 }}
-                    className="absolute inset-0 rounded-full border border-zixo-secondary/30"
+                    initial={{ scale: 0.8, opacity: 0.5 }}
+                    animate={{ scale: 2, opacity: 0 }}
+                    transition={{ duration: 2.5, repeat: Infinity, ease: 'easeOut', delay: 0.7 }}
+                    className="absolute inset-0 rounded-full"
+                    style={{ border: '2px solid rgba(52, 183, 241, 0.4)', boxShadow: '0 0 20px rgba(52, 183, 241, 0.2)' }}
                   />
                   <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1.5, opacity: 0 }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 1.2 }}
-                    className="absolute inset-0 rounded-full border border-zixo-accent/20"
+                    initial={{ scale: 0.8, opacity: 0.4 }}
+                    animate={{ scale: 1.6, opacity: 0 }}
+                    transition={{ duration: 2.5, repeat: Infinity, ease: 'easeOut', delay: 1.4 }}
+                    className="absolute inset-0 rounded-full"
+                    style={{ border: '2px solid rgba(37, 211, 102, 0.3)', boxShadow: '0 0 15px rgba(37, 211, 102, 0.15)' }}
                   />
                 </>
               )}
             </AnimatePresence>
 
-            {/* Glowing halo when connected */}
+            {/* Breathing glow halo when connected */}
             {callStatus === 'connected' && (
-              <motion.div
-                animate={{
-                  boxShadow: [
-                    '0 0 30px rgba(37, 211, 102, 0.3), 0 0 60px rgba(37, 211, 102, 0.1)',
-                    '0 0 50px rgba(37, 211, 102, 0.5), 0 0 100px rgba(37, 211, 102, 0.2)',
-                    '0 0 30px rgba(37, 211, 102, 0.3), 0 0 60px rgba(37, 211, 102, 0.1)',
-                  ],
-                }}
-                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                className="absolute inset-0 rounded-full"
-              />
+              <>
+                <motion.div
+                  animate={{
+                    boxShadow: [
+                      '0 0 30px rgba(37, 211, 102, 0.4), 0 0 60px rgba(37, 211, 102, 0.15)',
+                      '0 0 60px rgba(37, 211, 102, 0.6), 0 0 120px rgba(37, 211, 102, 0.25), 0 0 180px rgba(37, 211, 102, 0.1)',
+                      '0 0 30px rgba(37, 211, 102, 0.4), 0 0 60px rgba(37, 211, 102, 0.15)',
+                    ],
+                  }}
+                  transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  className="absolute inset-0 rounded-full"
+                />
+                <motion.div
+                  className="absolute -inset-2 rounded-full"
+                  animate={{
+                    boxShadow: [
+                      '0 0 15px rgba(37, 211, 102, 0.2), inset 0 0 15px rgba(37, 211, 102, 0.05)',
+                      '0 0 25px rgba(37, 211, 102, 0.35), inset 0 0 25px rgba(37, 211, 102, 0.1)',
+                      '0 0 15px rgba(37, 211, 102, 0.2), inset 0 0 15px rgba(37, 211, 102, 0.05)',
+                    ],
+                  }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  style={{ border: '1px solid rgba(37, 211, 102, 0.15)' }}
+                />
+              </>
             )}
 
             <Avatar
@@ -180,7 +231,19 @@ export function AudioCallScreen({
 
           {/* Name and status */}
           <div className="text-center">
-            <h2 className="text-2xl font-bold text-white tracking-tight">{remoteUser.displayName}</h2>
+            <motion.h2
+              className="text-2xl font-bold text-white tracking-tight"
+              animate={callStatus === 'connected' ? {
+                textShadow: [
+                  '0 0 10px rgba(37, 211, 102, 0)',
+                  '0 0 20px rgba(37, 211, 102, 0.3)',
+                  '0 0 10px rgba(37, 211, 102, 0)',
+                ],
+              } : {}}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              {remoteUser.displayName}
+            </motion.h2>
             <div className="mt-2 h-7 flex items-center justify-center">
               <AnimatePresence mode="wait">
                 {callStatus === 'ringing' && !isIncoming && (
@@ -189,7 +252,7 @@ export function AudioCallScreen({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="text-sm text-zixo-text-secondary flex items-center gap-1"
+                    className="text-sm text-zixo-primary/80 flex items-center gap-1"
                   >
                     Calling<span className="animate-pulse">.</span><span className="animate-pulse delay-100">.</span><span className="animate-pulse delay-200">.</span>
                   </motion.p>
@@ -197,10 +260,11 @@ export function AudioCallScreen({
                 {callStatus === 'ringing' && isIncoming && (
                   <motion.p
                     key="incoming"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="text-sm text-zixo-primary font-medium"
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: [0.5, 1, 0.5], scale: 1 }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                    className="text-sm text-zixo-primary font-semibold"
+                    style={{ textShadow: '0 0 10px rgba(37, 211, 102, 0.5)' }}
                   >
                     Incoming call...
                   </motion.p>
@@ -212,6 +276,7 @@ export function AudioCallScreen({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     className="text-sm text-zixo-accent"
+                    style={{ textShadow: '0 0 10px rgba(52, 183, 241, 0.4)' }}
                   >
                     Connecting...
                   </motion.p>
@@ -222,11 +287,13 @@ export function AudioCallScreen({
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0 }}
-                    className="text-sm font-mono tracking-widest"
+                    className="text-sm font-mono tracking-[0.3em] font-bold"
                     style={{
-                      background: 'linear-gradient(90deg, #25D366, #34B7F1)',
+                      background: 'linear-gradient(90deg, #25D366, #34B7F1, #25D366)',
+                      backgroundSize: '200% 100%',
                       WebkitBackgroundClip: 'text',
                       WebkitTextFillColor: 'transparent',
+                      animation: 'shimmer 2s linear infinite',
                     }}
                   >
                     {formatDuration(callDuration)}
@@ -239,6 +306,7 @@ export function AudioCallScreen({
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     className="text-sm text-zixo-error"
+                    style={{ textShadow: '0 0 10px rgba(234, 67, 53, 0.4)' }}
                   >
                     Call ended
                   </motion.p>
@@ -249,7 +317,7 @@ export function AudioCallScreen({
         </motion.div>
       </div>
 
-      {/* Center area - Waveform */}
+      {/* Center area - Waveform / Signal */}
       <div className="relative z-10 flex-1 flex items-center justify-center">
         {callStatus === 'connected' && (
           <motion.div
@@ -258,28 +326,28 @@ export function AudioCallScreen({
             className="relative"
           >
             {/* Circular waveform visualization */}
-            <div className="flex items-end justify-center gap-[3px] h-16">
-              {Array.from({ length: 40 }).map((_, i) => (
+            <div className="flex items-end justify-center gap-[3px] h-20">
+              {Array.from({ length: 48 }).map((_, i) => (
                 <motion.div
                   key={i}
                   className="w-[3px] rounded-full"
                   style={{
                     background: `linear-gradient(180deg, #25D366, #34B7F1)`,
-                    boxShadow: isMuted ? 'none' : `0 0 6px rgba(37, 211, 102, 0.4)`,
+                    boxShadow: isMuted ? 'none' : `0 0 8px rgba(37, 211, 102, 0.5), 0 0 16px rgba(37, 211, 102, 0.2)`,
                   }}
                   animate={{
-                    height: isMuted ? 4 : [4, Math.random() * 36 + 8, 4],
+                    height: isMuted ? 4 : [4, Math.random() * 48 + 10, 4],
                   }}
                   transition={{
-                    duration: 0.4 + Math.random() * 0.6,
+                    duration: 0.3 + Math.random() * 0.7,
                     repeat: Infinity,
-                    delay: i * 0.025,
+                    delay: i * 0.02,
                     ease: 'easeInOut',
                   }}
                 />
               ))}
             </div>
-            <p className="text-[10px] text-zixo-text-secondary/50 text-center mt-3 tracking-wider uppercase">
+            <p className="text-[10px] text-zixo-text-secondary/50 text-center mt-3 tracking-[0.2em] uppercase">
               {isMuted ? 'Microphone Off' : 'Live Audio'}
             </p>
           </motion.div>
@@ -291,17 +359,18 @@ export function AudioCallScreen({
             animate={{ opacity: 1 }}
             className="flex flex-col items-center gap-4"
           >
-            {/* Animated signal waves */}
+            {/* Animated signal waves with glow */}
             {[0, 1, 2].map((i) => (
               <motion.div
                 key={i}
-                className="w-16 h-1 rounded-full"
+                className="w-20 h-1.5 rounded-full"
                 style={{
                   background: 'linear-gradient(90deg, transparent, #25D366, transparent)',
+                  boxShadow: '0 0 10px rgba(37, 211, 102, 0.4)',
                 }}
                 animate={{
                   scaleX: [0.3, 1, 0.3],
-                  opacity: [0.2, 0.6, 0.2],
+                  opacity: [0.2, 0.7, 0.2],
                 }}
                 transition={{
                   duration: 1.5,
@@ -333,7 +402,7 @@ export function AudioCallScreen({
                 className="w-20 h-20 rounded-full flex items-center justify-center relative"
                 style={{
                   background: 'linear-gradient(135deg, #EA4335, #c62828)',
-                  boxShadow: '0 0 30px rgba(234, 67, 53, 0.5), 0 0 60px rgba(234, 67, 53, 0.2)',
+                  boxShadow: glowRed,
                 }}
               >
                 <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
@@ -351,24 +420,34 @@ export function AudioCallScreen({
                 className="w-20 h-20 rounded-full flex items-center justify-center relative"
                 style={{
                   background: 'linear-gradient(135deg, #25D366, #128C7E)',
-                  boxShadow: '0 0 30px rgba(37, 211, 102, 0.5), 0 0 60px rgba(37, 211, 102, 0.2)',
+                  boxShadow: glowGreen,
                 }}
               >
                 <motion.div
                   animate={{
                     boxShadow: [
-                      '0 0 0 0 rgba(37, 211, 102, 0.4)',
-                      '0 0 0 15px rgba(37, 211, 102, 0)',
+                      '0 0 0 0 rgba(37, 211, 102, 0.5)',
+                      '0 0 0 20px rgba(37, 211, 102, 0)',
                     ],
                   }}
                   transition={{ duration: 1.5, repeat: Infinity }}
+                  className="absolute inset-0 rounded-full"
+                />
+                <motion.div
+                  animate={{
+                    boxShadow: [
+                      '0 0 0 0 rgba(37, 211, 102, 0.3)',
+                      '0 0 0 35px rgba(37, 211, 102, 0)',
+                    ],
+                  }}
+                  transition={{ duration: 1.5, repeat: Infinity, delay: 0.5 }}
                   className="absolute inset-0 rounded-full"
                 />
                 <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
                 </svg>
               </motion.button>
-              <span className="text-[10px] text-zixo-text-secondary tracking-wider uppercase">Answer</span>
+              <span className="text-[10px] text-zixo-primary tracking-wider uppercase font-medium">Answer</span>
             </div>
           </motion.div>
         )}
@@ -381,15 +460,29 @@ export function AudioCallScreen({
             transition={{ type: 'spring', stiffness: 200, damping: 20 }}
             className="px-8"
           >
-            {/* Glass panel */}
-            <div className="rounded-3xl p-6"
+            {/* Glass panel with glow border */}
+            <div className="rounded-3xl p-6 relative overflow-hidden"
               style={{
                 background: 'rgba(17, 27, 33, 0.7)',
                 backdropFilter: 'blur(24px)',
                 WebkitBackdropFilter: 'blur(24px)',
-                border: '1px solid rgba(37, 211, 102, 0.1)',
+                border: '1px solid rgba(37, 211, 102, 0.15)',
+                boxShadow: '0 0 30px rgba(37, 211, 102, 0.05), inset 0 0 30px rgba(37, 211, 102, 0.02)',
               }}
             >
+              {/* Animated border glow */}
+              <motion.div
+                className="absolute inset-0 rounded-3xl pointer-events-none"
+                animate={{
+                  boxShadow: [
+                    'inset 0 0 20px rgba(37, 211, 102, 0.03), 0 0 20px rgba(37, 211, 102, 0.03)',
+                    'inset 0 0 40px rgba(37, 211, 102, 0.08), 0 0 40px rgba(37, 211, 102, 0.08)',
+                    'inset 0 0 20px rgba(37, 211, 102, 0.03), 0 0 20px rgba(37, 211, 102, 0.03)',
+                  ],
+                }}
+                transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+              />
+
               <div className="flex items-center justify-center gap-5">
                 {/* Mute */}
                 <div className="flex flex-col items-center gap-2">
@@ -404,7 +497,7 @@ export function AudioCallScreen({
                     )}
                     style={isMuted ? {
                       background: 'rgba(234, 67, 53, 0.15)',
-                      boxShadow: '0 0 20px rgba(234, 67, 53, 0.2)',
+                      boxShadow: '0 0 20px rgba(234, 67, 53, 0.25)',
                     } : {}}
                   >
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isMuted ? '#EA4335' : '#E9EDEF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -447,7 +540,7 @@ export function AudioCallScreen({
                     )}
                     style={isSpeakerOn ? {
                       background: 'rgba(18, 140, 126, 0.15)',
-                      boxShadow: '0 0 20px rgba(18, 140, 126, 0.2)',
+                      boxShadow: '0 0 20px rgba(18, 140, 126, 0.25)',
                     } : {}}
                   >
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isSpeakerOn ? '#128C7E' : '#E9EDEF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -478,7 +571,7 @@ export function AudioCallScreen({
                     className="w-16 h-16 rounded-full flex items-center justify-center"
                     style={{
                       background: 'linear-gradient(135deg, #EA4335, #c62828)',
-                      boxShadow: '0 0 30px rgba(234, 67, 53, 0.5), 0 0 60px rgba(234, 67, 53, 0.2)',
+                      boxShadow: glowRed,
                     }}
                   >
                     <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
@@ -492,9 +585,19 @@ export function AudioCallScreen({
           </motion.div>
         )}
       </div>
+
+      {/* Shimmer animation keyframes */}
+      <style jsx global>{`
+        @keyframes shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+      `}</style>
     </div>
   );
 }
+
+// ==================== VIDEO CALL SCREEN ====================
 
 interface VideoCallScreenProps {
   remoteUser: ZixoUserProfile;
@@ -580,30 +683,46 @@ export function VideoCallScreen({
       ) : (
         <div className="absolute inset-0 flex items-center justify-center"
           style={{
-            background: 'radial-gradient(ellipse at center, #1a2a22 0%, #0a0f14 70%, #000 100%)',
+            background: 'radial-gradient(ellipse at center, #0d2818 0%, #0a0f14 60%, #000 100%)',
           }}
         >
-          {/* Animated rings for connecting state */}
+          {/* Animated neon rings for connecting state */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="text-center"
           >
             <div className="relative inline-block">
-              {/* Pulsing rings */}
+              {/* Multi-layer pulsing rings */}
               <motion.div
-                animate={{ scale: [1, 1.6, 1], opacity: [0.3, 0, 0.3] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="absolute inset-0 rounded-full border border-zixo-primary/40"
+                animate={{ scale: [1, 1.8, 1], opacity: [0.4, 0, 0.4] }}
+                transition={{ duration: 2.5, repeat: Infinity }}
+                className="absolute inset-0 rounded-full"
+                style={{ border: '2px solid rgba(37, 211, 102, 0.5)', boxShadow: '0 0 30px rgba(37, 211, 102, 0.3)' }}
               />
               <motion.div
-                animate={{ scale: [1, 1.4, 1], opacity: [0.2, 0, 0.2] }}
-                transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
-                className="absolute inset-0 rounded-full border border-zixo-secondary/30"
+                animate={{ scale: [1, 1.5, 1], opacity: [0.3, 0, 0.3] }}
+                transition={{ duration: 2.5, repeat: Infinity, delay: 0.6 }}
+                className="absolute inset-0 rounded-full"
+                style={{ border: '2px solid rgba(52, 183, 241, 0.4)', boxShadow: '0 0 25px rgba(52, 183, 241, 0.2)' }}
+              />
+              <motion.div
+                animate={{ scale: [1, 1.3, 1], opacity: [0.2, 0, 0.2] }}
+                transition={{ duration: 2.5, repeat: Infinity, delay: 1.2 }}
+                className="absolute inset-0 rounded-full"
+                style={{ border: '1px solid rgba(37, 211, 102, 0.2)' }}
               />
               <Avatar name={remoteUser.displayName} uid={remoteUser.uid} size="2xl" className="mx-auto breathe" />
             </div>
-            <h3 className="text-xl font-semibold text-white mt-6">{remoteUser.displayName}</h3>
+            <motion.h3
+              className="text-xl font-semibold text-white mt-6"
+              animate={{
+                textShadow: ['0 0 10px rgba(37, 211, 102, 0)', '0 0 20px rgba(37, 211, 102, 0.3)', '0 0 10px rgba(37, 211, 102, 0)'],
+              }}
+              transition={{ duration: 3, repeat: Infinity }}
+            >
+              {remoteUser.displayName}
+            </motion.h3>
             <p className="text-xs text-zixo-text-secondary mt-2">
               {callStatus === 'ringing' && 'Calling...'}
               {callStatus === 'connecting' && 'Connecting...'}
@@ -612,22 +731,22 @@ export function VideoCallScreen({
         </div>
       )}
 
-      {/* Cinematic gradient overlay at top and bottom */}
-      <div className="absolute inset-x-0 top-0 h-28 pointer-events-none z-[5]"
-        style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%)' }}
+      {/* Cinematic gradient overlays */}
+      <div className="absolute inset-x-0 top-0 h-32 pointer-events-none z-[5]"
+        style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, transparent 100%)' }}
       />
-      <div className="absolute inset-x-0 bottom-0 h-40 pointer-events-none z-[5]"
-        style={{ background: 'linear-gradient(0deg, rgba(0,0,0,0.8) 0%, transparent 100%)' }}
+      <div className="absolute inset-x-0 bottom-0 h-44 pointer-events-none z-[5]"
+        style={{ background: 'linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%)' }}
       />
 
-      {/* Self View (PiP) */}
+      {/* Self View (PiP) with neon border */}
       <motion.div
         drag
-        dragConstraints={{ top: 50, left: 20, right: window.innerWidth - 140, bottom: window.innerHeight - 200 }}
+        dragConstraints={{ top: 50, left: 20, right: typeof window !== 'undefined' ? window.innerWidth - 140 : 300, bottom: typeof window !== 'undefined' ? window.innerHeight - 200 : 600 }}
         className="absolute top-12 right-4 w-28 h-40 rounded-2xl overflow-hidden z-10 cursor-grab active:cursor-grabbing"
         style={{
-          border: '2px solid rgba(37, 211, 102, 0.3)',
-          boxShadow: '0 0 20px rgba(37, 211, 102, 0.15), 0 8px 32px rgba(0,0,0,0.4)',
+          border: '2px solid rgba(37, 211, 102, 0.4)',
+          boxShadow: '0 0 25px rgba(37, 211, 102, 0.2), 0 8px 32px rgba(0,0,0,0.5)',
         }}
       >
         {localStream ? (
@@ -642,9 +761,21 @@ export function VideoCallScreen({
           <div className="w-full h-full flex items-center justify-center"
             style={{ background: 'linear-gradient(135deg, rgba(37, 211, 102, 0.2), rgba(18, 140, 126, 0.2))' }}
           >
-            <div className="w-12 h-12 rounded-full gradient-primary flex items-center justify-center text-sm font-semibold text-white">
+            <div className="w-12 h-12 rounded-full gradient-primary flex items-center justify-center text-sm font-semibold text-white"
+              style={{ boxShadow: '0 0 15px rgba(37, 211, 102, 0.3)' }}
+            >
               You
             </div>
+          </div>
+        )}
+        {/* Video off overlay */}
+        {!isVideoOn && localStream && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+              <polygon points="23 7 16 12 23 17 23 7" />
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
           </div>
         )}
       </motion.div>
@@ -667,23 +798,25 @@ export function VideoCallScreen({
                       background: 'linear-gradient(90deg, #25D366, #34B7F1)',
                       WebkitBackgroundClip: 'text',
                       WebkitTextFillColor: 'transparent',
+                      fontWeight: 600,
                     }}>
                       {formatDuration(callDuration)}
                     </span>
                   ) : 'Connecting...'}
                 </p>
               </div>
-              {/* Network quality */}
+              {/* Network quality indicator */}
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
                 style={{
                   background: 'rgba(255,255,255,0.1)',
                   backdropFilter: 'blur(10px)',
+                  boxShadow: '0 0 15px rgba(37, 211, 102, 0.1)',
                 }}
               >
                 <div className="flex gap-[2px]">
-                  <div className="w-1 h-3 rounded-sm bg-zixo-success" />
-                  <div className="w-1 h-4 rounded-sm bg-zixo-success" />
-                  <div className="w-1 h-5 rounded-sm bg-zixo-success" />
+                  <div className="w-1 h-3 rounded-sm bg-zixo-success" style={{ boxShadow: '0 0 4px rgba(37, 211, 102, 0.5)' }} />
+                  <div className="w-1 h-4 rounded-sm bg-zixo-success" style={{ boxShadow: '0 0 4px rgba(37, 211, 102, 0.5)' }} />
+                  <div className="w-1 h-5 rounded-sm bg-zixo-success" style={{ boxShadow: '0 0 4px rgba(37, 211, 102, 0.5)' }} />
                   <div className="w-1 h-6 rounded-sm bg-zixo-success/40" />
                 </div>
                 <span className="text-[10px] text-white/60 ml-1">Good</span>
@@ -693,7 +826,7 @@ export function VideoCallScreen({
         )}
       </AnimatePresence>
 
-      {/* Bottom Controls */}
+      {/* Bottom Controls with glowing design */}
       <AnimatePresence>
         {showControls && (
           <motion.div
@@ -713,8 +846,8 @@ export function VideoCallScreen({
                 )}
                 style={isMuted ? {
                   background: 'rgba(234, 67, 53, 0.2)',
-                  border: '1px solid rgba(234, 67, 53, 0.3)',
-                  boxShadow: '0 0 15px rgba(234, 67, 53, 0.2)',
+                  border: '1px solid rgba(234, 67, 53, 0.4)',
+                  boxShadow: '0 0 20px rgba(234, 67, 53, 0.25)',
                 } : { border: '1px solid rgba(255,255,255,0.1)' }}
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isMuted ? '#EA4335' : 'white'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -747,8 +880,8 @@ export function VideoCallScreen({
                 )}
                 style={!isVideoOn ? {
                   background: 'rgba(234, 67, 53, 0.2)',
-                  border: '1px solid rgba(234, 67, 53, 0.3)',
-                  boxShadow: '0 0 15px rgba(234, 67, 53, 0.2)',
+                  border: '1px solid rgba(234, 67, 53, 0.4)',
+                  boxShadow: '0 0 20px rgba(234, 67, 53, 0.25)',
                 } : { border: '1px solid rgba(255,255,255,0.1)' }}
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={!isVideoOn ? '#EA4335' : 'white'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -779,7 +912,7 @@ export function VideoCallScreen({
                 className="w-16 h-16 rounded-full flex items-center justify-center"
                 style={{
                   background: 'linear-gradient(135deg, #EA4335, #c62828)',
-                  boxShadow: '0 0 30px rgba(234, 67, 53, 0.5), 0 0 60px rgba(234, 67, 53, 0.2)',
+                  boxShadow: glowRed,
                 }}
               >
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
@@ -791,5 +924,205 @@ export function VideoCallScreen({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// ==================== PERMISSION MODAL ====================
+
+interface PermissionModalProps {
+  isOpen: boolean;
+  requests: Array<{
+    type: 'camera' | 'microphone' | 'location';
+    status: 'requesting' | 'granted' | 'denied' | 'error';
+    message?: string;
+  }>;
+  currentIndex: number;
+  onAllow: () => void;
+  onSkip: () => void;
+  onCancel: () => void;
+}
+
+export function PermissionModal({
+  isOpen,
+  requests,
+  currentIndex,
+  onAllow,
+  onSkip,
+  onCancel,
+}: PermissionModalProps) {
+  if (!isOpen || currentIndex >= requests.length) return null;
+
+  const current = requests[currentIndex];
+  const isProcessing = current.status === 'requesting';
+
+  const getIcon = (type: string) => {
+    switch (type) {
+      case 'camera':
+        return (
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+            <circle cx="12" cy="13" r="4" />
+          </svg>
+        );
+      case 'microphone':
+        return (
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="8" y1="23" x2="16" y2="23" />
+          </svg>
+        );
+      case 'location':
+        return (
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+            <circle cx="12" cy="10" r="3" />
+          </svg>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const getTitle = (type: string) => {
+    switch (type) {
+      case 'camera': return 'Camera Access';
+      case 'microphone': return 'Microphone Access';
+      case 'location': return 'Location Access';
+      default: return 'Permission';
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)' }}
+        >
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.8, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            className="w-[340px] rounded-3xl p-6 text-center relative overflow-hidden"
+            style={{
+              background: 'linear-gradient(180deg, #1a2a22 0%, #111B21 50%, #0a0f14 100%)',
+              border: '1px solid rgba(37, 211, 102, 0.2)',
+              boxShadow: '0 0 60px rgba(37, 211, 102, 0.1), 0 20px 60px rgba(0,0,0,0.5)',
+            }}
+          >
+            {/* Progress indicator */}
+            <div className="flex items-center justify-center gap-2 mb-6">
+              {requests.map((req, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'w-8 h-1 rounded-full transition-all',
+                    i < currentIndex ? 'bg-zixo-primary' :
+                    i === currentIndex ? 'bg-zixo-primary/50' :
+                    'bg-white/10'
+                  )}
+                />
+              ))}
+            </div>
+
+            {/* Icon with glow */}
+            <motion.div
+              className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-zixo-primary"
+              style={{
+                background: 'rgba(37, 211, 102, 0.1)',
+                border: '1px solid rgba(37, 211, 102, 0.2)',
+                boxShadow: '0 0 30px rgba(37, 211, 102, 0.15)',
+              }}
+              animate={isProcessing ? {
+                boxShadow: [
+                  '0 0 30px rgba(37, 211, 102, 0.15)',
+                  '0 0 50px rgba(37, 211, 102, 0.3)',
+                  '0 0 30px rgba(37, 211, 102, 0.15)',
+                ],
+              } : {}}
+              transition={{ duration: 2, repeat: Infinity }}
+            >
+              {getIcon(current.type)}
+            </motion.div>
+
+            {/* Title */}
+            <h3 className="text-lg font-bold text-white mb-2">{getTitle(current.type)}</h3>
+
+            {/* Description */}
+            <p className="text-sm text-zixo-text-secondary mb-6 leading-relaxed">
+              {current.message || `Zixo needs access to your ${current.type} for calls.`}
+            </p>
+
+            {/* Status indicator */}
+            {current.status === 'granted' && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center justify-center gap-2 mb-4"
+              >
+                <div className="w-5 h-5 rounded-full bg-zixo-success flex items-center justify-center"
+                  style={{ boxShadow: '0 0 10px rgba(37, 211, 102, 0.5)' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+                <span className="text-sm text-zixo-success">Granted</span>
+              </motion.div>
+            )}
+
+            {current.status === 'denied' && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center justify-center gap-2 mb-4"
+              >
+                <div className="w-5 h-5 rounded-full bg-zixo-error/20 flex items-center justify-center">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#EA4335" strokeWidth="3">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </div>
+                <span className="text-sm text-zixo-error">Denied</span>
+              </motion.div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-3">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={onSkip}
+                className="flex-1 py-3 rounded-xl text-sm font-medium text-zixo-text-secondary bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
+              >
+                Skip
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={onAllow}
+                className="flex-1 py-3 rounded-xl text-sm font-semibold text-white gradient-primary glow-primary"
+                style={{
+                  boxShadow: '0 0 20px rgba(37, 211, 102, 0.3)',
+                }}
+              >
+                {isProcessing ? 'Allow' : current.status === 'granted' ? 'Next' : 'Allow'}
+              </motion.button>
+            </div>
+
+            {/* Cancel */}
+            <button
+              onClick={onCancel}
+              className="mt-3 text-xs text-zixo-text-secondary/60 hover:text-zixo-text-secondary transition-colors"
+            >
+              Cancel call
+            </button>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

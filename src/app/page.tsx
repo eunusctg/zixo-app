@@ -12,7 +12,7 @@ import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/On
 import Avatar from '@/components/zixo/Avatar';
 import { ChatList } from '@/components/zixo/ChatList';
 import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToBottomFAB } from '@/components/zixo/ChatScreen';
-import { AudioCallScreen, VideoCallScreen } from '@/components/zixo/CallScreens';
+import { AudioCallScreen, VideoCallScreen, PermissionModal } from '@/components/zixo/CallScreens';
 import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
 import AdminPanel from '@/components/zixo/AdminPanel';
@@ -60,12 +60,103 @@ export default function ZixoApp() {
     toggleSearching,
     toggleFABMenu,
     markChatRead,
+    showPermissionModal,
+    permissionRequests,
+    permissionCallback,
   } = useZixoStore();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
+
+  // Permission modal state
+  const [permCurrentIndex, setPermCurrentIndex] = useState(0);
+  const [permRequests, setPermRequests] = useState<any[]>([]);
+
+  // When permission modal opens, initialize the request tracking
+  useEffect(() => {
+    if (showPermissionModal && permissionRequests.length > 0) {
+      setPermRequests(permissionRequests);
+      setPermCurrentIndex(0);
+    }
+  }, [showPermissionModal, permissionRequests]);
+
+  const handlePermissionAllow = useCallback(async () => {
+    if (permCurrentIndex >= permRequests.length) return;
+
+    const currentReq = permRequests[permCurrentIndex];
+    let granted = false;
+
+    try {
+      if (currentReq.type === 'camera' || currentReq.type === 'microphone') {
+        const constraints: MediaStreamConstraints = {
+          audio: currentReq.type === 'microphone' ? true : false,
+          video: currentReq.type === 'camera' ? { width: 720, height: 1280, facingMode: 'user' } : false,
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream.getTracks().forEach(track => track.stop());
+        granted = true;
+      } else if (currentReq.type === 'location') {
+        granted = await new Promise<boolean>((resolve) => {
+          if (!navigator.geolocation) { resolve(false); return; }
+          navigator.geolocation.getCurrentPosition(
+            () => resolve(true),
+            () => resolve(false),
+            { enableHighAccuracy: true, timeout: 10000 }
+          );
+        });
+      }
+    } catch (err: any) {
+      if (err?.name === 'NotAllowedError') {
+        granted = false;
+      } else {
+        granted = false;
+      }
+    }
+
+    // Update the request status
+    const updatedRequests = [...permRequests];
+    updatedRequests[permCurrentIndex] = { ...currentReq, status: granted ? 'granted' : 'denied' };
+    setPermRequests(updatedRequests);
+
+    // Move to next permission or complete
+    const nextIndex = permCurrentIndex + 1;
+    if (nextIndex >= updatedRequests.length) {
+      // All permissions processed - check if mic was granted (minimum required)
+      const micGranted = updatedRequests.find(r => r.type === 'microphone')?.status === 'granted';
+      setTimeout(() => {
+        useZixoStore.setState({ showPermissionModal: false });
+        permissionCallback?.(micGranted || false);
+      }, 500);
+    } else {
+      setPermCurrentIndex(nextIndex);
+    }
+  }, [permCurrentIndex, permRequests, permissionCallback]);
+
+  const handlePermissionSkip = useCallback(() => {
+    if (permCurrentIndex >= permRequests.length) return;
+
+    const updatedRequests = [...permRequests];
+    updatedRequests[permCurrentIndex] = { ...permRequests[permCurrentIndex], status: 'denied' };
+    setPermRequests(updatedRequests);
+
+    const nextIndex = permCurrentIndex + 1;
+    if (nextIndex >= updatedRequests.length) {
+      const micGranted = updatedRequests.find(r => r.type === 'microphone')?.status === 'granted';
+      setTimeout(() => {
+        useZixoStore.setState({ showPermissionModal: false });
+        permissionCallback?.(micGranted || false);
+      }, 300);
+    } else {
+      setPermCurrentIndex(nextIndex);
+    }
+  }, [permCurrentIndex, permRequests, permissionCallback]);
+
+  const handlePermissionCancel = useCallback(() => {
+    useZixoStore.setState({ showPermissionModal: false });
+    permissionCallback?.(false);
+  }, [permissionCallback]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -715,6 +806,16 @@ export default function ZixoApp() {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Permission Modal for camera/mic/location before calls */}
+      <PermissionModal
+        isOpen={showPermissionModal && permRequests.length > 0}
+        requests={permRequests}
+        currentIndex={permCurrentIndex}
+        onAllow={handlePermissionAllow}
+        onSkip={handlePermissionSkip}
+        onCancel={handlePermissionCancel}
+      />
     </div>
   );
 }

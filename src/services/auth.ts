@@ -122,6 +122,7 @@ export interface ZixoUserProfile {
   createdAt: number;
   publicKey?: string;
   role?: 'admin' | 'user';
+  phoneNumber?: string;
 }
 
 /**
@@ -266,6 +267,7 @@ export async function getUserProfile(uid: string): Promise<ZixoUserProfile | nul
       createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
       publicKey: data.publicKey,
       role: data.role || 'user',
+      phoneNumber: data.phoneNumber || '',
     };
   }
   return null;
@@ -475,27 +477,75 @@ let confirmationResult: ConfirmationResult | null = null;
 
 /**
  * Initialize the invisible reCAPTCHA verifier for phone auth
- * @param buttonId - The ID of the container element for the reCAPTCHA
+ * Uses invisible reCAPTCHA for seamless UX
+ * @param containerId - The ID of the container element for the reCAPTCHA
  */
-export function initRecaptcha(buttonId: string): void {
-  if (recaptchaVerifier) return;
-  recaptchaVerifier = new RecaptchaVerifier(auth, buttonId, {
+export function initRecaptcha(containerId: string): void {
+  // Always clear previous verifier first to avoid stale state
+  if (recaptchaVerifier) {
+    try {
+      recaptchaVerifier.clear();
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+    recaptchaVerifier = null;
+  }
+
+  // Ensure the container element exists in the DOM
+  const container = typeof document !== 'undefined' ? document.getElementById(containerId) : null;
+  if (!container) {
+    console.warn(`[Zixo Auth] reCAPTCHA container #${containerId} not found in DOM. Creating it.`);
+    // Create the container if it doesn't exist
+    const div = document.createElement('div');
+    div.id = containerId;
+    document.body.appendChild(div);
+  }
+
+  recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
     size: 'invisible',
     callback: () => {
-      // reCAPTCHA solved
+      console.log('[Zixo Auth] reCAPTCHA solved');
+    },
+    'expired-callback': () => {
+      console.log('[Zixo Auth] reCAPTCHA expired, resetting...');
+      resetPhoneAuth();
     },
   });
 }
 
 /**
  * Send OTP to the given phone number
- * @param phoneNumber - Phone number in +XX format (e.g., +1234567890)
+ * @param phoneNumber - Phone number in +XX format (e.g., +8801712345678)
  */
 export async function sendOTP(phoneNumber: string): Promise<void> {
   if (!recaptchaVerifier) {
     throw new Error('Recaptcha not initialized. Call initRecaptcha first.');
   }
-  confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+
+  // Ensure the reCAPTCHA verifier is ready
+  try {
+    await recaptchaVerifier.verify();
+  } catch (e: any) {
+    // If reCAPTCHA verification fails, try resetting and re-initializing
+    console.warn('[Zixo Auth] reCAPTCHA verify failed, resetting:', e?.message);
+    resetPhoneAuth();
+    initRecaptcha('recaptcha-container');
+    if (!recaptchaVerifier) {
+      throw new Error('Failed to initialize reCAPTCHA. Please refresh the page and try again.');
+    }
+  }
+
+  try {
+    confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+  } catch (err: any) {
+    // If we get operation-not-allowed, provide clear guidance
+    if (err?.code === 'auth/operation-not-allowed') {
+      console.error('[Zixo Auth] Phone auth not enabled. Visit: https://console.firebase.google.com/project/zixo-call/authentication/providers');
+    }
+    // Reset reCAPTCHA on any error so it can be reused
+    resetPhoneAuth();
+    throw err;
+  }
 }
 
 /**
@@ -512,17 +562,20 @@ export async function verifyOTP(code: string): Promise<{ user: User; profile: Zi
   // Get or create profile
   let profile = await getUserProfile(user.uid);
   if (!profile) {
+    const phoneNumber = user.phoneNumber || '';
+    const phoneUsername = phoneNumber ? `@${phoneNumber.replace(/[^0-9]/g, '').slice(-7)}` : `@user${Math.floor(Math.random() * 10000)}`;
     profile = {
       uid: user.uid,
-      displayName: user.displayName || user.phoneNumber || 'User',
+      displayName: user.displayName || phoneNumber || 'User',
       email: user.email || '',
-      username: `@user${Math.floor(Math.random() * 10000)}`,
+      username: phoneUsername,
       bio: '',
       avatar: user.photoURL || '',
       online: true,
       lastSeen: Date.now(),
       createdAt: Date.now(),
       role: 'user',
+      phoneNumber: phoneNumber,
     };
     // Create Firestore profile
     await setDoc(doc(db, 'users', user.uid), {
@@ -530,6 +583,11 @@ export async function verifyOTP(code: string): Promise<{ user: User; profile: Zi
       createdAt: serverTimestamp(),
       lastSeen: serverTimestamp(),
     });
+    // Create username mapping for search
+    await setDoc(doc(db, 'usernames', phoneUsername), { uid: user.uid });
+  } else {
+    // Update online status for existing user
+    await updateOnlineStatus(user.uid, true);
   }
   return { user, profile };
 }
@@ -539,7 +597,11 @@ export async function verifyOTP(code: string): Promise<{ user: User; profile: Zi
  */
 export function resetPhoneAuth(): void {
   if (recaptchaVerifier) {
-    recaptchaVerifier.clear();
+    try {
+      recaptchaVerifier.clear();
+    } catch (e) {
+      // Ignore cleanup errors
+    }
     recaptchaVerifier = null;
   }
   confirmationResult = null;
