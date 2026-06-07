@@ -354,10 +354,19 @@ async function sendFCMMessage(
 
 /**
  * Get a Firestore document
+ * Returns null for 404 (document not found) instead of throwing
  */
 async function getDocument(collection: string, docId: string): Promise<any> {
-  const result = await firestoreRequest('GET', `/documents/${collection}/${docId}`);
-  return result?.fields ? firestoreDocumentToJs(result) : null;
+  try {
+    const result = await firestoreRequest('GET', `/documents/${collection}/${docId}`);
+    return result?.fields ? firestoreDocumentToJs(result) : null;
+  } catch (err: any) {
+    // 404 means document not found — return null instead of throwing
+    if (err.message?.includes('not found') || err.message?.includes('404')) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -396,15 +405,20 @@ async function queryCollection(
     },
   };
 
-  const result = await firestoreRequest('POST', '/documents:runQuery', body);
-  if (!Array.isArray(result)) return [];
+  try {
+    const result = await firestoreRequest('POST', '/documents:runQuery', body);
+    if (!Array.isArray(result)) return [];
 
-  return result
-    .filter((item: any) => item.document)
-    .map((item: any) => ({
-      id: item.document.name.split('/').pop(),
-      ...firestoreDocumentToJs(item.document),
-    }));
+    return result
+      .filter((item: any) => item.document)
+      .map((item: any) => ({
+        id: item.document.name.split('/').pop(),
+        ...firestoreDocumentToJs(item.document),
+      }));
+  } catch (err: any) {
+    console.warn('[Firebase Admin] queryCollection failed:', err.message);
+    return [];
+  }
 }
 
 /**

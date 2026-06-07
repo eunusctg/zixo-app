@@ -42,6 +42,34 @@ async function rtdbSet(path: string, method: string, data?: any): Promise<any> {
   return text ? JSON.parse(text) : null;
 }
 
+/**
+ * Verify that a user has admin role.
+ * Tries Firestore REST API first, falls back to RTDB.
+ */
+async function verifyAdmin(requesterUid: string): Promise<boolean> {
+  // Method 1: Firestore REST API via adminOperations
+  try {
+    const profile = await adminOperations.getDocument('users', requesterUid);
+    if (profile && profile.role === 'admin') {
+      return true;
+    }
+  } catch (err: any) {
+    console.warn('[Zixo API] Admin verification via Firestore REST failed:', err.message);
+  }
+
+  // Method 2: RTDB fallback (always works with database secret)
+  try {
+    const rtdbProfile = await rtdbGet(`/users/${requesterUid}`);
+    if (rtdbProfile && rtdbProfile.role === 'admin') {
+      return true;
+    }
+  } catch (err: any) {
+    console.warn('[Zixo API] Admin verification via RTDB failed:', err.message);
+  }
+
+  return false;
+}
+
 // ==================== HEALTH CHECK ====================
 export async function GET() {
   const hasPrivateKey = !!process.env.FIREBASE_PRIVATE_KEY;
@@ -279,6 +307,74 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ==================== DISCOVER USERS (no admin required) ====================
+      case 'discoverUsers': {
+        const { limit: reqLimit } = body;
+        const maxUsers = Math.min(reqLimit || 50, 100);
+
+        try {
+          let users: any[] = [];
+
+          // Method 1: Firestore REST API listDocuments
+          try {
+            const listResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/users?pageSize=${maxUsers}`
+            );
+            if (listResult?.documents) {
+              users = listResult.documents.map((doc: any) => {
+                const js = adminOperations.firestoreDocumentToJs(doc);
+                return {
+                  id: doc.name.split('/').pop(),
+                  uid: js.uid || doc.name.split('/').pop(),
+                  displayName: js.displayName || '',
+                  username: js.username || '',
+                  avatar: js.avatar || '',
+                  online: js.online || false,
+                  zixoNumber: js.zixoNumber || '',
+                };
+              });
+            }
+          } catch (listErr: any) {
+            console.warn('[Zixo API] Discover users Firestore list failed:', listErr.message);
+          }
+
+          // Method 2: RTDB fallback
+          if (users.length === 0) {
+            try {
+              const rtdbUsers = await rtdbGet('/users');
+              if (rtdbUsers && typeof rtdbUsers === 'object') {
+                users = Object.entries(rtdbUsers)
+                  .slice(0, maxUsers)
+                  .map(([uid, data]: [string, any]) => ({
+                    id: uid,
+                    uid,
+                    displayName: data?.displayName || '',
+                    username: data?.username || '',
+                    avatar: data?.avatar || '',
+                    online: data?.online || false,
+                    zixoNumber: data?.zixoNumber || '',
+                  }));
+              }
+            } catch (rtdbErr: any) {
+              console.warn('[Zixo API] Discover users RTDB fallback failed:', rtdbErr.message);
+            }
+          }
+
+          return NextResponse.json({
+            success: true,
+            users,
+            count: users.length,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Discover users error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to discover users', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
       // ==================== CLEANUP STALE CALLS ====================
       case 'cleanupStaleCalls': {
         try {
@@ -394,15 +490,15 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can assign Zixo numbers' },
               { status: 403 }
             );
           }
 
-          // Get all users from Firestore
+          // Get all users from Firestore (with RTDB fallback)
           let users: any[] = [];
           try {
             const listResult = await adminOperations.firestoreRequest(
@@ -416,11 +512,25 @@ export async function POST(request: NextRequest) {
               }));
             }
           } catch (listErr: any) {
-            console.warn('[Zixo API] List documents failed:', listErr.message);
-            return NextResponse.json(
-              { error: 'Failed to list users', details: listErr.message },
-              { status: 500 }
-            );
+            console.warn('[Zixo API] Firestore list documents failed, trying RTDB fallback:', listErr.message);
+            try {
+              const rtdbUsers = await rtdbGet('/users');
+              if (rtdbUsers && typeof rtdbUsers === 'object') {
+                users = Object.entries(rtdbUsers).map(([uid, data]: [string, any]) => ({
+                  id: uid,
+                  zixoNumber: data?.zixoNumber || '',
+                  displayName: data?.displayName || '',
+                  email: data?.email || '',
+                  role: data?.role || 'user',
+                }));
+              }
+            } catch (rtdbErr: any) {
+              console.warn('[Zixo API] RTDB fallback also failed:', rtdbErr.message);
+              return NextResponse.json(
+                { error: 'Failed to list users', details: listErr.message },
+                { status: 500 }
+              );
+            }
           }
 
           // For each user without a zixoNumber, generate and assign one
@@ -489,8 +599,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can grant admin role' },
               { status: 403 }
@@ -526,8 +636,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can revoke admin role' },
               { status: 403 }
@@ -562,28 +672,8 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          // Verify requester is admin — try admin API first, fall back to Firestore client
-          let isAdmin = false;
-          try {
-            const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-            if (requesterProfile && requesterProfile.role === 'admin') {
-              isAdmin = true;
-            }
-          } catch (adminErr: any) {
-            console.warn('[Zixo API] Admin verification via REST API failed:', adminErr.message);
-            // Fallback: verify admin using Firestore client SDK
-            try {
-              const { getDoc, doc } = await import('firebase/firestore');
-              const { db } = await import('@/services/firebase');
-              const docSnap = await getDoc(doc(db, 'users', requesterUid));
-              if (docSnap.exists() && docSnap.data().role === 'admin') {
-                isAdmin = true;
-              }
-            } catch (clientErr: any) {
-              console.warn('[Zixo API] Admin verification via client SDK also failed:', clientErr.message);
-            }
-          }
-
+          // Verify requester is admin
+          const isAdmin = await verifyAdmin(requesterUid);
           if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can list all users' },
@@ -591,14 +681,14 @@ export async function POST(request: NextRequest) {
             );
           }
 
-          // List all users — try multiple methods
+          // List all users — try multiple methods with fallbacks
           let users: any[] = [];
 
           // Method 1: Firestore REST API listDocuments
           try {
             const listResult = await adminOperations.firestoreRequest(
               'GET',
-              `/documents/users?pageSize=100`
+              `/documents/users?pageSize=300`
             );
             if (listResult?.documents) {
               users = listResult.documents.map((doc: any) => ({
@@ -607,14 +697,14 @@ export async function POST(request: NextRequest) {
               }));
             }
           } catch (listErr: any) {
-            console.warn('[Zixo API] List documents failed:', listErr.message);
+            console.warn('[Zixo API] Firestore listDocuments failed:', listErr.message);
 
-            // Method 2: Firestore REST API runQuery (using a query that works)
+            // Method 2: Firestore REST API runQuery (structured query without WHERE)
             try {
               const queryBody = {
                 structuredQuery: {
                   from: [{ collectionId: 'users' }],
-                  limit: 100,
+                  limit: 300,
                 },
               };
               const queryResult = await adminOperations.firestoreRequest(
@@ -631,38 +721,41 @@ export async function POST(request: NextRequest) {
                   }));
               }
             } catch (queryErr: any) {
-              console.warn('[Zixo API] Query also failed:', queryErr.message);
+              console.warn('[Zixo API] Firestore runQuery also failed:', queryErr.message);
+            }
+          }
 
-              // Method 3: Firestore client SDK (works without admin token)
-              try {
-                const { collection, getDocs, limit: firestoreLimit } = await import('firebase/firestore');
-                const { db } = await import('@/services/firebase');
-                const snapshot = await getDocs(collection(db, 'users'));
-                snapshot.forEach((docSnap: any) => {
-                  const data = docSnap.data();
-                  users.push({
-                    id: docSnap.id,
-                    uid: data.uid || docSnap.id,
-                    displayName: data.displayName || '',
-                    email: data.email || '',
-                    username: data.username || '',
-                    bio: data.bio || '',
-                    avatar: data.avatar || '',
-                    online: data.online || false,
-                    role: data.role || 'user',
-                    zixoNumber: data.zixoNumber || '',
-                  });
-                });
-              } catch (sdkErr: any) {
-                console.warn('[Zixo API] Client SDK also failed:', sdkErr.message);
+          // Method 3: RTDB fallback (always works with database secret)
+          if (users.length === 0) {
+            try {
+              const rtdbUsers = await rtdbGet('/users');
+              if (rtdbUsers && typeof rtdbUsers === 'object') {
+                users = Object.entries(rtdbUsers).map(([uid, data]: [string, any]) => ({
+                  id: uid,
+                  uid,
+                  displayName: data?.displayName || '',
+                  email: data?.email || '',
+                  username: data?.username || '',
+                  bio: data?.bio || '',
+                  avatar: data?.avatar || '',
+                  online: data?.online || false,
+                  role: data?.role || 'user',
+                  zixoNumber: data?.zixoNumber || '',
+                  lastSeen: data?.lastSeen || null,
+                  createdAt: data?.createdAt || null,
+                  fcmToken: data?.fcmToken || '',
+                  banned: data?.banned || false,
+                }));
               }
+            } catch (rtdbErr: any) {
+              console.warn('[Zixo API] RTDB fallback also failed:', rtdbErr.message);
             }
           }
 
           return NextResponse.json({
             success: true,
-            users: users || [],
-            count: users?.length || 0,
+            users,
+            count: users.length,
           });
         } catch (err: any) {
           console.error('[Zixo API] List users error:', err.message);
@@ -686,8 +779,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can delete users' },
               { status: 403 }
@@ -724,8 +817,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can enable phone auth' },
               { status: 403 }
@@ -820,8 +913,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can ban users' },
               { status: 403 }
@@ -860,8 +953,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can unban users' },
               { status: 403 }
@@ -897,8 +990,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can broadcast notifications' },
               { status: 403 }
@@ -919,7 +1012,22 @@ export async function POST(request: NextRequest) {
               }));
             }
           } catch (listErr: any) {
-            console.warn('[Zixo API] List documents for broadcast failed:', listErr.message);
+            console.warn('[Zixo API] Firestore list for broadcast failed, trying RTDB:', listErr.message);
+            try {
+              const rtdbUsers = await rtdbGet('/users');
+              if (rtdbUsers && typeof rtdbUsers === 'object') {
+                users = Object.entries(rtdbUsers).map(([uid, data]: [string, any]) => ({
+                  id: uid,
+                  uid,
+                  displayName: data?.displayName || '',
+                  email: data?.email || '',
+                  fcmToken: data?.fcmToken || '',
+                  banned: data?.banned || false,
+                }));
+              }
+            } catch (rtdbErr: any) {
+              console.warn('[Zixo API] RTDB fallback for broadcast also failed:', rtdbErr.message);
+            }
           }
 
           // Send FCM to all users with fcmToken
@@ -970,15 +1078,15 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can view stats' },
               { status: 403 }
             );
           }
 
-          // Get user counts from Firestore
+          // Get user counts from Firestore (with RTDB fallback)
           let totalUsers = 0;
           let onlineUsers = 0;
           try {
@@ -994,7 +1102,16 @@ export async function POST(request: NextRequest) {
               }).length;
             }
           } catch (err: any) {
-            console.warn('[Zixo API] Stats user list failed:', err.message);
+            console.warn('[Zixo API] Firestore stats failed, trying RTDB:', err.message);
+            try {
+              const rtdbUsers = await rtdbGet('/users');
+              if (rtdbUsers && typeof rtdbUsers === 'object') {
+                totalUsers = Object.keys(rtdbUsers).length;
+                onlineUsers = Object.values(rtdbUsers).filter((u: any) => u?.online === true).length;
+              }
+            } catch (rtdbErr: any) {
+              console.warn('[Zixo API] RTDB stats fallback also failed:', rtdbErr.message);
+            }
           }
 
           // Get active chats count from Firestore
@@ -1067,8 +1184,8 @@ export async function POST(request: NextRequest) {
 
         try {
           // Verify requester is admin
-          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
-          if (!requesterProfile || requesterProfile.role !== 'admin') {
+          const isAdmin = await verifyAdmin(requesterUid);
+          if (!isAdmin) {
             return NextResponse.json(
               { error: 'Unauthorized: Only admins can update auth config' },
               { status: 403 }

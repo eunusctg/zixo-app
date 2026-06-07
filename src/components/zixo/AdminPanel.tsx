@@ -135,6 +135,10 @@ export default function AdminPanel({ currentUser, onBack }: AdminPanelProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, requesterUid: currentUser.uid, ...extra }),
     });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`API error (${res.status}): ${text || res.statusText}`);
+    }
     const data = await res.json();
     if (!data.success && data.error) throw new Error(data.error);
     return data;

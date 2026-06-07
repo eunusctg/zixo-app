@@ -627,12 +627,14 @@ export async function searchUsers(searchText: string, maxResults: number = 20): 
 /**
  * Get all users on Zixo (for browsing/discovery)
  * Returns up to maxResults users, excluding the current user
+ * Tries Firestore client SDK first, falls back to API endpoint, then RTDB
  */
 export async function getAllUsers(currentUid: string, maxResults: number = 50): Promise<ZixoUserProfile[]> {
-  const { collection, query, getDocs, limit: firestoreLimit } = await import('firebase/firestore');
   const users: ZixoUserProfile[] = [];
 
+  // Method 1: Firestore client SDK
   try {
+    const { collection, query, getDocs, limit: firestoreLimit } = await import('firebase/firestore');
     const q = query(collection(db, 'users'), firestoreLimit(maxResults + 1));
     const snapshot = await getDocs(q);
     snapshot.forEach((docSnap) => {
@@ -653,8 +655,41 @@ export async function getAllUsers(currentUid: string, maxResults: number = 50): 
         });
       }
     });
+    if (users.length > 0) return users.slice(0, maxResults);
   } catch (err) {
-    console.warn('[Zixo] Failed to fetch all users:', err);
+    console.warn('[Zixo] Firestore client: Failed to fetch all users:', err);
+  }
+
+  // Method 2: API endpoint (discoverUsers - no admin role required)
+  try {
+    const res = await fetch('/api/zixo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'discoverUsers', limit: maxResults }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.users && data.users.length > 0) {
+        return data.users
+          .filter((u: any) => u.uid !== currentUid)
+          .map((u: any) => ({
+            uid: u.uid || u.id,
+            displayName: u.displayName || '',
+            email: u.email || '',
+            username: u.username || '',
+            bio: u.bio || '',
+            avatar: u.avatar || '',
+            online: u.online || false,
+            lastSeen: u.lastSeen || Date.now(),
+            createdAt: u.createdAt || Date.now(),
+            role: u.role || 'user',
+            zixoNumber: u.zixoNumber || '',
+          }))
+          .slice(0, maxResults);
+      }
+    }
+  } catch (err) {
+    console.warn('[Zixo] API: Failed to fetch all users:', err);
   }
 
   return users.slice(0, maxResults);

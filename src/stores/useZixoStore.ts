@@ -541,12 +541,14 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     })),
 
   login: (user) =>
-    set({
+    set((state) => ({
       isAuthenticated: true,
       currentUser: user,
-      currentScreen: 'home',
-      userProfiles: { [user.uid]: user },
-    }),
+      // Only navigate to 'home' on first login (from auth/onboarding).
+      // If user is already on a screen (chat, settings, etc.), stay there.
+      currentScreen: state.isAuthenticated ? state.currentScreen : 'home',
+      userProfiles: { ...state.userProfiles, [user.uid]: user },
+    })),
 
   logout: () => {
     // Clean up all Firebase listeners

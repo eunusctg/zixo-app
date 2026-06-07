@@ -141,23 +141,37 @@ export function useFirebaseBridge() {
         console.log('[Zixo Bridge] Auth state is null, debouncing before potential logout...');
         // Clear any existing timer
         if (nullAuthTimerRef.current) clearTimeout(nullAuthTimerRef.current);
-        // Wait 5 seconds — if Firebase restores auth within this window, no logout
+        // Wait 10 seconds — if Firebase restores auth within this window, no logout
+        // We use a generous timeout because token refresh can be slow on mobile
         nullAuthTimerRef.current = setTimeout(async () => {
           const currentStore = useZixoStore.getState();
+          // Don't logout if we're no longer in a state that requires it
+          if (!currentStore.isAuthenticated || !currentStore.currentUser) return;
+
           // Check if Firebase still reports null by trying to get the current user
           try {
             const { auth } = await import('@/services/firebase');
             if (!auth.currentUser) {
-              console.log('[Zixo Bridge] Firebase still null after debounce, logging out');
+              // Double-check: try to reload the user (forces a token refresh)
+              try {
+                console.log('[Zixo Bridge] Attempting user reload before logout...');
+                // We can't call reload on null user, so just verify again
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                if (auth.currentUser) {
+                  console.log('[Zixo Bridge] User recovered after additional wait, staying logged in');
+                  return;
+                }
+              } catch {}
+              console.log('[Zixo Bridge] Firebase still null after 10s debounce, logging out');
               currentStore.logout();
             } else {
               console.log('[Zixo Bridge] Firebase auth restored during debounce, staying logged in');
             }
           } catch {
             // If we can't check, don't logout — prefer staying in over false logout
-            console.log('[Zixo Bridge] Cannot verify auth state, staying logged in');
+            console.log('[Zixo Bridge] Cannot verify auth state, staying logged in (safe default)');
           }
-        }, 5000);
+        }, 10000);
       }
       return;
     }

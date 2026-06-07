@@ -242,8 +242,8 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
 
   // Use allUsers as the default list, filter locally if search is short
   // Filter out null/undefined entries and ensure valid uid
-  const displayUsers = (searchResults.length > 0
-    ? searchResults
+  const displayUsers = ((searchResults || []).length > 0
+    ? (searchResults || [])
     : search.trim().length > 0 && search.trim().length < 2
       ? (allUsers || []).filter(
           (c) =>
