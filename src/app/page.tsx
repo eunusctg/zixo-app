@@ -236,22 +236,18 @@ export default function ZixoApp() {
       case 'onboarding':
         return (
           <OnboardingScreen
-            onComplete={() => setScreen('auth-login')}
-            onSignIn={() => setScreen('auth-login')}
-            onSignUp={() => setScreen('auth-signup')}
+            onComplete={() => setScreen('auth')}
+            onSignIn={() => setScreen('auth')}
+            onSignUp={() => setScreen('auth')}
           />
         );
 
-      case 'auth-login':
-      case 'auth-signup':
-      case 'auth-forgot':
+      case 'auth':
         return (
           <AuthScreen
-            mode={currentScreen === 'auth-forgot' ? 'forgot' : currentScreen === 'auth-signup' ? 'signup' : 'login'}
+            mode="login"
             onAuth={() => {}} // Auth handled by useFirebaseBridge
-            onSwitchMode={(mode) => {
-              setScreen(mode === 'forgot' ? 'auth-forgot' : mode === 'signup' ? 'auth-signup' : 'auth-login');
-            }}
+            onSwitchMode={() => {}}
             onBack={() => setScreen('onboarding')}
           />
         );
@@ -302,7 +298,12 @@ export default function ZixoApp() {
             isVideoOn={activeCall.isVideoOn}
             onToggleMute={toggleMute}
             onToggleVideo={toggleVideo}
-            onFlipCamera={() => {}}
+            onFlipCamera={() => {
+              try {
+                const { getWebRTC } = require('@/services/webrtc');
+                getWebRTC().switchCamera();
+              } catch {}
+            }}
             onEndCall={endCall}
             localStream={activeCall.localStream}
             remoteStream={activeCall.remoteStream}

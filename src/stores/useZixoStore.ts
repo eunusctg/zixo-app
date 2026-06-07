@@ -55,10 +55,7 @@ export interface CallRecord {
 export type Screen =
   | 'splash'
   | 'onboarding'
-  | 'auth-login'
-  | 'auth-signup'
-  | 'auth-forgot'
-  | 'auth-verify'
+  | 'auth'
   | 'home'
   | 'chat'
   | 'audio-call'
@@ -270,7 +267,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     set({
       isAuthenticated: false,
       currentUser: null,
-      currentScreen: 'auth-login',
+      currentScreen: 'auth',
       chats: [],
       messages: {},
       callHistory: [],

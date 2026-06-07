@@ -125,6 +125,27 @@ body {
   box-shadow: 0 0 20px rgba(234, 67, 53, 0.4);
 }
 
+/* Neon Glow Effects for Call Screen */
+.glow-neon-green {
+  box-shadow: 0 0 15px rgba(37, 211, 102, 0.4), 0 0 40px rgba(37, 211, 102, 0.15), inset 0 0 15px rgba(37, 211, 102, 0.05);
+}
+
+.glow-neon-red {
+  box-shadow: 0 0 15px rgba(234, 67, 53, 0.4), 0 0 40px rgba(234, 67, 53, 0.15), inset 0 0 15px rgba(234, 67, 53, 0.05);
+}
+
+.glow-neon-blue {
+  box-shadow: 0 0 15px rgba(52, 183, 241, 0.4), 0 0 40px rgba(52, 183, 241, 0.15), inset 0 0 15px rgba(52, 183, 241, 0.05);
+}
+
+/* Call screen gradient text */
+.gradient-call-text {
+  background: linear-gradient(90deg, #25D366, #34B7F1);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
 /* Pulse Animation for Online Indicator */
 @keyframes pulse-online {
   0%, 100% {
