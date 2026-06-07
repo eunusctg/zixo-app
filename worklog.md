@@ -1,25 +1,30 @@
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Implement all user-requested features for Zixo app
+Task: Implement Zixo Number system + Group Calls + Deploy
 
 Work Log:
-- Analyzed complete codebase structure and existing implementations
-- Discovered Phone Auth is enabled in Firebase but SMS regions are blocked for all countries
-- Added `enablePhoneAuth` API endpoint to `/api/zixo/route.ts` for enabling phone auth via Identity Toolkit API
-- Added `identitytoolkit` scope to Firebase Admin JWT in `firebase-admin.ts`
-- Created ProfileEditScreen component with avatar upload, name editing, bio/status editing
-- Added voice recording with MediaRecorder API - record, upload to Storage, send as voice message
-- Updated ChatInputBar to show recording state with duration timer and stop button
-- Fixed calling screen responsive design for Android - added safe-area-top/bottom classes, responsive padding
-- Fixed Video Call Screen PiP self-view - replaced window-based drag constraints with fixed values
-- Added multiple friend-adding methods to ContactsScreen: Share Link, Search by Phone, Nearby, QR Code
-- Added Share Link dialog with copy-to-clipboard functionality
-- Wired ProfileEditScreen into page.tsx with profile-edit screen case
-- Fixed settings screen to properly navigate to profile-edit
-- Deployed to Cloudflare Pages: https://9286c120.zixo-app-cfy.pages.dev
+- Explored entire codebase (13+ files, ~5000 lines)
+- Implemented 8-digit Zixo Number system in auth.ts (generateUniqueZixoNumber, searchUserByZixoNumber, formatZixoNumber)
+- Added zixoNumber to ZixoUserProfile interface and all user profile mapping code
+- Updated Onboarding.tsx with welcome screen showing Zixo number after registration
+- Added Zixo number display in ProfileEditScreen.tsx and SettingsScreen.tsx
+- Added Zixo number search in ContactsScreen (CallHistory.tsx)
+- Created webrtc-group.ts for mesh P2P group calls (up to 6 participants)
+- Created GroupCallScreens.tsx with GroupAudioCallScreen, GroupVideoCallScreen, IncomingGroupCallScreen
+- Added group call signaling in presence.ts (createGroupCallSignal, subscribeToGroupCalls, etc.)
+- Extended useZixoStore.ts with groupCall state and actions
+- Updated useFirebaseBridge.ts with incoming group call listener
+- Updated page.tsx with group call screens and participant picker modal
+- Extended firestore.ts with group call record types and save/get functions
+- Fixed type errors (CallRecord type, voice upload return type, callerProfile null safety)
+- Built successfully with Next.js + OpenNext for Cloudflare
+- Deployed to Cloudflare Pages (zixo-app project)
+- Pushed all changes to GitHub (eunusctg/zixo-app)
 
 Stage Summary:
-- All UI features implemented: profile editing, voice recording, friend adding methods, responsive call screens
-- Phone Auth is enabled in Firebase but SMS regions need manual enabling in Firebase Console
-- Deployed successfully to Cloudflare Pages
+- 13 files changed, 3009 insertions
+- Key features: 8-digit Zixo numbers, group audio/video calls, enhanced friend-adding
+- Deployment note: OpenNext worker deployed but SSR has 500 error on main page
+- The zixo-app.pages.dev domain has an older working version
+- Full deployment needs @cloudflare/next-on-pages compatibility with Next.js 15+
