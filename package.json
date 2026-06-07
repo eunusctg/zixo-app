@@ -7,7 +7,7 @@
     "build": "next build",
     "build:cloudflare": "npx @cloudflare/next-on-pages",
     "preview": "npx wrangler pages dev .vercel/output/static",
-    "deploy": "npx wrangler pages deploy .vercel/output/static --project-name zixo-app --branch main --commit-dirty=true",
+    "deploy": "npx wrangler pages deploy .vercel/output/static --project-name zixo --branch main --commit-dirty=true",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint ."
   },
