@@ -6,6 +6,34 @@ import { getWebRTC, resetWebRTC } from '@/services/webrtc';
 import { getGroupWebRTC, resetGroupWebRTC } from '@/services/webrtc-group';
 import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, type RTDBGroupCallSignal } from '@/services/presence';
 
+// ==================== PERMISSION HELPERS ====================
+
+/**
+ * Check if call permissions have already been decided (granted or denied).
+ * Returns true if all required permissions are already decided (no need to show modal).
+ * Returns false if at least one permission is in 'prompt' state (need to show modal).
+ */
+async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
+  try {
+    const micStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+    if (micStatus.state === 'granted') return true;
+    if (micStatus.state === 'denied') return true; // Already decided, don't ask again
+    // micStatus.state === 'prompt' - need to ask
+    if (type === 'video') {
+      const camStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
+      if (camStatus.state === 'granted' || camStatus.state === 'denied') {
+        // Camera is decided, only show modal if mic still needs asking
+        return micStatus.state !== 'prompt';
+      }
+      // Camera is also in 'prompt' state
+      return false;
+    }
+    return false; // Mic is in 'prompt' state, need to show permission modal
+  } catch {
+    return false; // permissions.query not supported, show modal
+  }
+}
+
 // Permission types for pre-call permission flow
 export type PermissionStatus = 'granted' | 'denied' | 'prompt' | 'unavailable';
 
@@ -391,81 +419,91 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     const currentUser = get().currentUser;
     if (!currentUser) return;
 
-    // Build permission requests list
+    // Build permission requests list (no 'location' - not needed for calls)
     const neededPermissions: PermissionRequest[] = [];
     if (type === 'video') {
       neededPermissions.push({ type: 'camera', status: 'requesting', message: 'Camera access is needed for video calls' });
     }
     neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for calls' });
-    neededPermissions.push({ type: 'location', status: 'requesting', message: 'Location sharing for emergency services' });
 
-    // Show permission modal, then proceed with call on grant
-    set({
-      showPermissionModal: true,
-      permissionRequests: neededPermissions,
-      permissionCallback: (granted: boolean) => {
-        if (!granted) return;
+    // Define the callback that proceeds with the call after permissions are granted
+    const proceedWithCall = (granted: boolean) => {
+      if (!granted) return;
 
-        const state = useZixoStore.getState();
-        const currentUser = state.currentUser;
-        if (!currentUser) return;
+      const state = useZixoStore.getState();
+      const currentUser = state.currentUser;
+      if (!currentUser) return;
 
-        // Reset any previous WebRTC instance
-        resetWebRTC();
-        const webrtc = getWebRTC();
+      // Reset any previous WebRTC instance
+      resetWebRTC();
+      const webrtc = getWebRTC();
 
-        // Set up callbacks
-        webrtc.onRemoteStream = (stream) => {
-          useZixoStore.getState().setCallRemoteStream(stream);
-          useZixoStore.getState().setCallStatus('connected');
-        };
+      // Set up callbacks
+      webrtc.onRemoteStream = (stream) => {
+        useZixoStore.getState().setCallRemoteStream(stream);
+        useZixoStore.getState().setCallStatus('connected');
+      };
 
-        webrtc.onConnectionStateChange = (connState) => {
-          if (connState === 'disconnected' || connState === 'failed') {
-            useZixoStore.getState().endCall();
+      webrtc.onConnectionStateChange = (connState) => {
+        if (connState === 'disconnected' || connState === 'failed') {
+          useZixoStore.getState().endCall();
+        }
+      };
+
+      // Set initial UI state immediately
+      useZixoStore.setState({
+        activeCall: {
+          status: 'ringing',
+          type,
+          remoteUser: user,
+          duration: 0,
+          isMuted: false,
+          isSpeakerOn: type === 'audio',
+          isVideoOn: type === 'video',
+          localStream: null,
+          remoteStream: null,
+          callId: null,
+          startedAt: null,
+          isIncoming: false,
+        },
+        currentScreen: type === 'audio' ? 'audio-call' : 'video-call',
+      });
+
+      // Initiate WebRTC call asynchronously
+      webrtc.startCall(currentUser.uid, currentUser.displayName, user.uid, type)
+        .then((callId) => {
+          const localStream = webrtc.getLocalStream();
+          useZixoStore.setState((s: any) => ({
+            activeCall: s.activeCall
+              ? { ...s.activeCall, callId, localStream, status: 'connecting' }
+              : null,
+          }));
+        })
+        .catch((err: any) => {
+          console.error('[Zixo] Failed to start call:', err);
+          try { webrtc.endCall(); } catch {}
+          useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
+          if (err?.name === 'NotAllowedError') {
+            alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
+          } else {
+            alert('Failed to start call. Please try again.');
           }
-        };
-
-        // Set initial UI state immediately
-        useZixoStore.setState({
-          activeCall: {
-            status: 'ringing',
-            type,
-            remoteUser: user,
-            duration: 0,
-            isMuted: false,
-            isSpeakerOn: type === 'audio',
-            isVideoOn: type === 'video',
-            localStream: null,
-            remoteStream: null,
-            callId: null,
-            startedAt: null,
-            isIncoming: false,
-          },
-          currentScreen: type === 'audio' ? 'audio-call' : 'video-call',
         });
+    };
 
-        // Initiate WebRTC call asynchronously
-        webrtc.startCall(currentUser.uid, currentUser.displayName, user.uid, type)
-          .then((callId) => {
-            const localStream = webrtc.getLocalStream();
-            useZixoStore.setState((s: any) => ({
-              activeCall: s.activeCall
-                ? { ...s.activeCall, callId, localStream, status: 'connecting' }
-                : null,
-            }));
-          })
-          .catch((err: any) => {
-            console.error('[Zixo] Failed to start call:', err);
-            try { webrtc.endCall(); } catch {}
-            useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
-            if (err?.name === 'NotAllowedError') {
-              alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
-            } else {
-              alert('Failed to start call. Please try again.');
-            }
-          });
-      },
+    // Check if permissions have already been decided - skip modal if so
+    checkCallPermissions(type).then((alreadyDecided) => {
+      if (alreadyDecided) {
+        // Permissions already granted or denied, directly proceed
+        proceedWithCall(true);
+      } else {
+        // Show permission modal
+        set({
+          showPermissionModal: true,
+          permissionRequests: neededPermissions,
+          permissionCallback: proceedWithCall,
+        });
+      }
     });
   },
 
@@ -473,89 +511,99 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     const incoming = get().incomingCall;
     if (!incoming) return;
 
-    // Build permission requests list
+    // Build permission requests list (no 'location' - not needed for calls)
     const neededPermissions: PermissionRequest[] = [];
     if (callType === 'video') {
       neededPermissions.push({ type: 'camera', status: 'requesting', message: 'Camera access is needed for video calls' });
     }
     neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for calls' });
-    neededPermissions.push({ type: 'location', status: 'requesting', message: 'Location sharing for emergency services' });
 
-    // Show permission modal, then proceed with answering on grant
-    set({
-      showPermissionModal: true,
-      permissionRequests: neededPermissions,
-      permissionCallback: (granted: boolean) => {
-        if (!granted) {
-          // Reject the incoming call if permissions denied
-          const s = useZixoStore.getState();
-          if (s.incomingCall) {
-            endCallSignal(s.incomingCall.callId);
-          }
-          useZixoStore.setState({ incomingCall: null, activeCall: null });
-          return;
+    // Define the callback that proceeds with answering after permissions are granted
+    const proceedWithAnswer = (granted: boolean) => {
+      if (!granted) {
+        // Reject the incoming call if permissions denied
+        const s = useZixoStore.getState();
+        if (s.incomingCall) {
+          endCallSignal(s.incomingCall.callId);
         }
+        useZixoStore.setState({ incomingCall: null, activeCall: null });
+        return;
+      }
 
-        const currentIncoming = useZixoStore.getState().incomingCall;
-        if (!currentIncoming) return;
+      const currentIncoming = useZixoStore.getState().incomingCall;
+      if (!currentIncoming) return;
 
-        // Reset any previous WebRTC instance
-        resetWebRTC();
-        const webrtc = getWebRTC();
+      // Reset any previous WebRTC instance
+      resetWebRTC();
+      const webrtc = getWebRTC();
 
-        // Set up callbacks
-        webrtc.onRemoteStream = (stream) => {
-          useZixoStore.getState().setCallRemoteStream(stream);
-          useZixoStore.getState().setCallStatus('connected');
-        };
+      // Set up callbacks
+      webrtc.onRemoteStream = (stream) => {
+        useZixoStore.getState().setCallRemoteStream(stream);
+        useZixoStore.getState().setCallStatus('connected');
+      };
 
-        webrtc.onConnectionStateChange = (connState) => {
-          if (connState === 'disconnected' || connState === 'failed') {
-            useZixoStore.getState().endCall();
+      webrtc.onConnectionStateChange = (connState) => {
+        if (connState === 'disconnected' || connState === 'failed') {
+          useZixoStore.getState().endCall();
+        }
+      };
+
+      // Set initial UI state
+      useZixoStore.setState({
+        activeCall: {
+          status: 'connecting',
+          type: callType,
+          remoteUser: callerProfile,
+          duration: 0,
+          isMuted: false,
+          isSpeakerOn: callType === 'audio',
+          isVideoOn: callType === 'video',
+          localStream: null,
+          remoteStream: null,
+          callId,
+          startedAt: null,
+          isIncoming: true,
+        },
+        incomingCall: null,
+        currentScreen: callType === 'audio' ? 'audio-call' : 'video-call',
+      });
+
+      // Answer the call via WebRTC
+      webrtc.answerCall(callId, currentIncoming.callData)
+        .then(() => {
+          const localStream = webrtc.getLocalStream();
+          useZixoStore.setState((s: any) => ({
+            activeCall: s.activeCall
+              ? { ...s.activeCall, localStream, status: 'connecting', startedAt: Date.now() }
+              : null,
+          }));
+        })
+        .catch((err: any) => {
+          console.error('[Zixo] Failed to answer call:', err);
+          try { webrtc.endCall(); } catch {}
+          useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
+          if (err?.name === 'NotAllowedError') {
+            alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
+          } else {
+            alert('Failed to answer call. Please try again.');
           }
-        };
-
-        // Set initial UI state
-        useZixoStore.setState({
-          activeCall: {
-            status: 'connecting',
-            type: callType,
-            remoteUser: callerProfile,
-            duration: 0,
-            isMuted: false,
-            isSpeakerOn: callType === 'audio',
-            isVideoOn: callType === 'video',
-            localStream: null,
-            remoteStream: null,
-            callId,
-            startedAt: null,
-            isIncoming: true,
-          },
-          incomingCall: null,
-          currentScreen: callType === 'audio' ? 'audio-call' : 'video-call',
         });
+    };
 
-        // Answer the call via WebRTC
-        webrtc.answerCall(callId, currentIncoming.callData)
-          .then(() => {
-            const localStream = webrtc.getLocalStream();
-            useZixoStore.setState((s: any) => ({
-              activeCall: s.activeCall
-                ? { ...s.activeCall, localStream, status: 'connecting', startedAt: Date.now() }
-                : null,
-            }));
-          })
-          .catch((err: any) => {
-            console.error('[Zixo] Failed to answer call:', err);
-            try { webrtc.endCall(); } catch {}
-            useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
-            if (err?.name === 'NotAllowedError') {
-              alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
-            } else {
-              alert('Failed to answer call. Please try again.');
-            }
-          });
-      },
+    // Check if permissions have already been decided - skip modal if so
+    checkCallPermissions(callType).then((alreadyDecided) => {
+      if (alreadyDecided) {
+        // Permissions already granted or denied, directly proceed
+        proceedWithAnswer(true);
+      } else {
+        // Show permission modal
+        set({
+          showPermissionModal: true,
+          permissionRequests: neededPermissions,
+          permissionCallback: proceedWithAnswer,
+        });
+      }
     });
   },
 
@@ -570,6 +618,16 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
   endCall: () => {
     const { activeCall, currentUser } = get();
+
+    // Always send endCallSignal FIRST to ensure RTDB data is cleaned up, even if WebRTC throws
+    if (activeCall?.callId) {
+      try {
+        endCallSignal(activeCall.callId);
+      } catch (e) {
+        // Signal might fail if call was already ended
+        console.warn('[Zixo] endCallSignal failed:', e);
+      }
+    }
 
     // End WebRTC connection
     try {
@@ -1101,13 +1159,22 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     }),
 
   // Update user profile (syncs with Firestore externally)
+  // Also updates participantProfiles in all chats
   updateUserProfile: (updates) =>
     set((state) => {
       if (!state.currentUser) return {};
       const updatedUser = { ...state.currentUser, ...updates };
+      // Also update in all chats where this user is a participant
+      const updatedChats = state.chats.map(chat => ({
+        ...chat,
+        participantProfiles: chat.participantProfiles.map(p =>
+          p.uid === updatedUser.uid ? { ...p, ...updates } : p
+        ),
+      }));
       return {
         currentUser: updatedUser,
         userProfiles: { ...state.userProfiles, [updatedUser.uid]: updatedUser },
+        chats: updatedChats,
       };
     }),
 

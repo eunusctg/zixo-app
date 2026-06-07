@@ -4,8 +4,8 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useZixoStore } from '@/stores/useZixoStore';
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
 import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory } from '@/services/firestore';
-import { initFCM } from '@/services/messaging';
-import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToMultiplePresence, subscribeToGroupCalls, type RTDBCallSignal } from '@/services/presence';
+import { initFCM, sendPushNotification } from '@/services/messaging';
+import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToCallStatus, subscribeToMultiplePresence, subscribeToGroupCalls, type RTDBCallSignal } from '@/services/presence';
 
 // ==================== RETRY LOGIC ====================
 
@@ -110,6 +110,22 @@ export function useFirebaseBridge() {
         try {
           const profile = await getUserProfile(firebaseUser.uid);
           if (profile) {
+            // Check if user is banned
+            if ((profile as any).banned === true) {
+              console.log('[Zixo Bridge] User is banned, signing out');
+              try {
+                const { signOut } = await import('firebase/auth');
+                const { auth } = await import('@/services/firebase');
+                await signOut(auth);
+              } catch (signOutErr) {
+                console.error('[Zixo Bridge] Failed to sign out banned user:', signOutErr);
+              }
+              // Show a message before redirect
+              if (typeof window !== 'undefined') {
+                alert('Your account has been suspended. Please contact support if you believe this is an error.');
+              }
+              return;
+            }
             console.log('[Zixo Bridge] User profile loaded, logging in');
             login(profile);
             initFCM(firebaseUser.uid).catch(console.error);
@@ -127,7 +143,7 @@ export function useFirebaseBridge() {
               lastSeen: Date.now(),
               createdAt: Date.now(),
               role: 'user',
-              // zixoNumber intentionally omitted here - will be assigned properly when Firestore profile is created
+              zixoNumber: '',
             };
             login(tempProfile);
           }
@@ -145,7 +161,7 @@ export function useFirebaseBridge() {
             lastSeen: Date.now(),
             createdAt: Date.now(),
             role: 'user',
-            // zixoNumber intentionally omitted here - will be assigned properly when Firestore profile is created
+            zixoNumber: '',
           };
           console.log('[Zixo Bridge] Using temp profile due to error');
           login(tempProfile);
@@ -215,6 +231,25 @@ export function useFirebaseBridge() {
 
             const uiChats = firestoreChats.map((fc) => {
               const myUnread = fc.unreadCount?.[currentUser.uid] || 0;
+
+              // Send push notification for new messages in non-active chats from other users
+              const currentActiveChatId = useZixoStore.getState().activeChatId;
+              if (
+                myUnread > 0 &&
+                fc.id !== currentActiveChatId &&
+                fc.lastMessageSender &&
+                fc.lastMessageSender !== currentUser.uid &&
+                !fc.muted?.includes(currentUser.uid)
+              ) {
+                const senderName = profiles[fc.lastMessageSender]?.displayName || 'Someone';
+                sendPushNotification(
+                  currentUser.uid,
+                  senderName,
+                  fc.lastMessage || 'Sent a message',
+                  { type: 'new-message', chatId: fc.id, senderId: fc.lastMessageSender }
+                ).catch(() => {});
+              }
+
               return {
                 id: fc.id,
                 participants: fc.participants,
@@ -456,6 +491,14 @@ export function useFirebaseBridge() {
               callData: call.data,
             });
             useZixoStore.getState().setScreen('incoming-call');
+
+            // Send a forceful push notification for the incoming call
+            sendPushNotification(
+              currentUser.uid,
+              `Incoming ${call.data.type} call`,
+              `${callerProfile.displayName} is calling you`,
+              { type: 'incoming-call', callId: call.id, callType: call.data.type }
+            ).catch(() => {});
           }
         }
       });
@@ -467,6 +510,30 @@ export function useFirebaseBridge() {
       if (unsub) unsub();
     };
   }, [isAuthenticated, currentUser, setIncomingCall]);
+
+  // 8b. Watch active call status - end call on receiver side when caller hangs up
+  useEffect(() => {
+    const { activeCall } = useZixoStore.getState();
+    if (!activeCall?.callId || !isAuthenticated) return;
+
+    let unsub: (() => void) | null = null;
+
+    try {
+      unsub = subscribeToCallStatus(activeCall.callId, (callData) => {
+        if (!callData) {
+          // Call data was removed or status is 'ended' - remote party hung up
+          console.log('[Zixo] Active call ended by remote party');
+          useZixoStore.getState().endCall();
+        }
+      });
+    } catch (error) {
+      console.warn('[Zixo] RTDB active call status subscription failed:', error);
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [useZixoStore.getState().activeCall?.callId, isAuthenticated]);
 
   // 9. Listen for incoming group calls (RTDB) - show incoming group call screen
   useEffect(() => {
@@ -499,6 +566,14 @@ export function useFirebaseBridge() {
             callData: call.data,
           });
           useZixoStore.getState().setScreen('incoming-group-call');
+
+          // Send a forceful push notification for the incoming group call
+          sendPushNotification(
+            currentUser.uid,
+            `Group ${call.data.type === 'group-video' ? 'Video' : 'Audio'} Call`,
+            `${call.data.callerName || 'Unknown'} is calling`,
+            { type: 'incoming-group-call', callId: call.id, callType: call.data.type }
+          ).catch(() => {});
         }
       });
     } catch (error) {

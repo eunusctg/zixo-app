@@ -284,6 +284,15 @@ export default function ZixoApp() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const autoStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up recording timers on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (autoStopTimeoutRef.current) clearTimeout(autoStopTimeoutRef.current);
+    };
+  }, []);
 
   const handleVoiceRecord = useCallback(async () => {
     if (isRecording) {
@@ -293,6 +302,11 @@ export default function ZixoApp() {
       }
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      if (autoStopTimeoutRef.current) {
+        clearTimeout(autoStopTimeoutRef.current);
+        autoStopTimeoutRef.current = null;
       }
       setIsRecording(false);
       return;
@@ -300,7 +314,16 @@ export default function ZixoApp() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      // Determine supported MIME type with fallback for Safari/iOS
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : MediaRecorder.isTypeSupported('audio/mp4')
+            ? 'audio/mp4'
+            : 'audio/ogg';
+      const fileExt = mimeType.startsWith('audio/mp4') ? 'm4a' : mimeType.startsWith('audio/ogg') ? 'ogg' : 'webm';
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -316,19 +339,23 @@ export default function ZixoApp() {
         // Stop all audio tracks
         stream.getTracks().forEach(track => track.stop());
 
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         const duration = Math.floor((Date.now() - startTime) / 1000);
 
         if (audioBlob.size > 0 && duration > 0) {
           // Upload voice note to storage
           try {
             const { uploadChatMedia } = await import('@/services/storage');
-            const file = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
+            const file = new File([audioBlob], `voice_${Date.now()}.${fileExt}`, { type: mimeType });
             const uploadResult = await uploadChatMedia(activeChatId || '', currentUser?.uid || '', file, 'voice');
-            handleSendMessage('🎤 Voice note', 'voice', { mediaUrl: uploadResult.downloadUrl, duration });
+            if (uploadResult?.downloadUrl) {
+              handleSendMessage('🎤 Voice note', 'voice', { mediaUrl: uploadResult.downloadUrl, duration });
+            } else {
+              handleSendMessage('🎤 Voice note', 'voice', { duration });
+            }
           } catch (err) {
             console.error('[Zixo] Voice upload failed:', err);
-            // Fallback: send as text
+            // Fallback: send as voice message without media URL
             handleSendMessage('🎤 Voice note', 'voice', { duration });
           }
         }
@@ -347,12 +374,16 @@ export default function ZixoApp() {
       }, 1000);
 
       // Auto-stop after 5 minutes
-      setTimeout(() => {
+      autoStopTimeoutRef.current = setTimeout(() => {
         if (mediaRecorderRef.current?.state === 'recording') {
           mediaRecorderRef.current.stop();
-          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+          if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current);
+            recordingTimerRef.current = null;
+          }
           setIsRecording(false);
         }
+        autoStopTimeoutRef.current = null;
       }, 300000);
 
     } catch (err: any) {
@@ -971,6 +1002,7 @@ export default function ZixoApp() {
           <ContactsScreen
             contacts={allContacts}
             allUsers={allUsers}
+            currentUser={currentUser}
             onStartChat={async (userId) => {
               // Create or get chat in Firestore, then navigate
               try {

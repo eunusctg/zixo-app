@@ -56,6 +56,7 @@ export class ZixoGroupWebRTC {
   private localName: string = '';
   private localStream: MediaStream | null = null;
   private peers: Map<string, PeerEntry> = new Map();
+  private connectingPeers: Set<string> = new Set();
   private unsubCall: Array<() => void> = [];
   private processedOffers: Set<string> = new Set();
   private processedAnswers: Set<string> = new Set();
@@ -140,7 +141,13 @@ export class ZixoGroupWebRTC {
     const statusRef = ref(rtdb, `groupCalls/${callId}/status`);
     await set(statusRef, 'active');
 
+    // Listen for signaling FIRST, so we catch offers/answers/candidates
+    // that arrive while we process existing participants
+    this.listenForSignaling();
+
     // Get existing participants and create peer connections
+    // Note: onChildAdded in listenForSignaling will also fire for existing participants,
+    // but this.peers.has() check prevents duplicate connections
     const participantsSnap = await get(ref(rtdb, `groupCalls/${callId}/participants`));
     if (participantsSnap.exists()) {
       const participants = participantsSnap.val() as Record<string, GroupCallParticipant>;
@@ -153,9 +160,6 @@ export class ZixoGroupWebRTC {
         }
       }
     }
-
-    // Listen for signaling
-    this.listenForSignaling();
   }
 
   // ==================== LEAVE GROUP CALL ====================
@@ -213,6 +217,7 @@ export class ZixoGroupWebRTC {
     this.callId = null;
     this.localUid = null;
     this.localName = '';
+    this.connectingPeers.clear();
     this.processedOffers.clear();
     this.processedAnswers.clear();
     this.processedCandidates.clear();
@@ -221,9 +226,11 @@ export class ZixoGroupWebRTC {
   // ==================== CREATE PEER CONNECTION ====================
 
   private async createPeerConnection(remoteUid: string, isInitiator: boolean): Promise<void> {
-    // Don't create duplicate connections
-    if (this.peers.has(remoteUid)) return;
+    // Don't create duplicate connections (also check connectingPeers for race condition)
+    if (this.peers.has(remoteUid) || this.connectingPeers.has(remoteUid)) return;
+    this.connectingPeers.add(remoteUid);
 
+    try {
     const pc = new RTCPeerConnection(ICE_SERVERS);
     const remoteStream = new MediaStream();
 
@@ -295,6 +302,10 @@ export class ZixoGroupWebRTC {
 
     // Listen for ICE candidates from remote peer
     this.listenForCandidates(remoteUid);
+    } catch (err) {
+      this.connectingPeers.delete(remoteUid);
+      throw err;
+    }
   }
 
   // ==================== LISTEN FOR ANSWER ====================
@@ -482,13 +493,13 @@ export class ZixoGroupWebRTC {
     });
     this.unsubCall.push(unsubOffers);
 
-    // Listen for call status changes (ended)
+    // Listen for call status changes (ended by creator)
     const statusRef = ref(rtdb, `groupCalls/${this.callId}/status`);
     const unsubStatus = onValue(statusRef, (snap) => {
       if (snap.exists() && snap.val() === 'ended') {
-        if (this.onParticipantLeft) {
-          // Signal to all that the call ended
-        }
+        // Call was ended by the creator - leave the call
+        console.log('[Zixo Group] Call ended by creator, leaving...');
+        this.leaveGroupCall();
       }
     });
     this.unsubCall.push(unsubStatus);

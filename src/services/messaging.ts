@@ -28,17 +28,20 @@ export async function requestNotificationPermission(): Promise<string | null> {
 
 /**
  * Listen to foreground messages (when app is in focus)
+ * Returns a cleanup function that properly unsubscribes
  */
 export function onForegroundMessage(callback: (payload: MessagePayload) => void): () => void {
   let unsubscribe: (() => void) | null = null;
+  let cleanedUp = false;
 
   messagingPromise.then((messaging) => {
-    if (messaging) {
+    if (messaging && !cleanedUp) {
       unsubscribe = onMessage(messaging, callback);
     }
   });
 
   return () => {
+    cleanedUp = true;
     if (unsubscribe) unsubscribe();
   };
 }
@@ -79,7 +82,37 @@ export async function initFCM(uid: string): Promise<() => void> {
 }
 
 /**
- * Show an in-app notification banner
+ * Send a push notification to a specific user via the server API
+ * This is "forceful" - it sends even if the user is online
+ */
+export async function sendPushNotification(
+  uid: string,
+  title: string,
+  body: string,
+  data?: Record<string, string>
+): Promise<boolean> {
+  try {
+    const response = await fetch('/api/zixo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'sendPush',
+        uid,
+        title,
+        body,
+        data,
+      }),
+    });
+    const result = await response.json();
+    return result.success === true;
+  } catch (err) {
+    console.error('[Zixo] Push notification failed:', err);
+    return false;
+  }
+}
+
+/**
+ * Show an in-app notification banner (XSS-safe: uses textContent instead of innerHTML)
  */
 function showInAppNotification(title: string, body: string) {
   // Create a custom notification element
@@ -97,13 +130,26 @@ function showInAppNotification(title: string, body: string) {
     animation: slideDown 0.3s ease-out;
   `;
 
-  notif.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-      <div style="width:24px;height:24px;border-radius:8px;background:linear-gradient(135deg,#6C5CE7,#00D2D3);display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:12px;">Z</div>
-      <span style="font-weight:600;font-size:14px;">${title}</span>
-    </div>
-    <p style="font-size:13px;color:#B0B0C3;margin:0;">${body}</p>
-  `;
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:4px;';
+
+  const icon = document.createElement('div');
+  icon.style.cssText = 'width:24px;height:24px;border-radius:8px;background:linear-gradient(135deg,#6C5CE7,#00D2D3);display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:12px;';
+  icon.textContent = 'Z';
+
+  const titleEl = document.createElement('span');
+  titleEl.style.cssText = 'font-weight:600;font-size:14px;';
+  titleEl.textContent = title; // Safe - uses textContent
+
+  header.appendChild(icon);
+  header.appendChild(titleEl);
+
+  const bodyEl = document.createElement('p');
+  bodyEl.style.cssText = 'font-size:13px;color:#B0B0C3;margin:0;';
+  bodyEl.textContent = body; // Safe - uses textContent
+
+  notif.appendChild(header);
+  notif.appendChild(bodyEl);
 
   // Add animation
   const style = document.createElement('style');

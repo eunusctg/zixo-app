@@ -71,6 +71,21 @@ function ParticipantTile({ uid, displayName, avatar, stream, isMuted, isVideoOn,
         boxShadow: isActive ? '0 0 20px rgba(37, 211, 102, 0.2)' : 'none',
       }}
     >
+      {/* Audio element for audio calls - always render when stream exists */}
+      {stream && !isLocal && (
+        <audio
+          ref={(el) => {
+            if (el && stream) {
+              el.srcObject = stream;
+              el.play().catch(() => {});
+            }
+          }}
+          autoPlay
+          playsInline
+          style={{ display: 'none' }}
+        />
+      )}
+
       {/* Video stream */}
       {isVideoOn && stream ? (
         <video
@@ -282,6 +297,20 @@ export function GroupAudioCallScreen({
                 exit={{ opacity: 0, scale: 0.8 }}
                 className="flex flex-col items-center"
               >
+                {/* Hidden audio element for audio calls */}
+                {p.stream && (
+                  <audio
+                    ref={(el) => {
+                      if (el && p.stream) {
+                        el.srcObject = p.stream;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay
+                    playsInline
+                    style={{ display: 'none' }}
+                  />
+                )}
                 <motion.div
                   animate={status === 'active' && !p.isMuted ? {
                     boxShadow: [

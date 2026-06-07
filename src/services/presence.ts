@@ -209,6 +209,36 @@ export function subscribeToIncomingCalls(
 }
 
 /**
+ * Subscribe to a specific call's data in real-time.
+ * Used to detect when the remote party ends the call (data deleted or status changed to 'ended').
+ */
+export function subscribeToCallStatus(
+  callId: string,
+  callback: (data: RTDBCallSignal | null) => void
+): () => void {
+  const callRef = ref(rtdb, `calls/${callId}`);
+
+  const unsubscribe = onValue(callRef, (snap) => {
+    if (snap.exists()) {
+      const data = snap.val() as RTDBCallSignal;
+      if (data.status === 'ended') {
+        callback(null);
+      } else {
+        callback(data);
+      }
+    } else {
+      // Call data was removed (caller hung up)
+      callback(null);
+    }
+  });
+
+  return () => {
+    off(callRef);
+    unsubscribe();
+  };
+}
+
+/**
  * Update a call signal
  */
 export function updateCallSignal(callId: string, updates: Partial<RTDBCallSignal>): void {

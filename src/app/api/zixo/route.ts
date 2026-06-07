@@ -360,6 +360,122 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ==================== SETUP: SET ADMIN ROLE (one-time setup) ====================
+      case 'setAdminRole': {
+        const { targetUid, secret } = body;
+
+        // Only allow with the setup secret (one-time use for initial admin setup)
+        if (secret !== 'zixo-admin-setup-2026' || !targetUid) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
+
+        try {
+          await adminOperations.setDocument('users', targetUid, { role: 'admin' }, true);
+          return NextResponse.json({ success: true, message: `Admin role set for ${targetUid}` });
+        } catch (err: any) {
+          console.error('[Zixo API] Set admin role error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to set admin role', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: ASSIGN ZIXO NUMBERS ====================
+      case 'assignZixoNumbers': {
+        const { requesterUid } = body;
+
+        if (!requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required field: requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can assign Zixo numbers' },
+              { status: 403 }
+            );
+          }
+
+          // Get all users from Firestore
+          let users: any[] = [];
+          try {
+            const listResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/users?pageSize=300`
+            );
+            if (listResult?.documents) {
+              users = listResult.documents.map((doc: any) => ({
+                id: doc.name.split('/').pop(),
+                ...adminOperations.firestoreDocumentToJs(doc),
+              }));
+            }
+          } catch (listErr: any) {
+            console.warn('[Zixo API] List documents failed:', listErr.message);
+            return NextResponse.json(
+              { error: 'Failed to list users', details: listErr.message },
+              { status: 500 }
+            );
+          }
+
+          // For each user without a zixoNumber, generate and assign one
+          let assignedCount = 0;
+          const usedNumbers = new Set<string>();
+
+          // Collect existing zixoNumbers to avoid collisions
+          for (const user of users) {
+            if (user.zixoNumber) {
+              usedNumbers.add(user.zixoNumber);
+            }
+          }
+
+          for (const user of users) {
+            if (!user.zixoNumber && user.id) {
+              // Generate a unique 8-digit number
+              let zixoNumber = '';
+              for (let attempt = 0; attempt < 20; attempt++) {
+                const num = String(Math.floor(Math.random() * 90000000) + 10000000);
+                if (!usedNumbers.has(num)) {
+                  zixoNumber = num;
+                  usedNumbers.add(num);
+                  break;
+                }
+              }
+
+              if (zixoNumber) {
+                try {
+                  // Update the user profile
+                  await adminOperations.setDocument('users', user.id, { zixoNumber }, true);
+                  // Create zixoNumber mapping
+                  await adminOperations.setDocument('zixoNumbers', zixoNumber, { uid: user.id }, false);
+                  assignedCount++;
+                } catch (err: any) {
+                  console.warn(`[Zixo API] Failed to assign zixoNumber for ${user.id}:`, err.message);
+                }
+              }
+            }
+          }
+
+          return NextResponse.json({
+            success: true,
+            totalUsers: users.length,
+            assignedCount,
+            message: `Assigned ${assignedCount} Zixo numbers to users without one`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Assign Zixo numbers error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to assign Zixo numbers', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
       // ==================== ADMIN: GRANT ADMIN ROLE ====================
       case 'grantAdmin': {
         const { targetUid, requesterUid } = body;
@@ -621,6 +737,338 @@ export async function POST(request: NextRequest) {
           console.error('[Zixo API] Enable phone auth error:', err.message);
           return NextResponse.json(
             { error: 'Failed to enable phone auth', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: BAN USER ====================
+      case 'banUser': {
+        const { targetUid, requesterUid } = body;
+
+        if (!targetUid || !requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required fields: targetUid, requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can ban users' },
+              { status: 403 }
+            );
+          }
+
+          // Set banned: true on the user's Firestore doc
+          await adminOperations.setDocument('users', targetUid, { banned: true }, true);
+
+          // Also clear their online status so they appear offline
+          await rtdbSet(`/presence/${targetUid}`, 'DELETE');
+
+          return NextResponse.json({
+            success: true,
+            message: `User ${targetUid} has been banned`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Ban user error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to ban user', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: UNBAN USER ====================
+      case 'unbanUser': {
+        const { targetUid, requesterUid } = body;
+
+        if (!targetUid || !requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required fields: targetUid, requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can unban users' },
+              { status: 403 }
+            );
+          }
+
+          // Set banned: false on the user's Firestore doc
+          await adminOperations.setDocument('users', targetUid, { banned: false }, true);
+
+          return NextResponse.json({
+            success: true,
+            message: `User ${targetUid} has been unbanned`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Unban user error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to unban user', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: BROADCAST NOTIFICATION ====================
+      case 'broadcastNotification': {
+        const { title, body: notifBody, requesterUid } = body;
+
+        if (!title || !requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required fields: title, requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can broadcast notifications' },
+              { status: 403 }
+            );
+          }
+
+          // List all users and find those with FCM tokens
+          let users: any[] = [];
+          try {
+            const listResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/users?pageSize=300`
+            );
+            if (listResult?.documents) {
+              users = listResult.documents.map((doc: any) => ({
+                id: doc.name.split('/').pop(),
+                ...adminOperations.firestoreDocumentToJs(doc),
+              }));
+            }
+          } catch (listErr: any) {
+            console.warn('[Zixo API] List documents for broadcast failed:', listErr.message);
+          }
+
+          // Send FCM to all users with fcmToken
+          let sentCount = 0;
+          let failedCount = 0;
+          const sendPromises = users
+            .filter((u: any) => u.fcmToken && !u.banned)
+            .map(async (u: any) => {
+              try {
+                await adminOperations.sendFCMMessage(
+                  u.fcmToken,
+                  { title, body: notifBody || '' },
+                  { type: 'admin_broadcast' }
+                );
+                sentCount++;
+              } catch {
+                failedCount++;
+              }
+            });
+
+          await Promise.allSettled(sendPromises);
+
+          return NextResponse.json({
+            success: true,
+            sentCount,
+            failedCount,
+            totalUsers: users.length,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Broadcast notification error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to broadcast notification', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: GET APP STATS ====================
+      case 'getAppStats': {
+        const { requesterUid } = body;
+
+        if (!requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required field: requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can view stats' },
+              { status: 403 }
+            );
+          }
+
+          // Get user counts from Firestore
+          let totalUsers = 0;
+          let onlineUsers = 0;
+          try {
+            const listResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/users?pageSize=300`
+            );
+            if (listResult?.documents) {
+              totalUsers = listResult.documents.length;
+              onlineUsers = listResult.documents.filter((doc: any) => {
+                const js = adminOperations.firestoreDocumentToJs(doc);
+                return js.online === true;
+              }).length;
+            }
+          } catch (err: any) {
+            console.warn('[Zixo API] Stats user list failed:', err.message);
+          }
+
+          // Get active chats count from Firestore
+          let activeChats = 0;
+          try {
+            const chatResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/chats?pageSize=300`
+            );
+            if (chatResult?.documents) {
+              activeChats = chatResult.documents.length;
+            }
+          } catch (err: any) {
+            console.warn('[Zixo API] Stats chat list failed:', err.message);
+          }
+
+          // Get call count from RTDB
+          let callCount = 0;
+          try {
+            const calls = await rtdbGet('/calls');
+            if (calls && typeof calls === 'object') {
+              callCount = Object.keys(calls).length;
+            }
+          } catch (err: any) {
+            console.warn('[Zixo API] Stats call count failed:', err.message);
+          }
+
+          // Also get presence count from RTDB
+          let presenceCount = 0;
+          try {
+            const presence = await rtdbGet('/presence');
+            if (presence && typeof presence === 'object') {
+              presenceCount = Object.keys(presence).length;
+            }
+          } catch (err: any) {
+            console.warn('[Zixo API] Stats presence count failed:', err.message);
+          }
+
+          // Use the higher of Firestore online count vs RTDB presence count
+          const effectiveOnline = Math.max(onlineUsers, presenceCount);
+
+          return NextResponse.json({
+            success: true,
+            stats: {
+              totalUsers,
+              onlineUsers: effectiveOnline,
+              activeChats,
+              callCount,
+            },
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Get app stats error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to get app stats', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: UPDATE AUTH CONFIG ====================
+      case 'updateAuthConfig': {
+        const { requesterUid, phoneEnabled, googleEnabled } = body;
+
+        if (!requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required field: requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can update auth config' },
+              { status: 403 }
+            );
+          }
+
+          // Get OAuth2 access token
+          const token = await adminOperations.getAccessToken();
+          if (!token) {
+            return NextResponse.json(
+              { error: 'No admin access token available. Set FIREBASE_PRIVATE_KEY.' },
+              { status: 500 }
+            );
+          }
+
+          // Update Identity Toolkit config
+          const updateBody: any = {
+            signIn: {
+              allowDuplicateEmails: false,
+              anonymous: { enabled: false },
+              email: { enabled: true, passwordRequired: true },
+              phone: { enabled: phoneEnabled ?? true },
+            },
+          };
+
+          const updateRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v2/projects/${PROJECT_ID}/config?updateMask=signIn`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(updateBody),
+            }
+          );
+
+          if (!updateRes.ok) {
+            const errText = await updateRes.text();
+            return NextResponse.json({
+              success: false,
+              error: `Identity Toolkit update failed: ${updateRes.status}`,
+              details: errText,
+            }, { status: 500 });
+          }
+
+          const updatedConfig = await updateRes.json();
+
+          // Store auth config in RTDB for reference
+          await rtdbSet('/admin/authConfig', 'PUT', {
+            phoneEnabled: phoneEnabled ?? true,
+            googleEnabled: googleEnabled ?? true,
+            updatedAt: Date.now(),
+          });
+
+          return NextResponse.json({
+            success: true,
+            phoneEnabled: updatedConfig?.signIn?.phone?.enabled ?? phoneEnabled,
+            googleEnabled: googleEnabled ?? true,
+            message: 'Auth configuration updated',
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Update auth config error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to update auth config', details: err.message },
             { status: 500 }
           );
         }
