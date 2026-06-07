@@ -1,6 +1,245 @@
 import { getToken, onMessage, type MessagePayload } from 'firebase/messaging';
 import { messagingPromise, FCM_VAPID_KEY } from './firebase';
 
+// ==================== NOTIFICATION SOUND ====================
+
+let audioContext: AudioContext | null = null;
+let notificationSoundEnabled = true;
+
+/**
+ * Play a short notification sound using Web Audio API
+ * Generates a pleasant two-tone chime without needing an audio file
+ */
+export function playNotificationSound(): void {
+  if (!notificationSoundEnabled) return;
+  if (typeof window === 'undefined') return;
+
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+
+    const ctx = audioContext;
+    const now = ctx.currentTime;
+
+    // First tone - higher pitch
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(880, now);
+    osc1.frequency.exponentialRampToValueAtTime(440, now + 0.15);
+    gain1.gain.setValueAtTime(0.3, now);
+    gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.2);
+
+    // Second tone - lower pitch, delayed
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(660, now + 0.15);
+    osc2.frequency.exponentialRampToValueAtTime(330, now + 0.35);
+    gain2.gain.setValueAtTime(0.2, now + 0.15);
+    gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.15);
+    osc2.stop(now + 0.4);
+  } catch (err) {
+    console.warn('[Zixo] Could not play notification sound:', err);
+  }
+}
+
+/**
+ * Play a ringing sound for incoming calls
+ * Generates a more prominent, repeating ring pattern
+ */
+export function playRingingSound(): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+
+    const ctx = audioContext;
+    const now = ctx.currentTime;
+
+    // Ring pattern: two tones repeated
+    for (let i = 0; i < 3; i++) {
+      const offset = i * 0.4;
+      // First ring tone
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(440, now + offset);
+      gain1.gain.setValueAtTime(0.4, now + offset);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.15);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now + offset);
+      osc1.stop(now + offset + 0.15);
+
+      // Second ring tone (higher)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(520, now + offset + 0.15);
+      gain2.gain.setValueAtTime(0.4, now + offset + 0.15);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.3);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + offset + 0.15);
+      osc2.stop(now + offset + 0.3);
+    }
+  } catch (err) {
+    console.warn('[Zixo] Could not play ringing sound:', err);
+  }
+}
+
+export function setNotificationSoundEnabled(enabled: boolean): void {
+  notificationSoundEnabled = enabled;
+}
+
+export function isNotificationSoundEnabled(): boolean {
+  return notificationSoundEnabled;
+}
+
+// ==================== MESSAGE BADGE ====================
+
+let unreadCount = 0;
+const originalTitle = typeof document !== 'undefined' ? document.title : 'Zixo';
+
+/**
+ * Update the document title to show unread count
+ */
+export function updateMessageBadge(count: number): void {
+  unreadCount = count;
+  if (typeof document === 'undefined') return;
+
+  if (count > 0) {
+    document.title = `(${count}) Zixo`;
+  } else {
+    document.title = 'Zixo';
+  }
+}
+
+/**
+ * Increment the unread message badge
+ */
+export function incrementMessageBadge(): void {
+  updateMessageBadge(unreadCount + 1);
+}
+
+/**
+ * Clear the unread message badge
+ */
+export function clearMessageBadge(): void {
+  updateMessageBadge(0);
+}
+
+/**
+ * Get current unread count
+ */
+export function getUnreadCount(): number {
+  return unreadCount;
+}
+
+// ==================== NOTIFICATION BANNER STATE ====================
+
+type BannerCallback = (notification: { id: string; senderName: string; senderAvatar?: string; messagePreview: string; chatId?: string; type: 'message' | 'call' }) => void;
+let bannerListeners: BannerCallback[] = [];
+
+/**
+ * Register a listener for notification banner events
+ */
+export function onNotificationBanner(callback: BannerCallback): () => void {
+  bannerListeners.push(callback);
+  return () => {
+    bannerListeners = bannerListeners.filter(cb => cb !== callback);
+  };
+}
+
+/**
+ * Show a notification banner (called from FCM foreground handler)
+ */
+export function showBannerNotification(data: {
+  senderName: string;
+  senderAvatar?: string;
+  messagePreview: string;
+  chatId?: string;
+  type?: 'message' | 'call';
+}): void {
+  const notification = {
+    id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    senderName: data.senderName,
+    senderAvatar: data.senderAvatar,
+    messagePreview: data.messagePreview,
+    chatId: data.chatId,
+    type: data.type || 'message' as const,
+  };
+
+  bannerListeners.forEach(cb => cb(notification));
+}
+
+// ==================== BACKGROUND NOTIFICATION HANDLER ====================
+
+/**
+ * Initialize background notification support
+ * Uses the Notification API for when the app is not in focus
+ */
+export function initBackgroundNotifications(): void {
+  if (typeof window === 'undefined') return;
+
+  // Listen for visibility changes to track when app goes to background
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // App came to foreground - clear badge
+      clearMessageBadge();
+    }
+  });
+}
+
+/**
+ * Show a browser notification when the app is not in focus
+ */
+export function showBrowserNotification(title: string, body: string, data?: Record<string, string>): void {
+  if (typeof window === 'undefined') return;
+  if (document.visibilityState === 'visible') return; // Don't show if app is visible
+
+  try {
+    if (Notification.permission !== 'granted') return;
+
+    const notification = new Notification(title, {
+      body,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      tag: data?.chatId || 'zixo-notification',
+      data,
+      silent: false,
+    });
+
+    notification.onclick = () => {
+      window.focus();
+      notification.close();
+      // Navigate to chat if we have a chatId
+      if (data?.chatId) {
+        // The app will handle navigation via its own routing
+        window.dispatchEvent(new CustomEvent('zixo-navigate-chat', { detail: { chatId: data.chatId } }));
+      }
+    };
+
+    // Auto-close after 10 seconds
+    setTimeout(() => notification.close(), 10000);
+  } catch (err) {
+    console.warn('[Zixo] Could not show browser notification:', err);
+  }
+}
+
+// ==================== FCM CORE ====================
+
 /**
  * Request notification permission and get FCM token
  */
@@ -57,6 +296,7 @@ export async function saveFCMToken(uid: string, token: string): Promise<void> {
 
 /**
  * Initialize FCM: request permission, get token, save it, listen for messages
+ * Enhanced with notification banners, sounds, and badge updates
  */
 export async function initFCM(uid: string): Promise<() => void> {
   // Request permission and get token
@@ -67,14 +307,38 @@ export async function initFCM(uid: string): Promise<() => void> {
     await saveFCMToken(uid, token);
   }
 
+  // Initialize background notification support
+  initBackgroundNotifications();
+
   // Listen for foreground messages
   const unsubscribe = onForegroundMessage((payload) => {
     console.log('Foreground message received:', payload);
 
-    // Show in-app notification
+    // Show in-app notification banner
     if (payload.notification) {
       const { title, body } = payload.notification;
-      showInAppNotification(title || 'Zixo', body || '');
+      const chatId = payload.data?.chatId as string | undefined;
+      const type = (payload.data?.type as string) === 'incoming-call' ? 'call' as const : 'message' as const;
+
+      showBannerNotification({
+        senderName: title || 'Zixo',
+        messagePreview: body || '',
+        chatId,
+        type,
+      });
+
+      // Play notification sound
+      if (type === 'call') {
+        playRingingSound();
+      } else {
+        playNotificationSound();
+      }
+
+      // Increment badge
+      incrementMessageBadge();
+
+      // Show browser notification if app is not focused
+      showBrowserNotification(title || 'Zixo', body || '', payload.data as Record<string, string> | undefined);
     }
   });
 
@@ -112,60 +376,15 @@ export async function sendPushNotification(
 }
 
 /**
- * Show an in-app notification banner (XSS-safe: uses textContent instead of innerHTML)
+ * Show an in-app notification banner (XSS-safe)
+ * @deprecated Use showBannerNotification instead for the React-based banner
  */
 function showInAppNotification(title: string, body: string) {
-  // Create a custom notification element
-  if (typeof document === 'undefined') return;
-
-  const notif = document.createElement('div');
-  notif.id = 'zixo-notification';
-  notif.style.cssText = `
-    position: fixed; top: 20px; right: 20px; z-index: 9999;
-    background: rgba(26, 26, 46, 0.95); backdrop-filter: blur(20px);
-    border: 1px solid rgba(108, 92, 231, 0.3);
-    border-radius: 16px; padding: 16px 20px; max-width: 320px;
-    color: white; font-family: 'Inter', sans-serif;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    animation: slideDown 0.3s ease-out;
-  `;
-
-  const header = document.createElement('div');
-  header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:4px;';
-
-  const icon = document.createElement('div');
-  icon.style.cssText = 'width:24px;height:24px;border-radius:8px;background:linear-gradient(135deg,#6C5CE7,#00D2D3);display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:12px;';
-  icon.textContent = 'Z';
-
-  const titleEl = document.createElement('span');
-  titleEl.style.cssText = 'font-weight:600;font-size:14px;';
-  titleEl.textContent = title; // Safe - uses textContent
-
-  header.appendChild(icon);
-  header.appendChild(titleEl);
-
-  const bodyEl = document.createElement('p');
-  bodyEl.style.cssText = 'font-size:13px;color:#B0B0C3;margin:0;';
-  bodyEl.textContent = body; // Safe - uses textContent
-
-  notif.appendChild(header);
-  notif.appendChild(bodyEl);
-
-  // Add animation
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  `;
-  document.head.appendChild(style);
-  document.body.appendChild(notif);
-
-  // Auto-remove after 4 seconds
-  setTimeout(() => {
-    notif.style.opacity = '0';
-    notif.style.transition = 'opacity 0.3s';
-    setTimeout(() => {
-      notif.remove();
-      style.remove();
-    }, 300);
-  }, 4000);
+  // This is now handled by the React NotificationBanner component
+  // via the showBannerNotification function above
+  showBannerNotification({
+    senderName: title,
+    messagePreview: body,
+    type: 'message',
+  });
 }

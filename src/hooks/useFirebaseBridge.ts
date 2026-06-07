@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useZixoStore } from '@/stores/useZixoStore';
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
-import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory } from '@/services/firestore';
-import { initFCM, sendPushNotification } from '@/services/messaging';
+import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory, subscribeToUserProfile } from '@/services/firestore';
+import { initFCM, sendPushNotification, onNotificationBanner, updateMessageBadge, playNotificationSound, playRingingSound, showBrowserNotification, showBannerNotification } from '@/services/messaging';
 import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToCallStatus, subscribeToMultiplePresence, subscribeToGroupCalls, type RTDBCallSignal } from '@/services/presence';
+import { getWebRTC } from '@/services/webrtc';
+import type { BannerNotification } from '@/components/zixo/NotificationBanner';
 
 // ==================== RETRY LOGIC ====================
 
@@ -66,14 +68,7 @@ function retrySubscription<T>(
 
 /**
  * Hook that manages the Firebase <-> Zustand bridge
- * - Listens to auth state changes
- * - Sets up RTDB presence (online/offline)
- * - Subscribes to real-time chat updates (Firestore)
- * - Subscribes to presence of chat participants
- * - Subscribes to typing indicators (RTDB)
- * - Listens for incoming calls (RTDB) and shows incoming call screen
- * - Loads call history from Firestore
- * - Initializes FCM push notifications
+ * Enhanced with notification banners, sounds, and badge updates
  */
 export function useFirebaseBridge() {
   const {
@@ -92,14 +87,39 @@ export function useFirebaseBridge() {
     addUnsub,
   } = useZixoStore();
 
-  // Reactive selector for activeCall.callId — ensures the component re-renders
-  // when a call starts/ends, so the call status subscription (section 8b) is properly established.
+  // Reactive selector for activeCall.callId
   const activeCallId = useZixoStore((s) => s.activeCall?.callId);
 
   const initialized = useRef(false);
   const chatUnsubs = useRef<Record<string, () => void>>({});
   const presenceUnsubs = useRef<Record<string, () => void>>({});
   const callHistoryLoaded = useRef(false);
+
+  // Notification banner state
+  const [bannerNotifications, setBannerNotifications] = useState<BannerNotification[]>([]);
+
+  const handleDismissBanner = useCallback((id: string) => {
+    setBannerNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  const handleTapBanner = useCallback((notification: BannerNotification) => {
+    // Dismiss the banner
+    setBannerNotifications(prev => prev.filter(n => n.id !== notification.id));
+
+    // Navigate to the chat if chatId is provided
+    if (notification.chatId) {
+      const store = useZixoStore.getState();
+      store.setActiveChat(notification.chatId);
+    }
+  }, []);
+
+  // Listen for notification banner events from messaging.ts
+  useEffect(() => {
+    const unsub = onNotificationBanner((notif) => {
+      setBannerNotifications(prev => [notif as BannerNotification, ...prev].slice(0, 5));
+    });
+    return unsub;
+  }, []);
 
   // 1. Listen to Firebase auth state changes
   useEffect(() => {
@@ -124,7 +144,6 @@ export function useFirebaseBridge() {
               } catch (signOutErr) {
                 console.error('[Zixo Bridge] Failed to sign out banned user:', signOutErr);
               }
-              // Show a message before redirect
               if (typeof window !== 'undefined') {
                 alert('Your account has been suspended. Please contact support if you believe this is an error.');
               }
@@ -134,7 +153,7 @@ export function useFirebaseBridge() {
             login(profile);
             initFCM(firebaseUser.uid).catch(console.error);
 
-            // Ensure admin role for specific accounts (e.g. eunus527@gmail.com)
+            // Ensure admin role for specific accounts
             if (firebaseUser.email === 'eunus527@gmail.com' && profile.role !== 'admin') {
               try {
                 const { setDoc: setDocFn } = await import('firebase/firestore');
@@ -149,7 +168,7 @@ export function useFirebaseBridge() {
               }
             }
 
-            // Ensure zixoNumber is assigned (lazy migration for existing users)
+            // Ensure zixoNumber is assigned
             if (!profile.zixoNumber) {
               try {
                 const { ensureZixoNumber } = await import('@/services/auth');
@@ -163,7 +182,6 @@ export function useFirebaseBridge() {
             }
           } else {
             console.log('[Zixo Bridge] No Firestore profile, creating temp profile');
-            // User exists in Auth but not in Firestore yet (e.g. first sign-in)
             const tempProfile: ZixoUserProfile = {
               uid: firebaseUser.uid,
               displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
@@ -181,7 +199,6 @@ export function useFirebaseBridge() {
           }
         } catch (error) {
           console.error('[Zixo Bridge] Error loading user profile:', error);
-          // Still log in with a temp profile so user isn't stuck
           const tempProfile: ZixoUserProfile = {
             uid: firebaseUser.uid,
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
@@ -198,7 +215,6 @@ export function useFirebaseBridge() {
           console.log('[Zixo Bridge] Using temp profile due to error');
           login(tempProfile);
 
-          // Error recovery: retry once after a delay to get real profile
           setTimeout(async () => {
             try {
               const profile = await getUserProfile(firebaseUser.uid);
@@ -227,7 +243,6 @@ export function useFirebaseBridge() {
       presenceUnsub = setupPresence(currentUser.uid);
     } catch (error) {
       console.warn('[Zixo] RTDB presence setup failed, will retry:', error);
-      // Retry presence setup after delay
       const retryTimeout = setTimeout(() => {
         try {
           presenceUnsub = setupPresence(currentUser.uid);
@@ -248,7 +263,6 @@ export function useFirebaseBridge() {
   }, [isAuthenticated, currentUser]);
 
   // 3. Subscribe to real-time chats when authenticated (Firestore)
-  //    With retry logic (exponential backoff)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -261,8 +275,6 @@ export function useFirebaseBridge() {
             const profiles = await getUserProfiles(Array.from(allUids));
             setUserProfiles(profiles);
 
-            // Use the latest currentUser from the store as the source of truth
-            // for the current user's profile (avoids stale Firestore reads)
             const latestCurrentUser = useZixoStore.getState().currentUser;
 
             const uiChats = firestoreChats.map((fc) => {
@@ -278,10 +290,29 @@ export function useFirebaseBridge() {
                 !fc.muted?.includes(currentUser.uid)
               ) {
                 const senderName = profiles[fc.lastMessageSender]?.displayName || 'Someone';
+                const senderAvatar = profiles[fc.lastMessageSender]?.avatar;
+                const messagePreview = fc.lastMessage || 'Sent a message';
+
+                // Show in-app notification banner
+                showBannerNotification({
+                  senderName,
+                  senderAvatar,
+                  messagePreview,
+                  chatId: fc.id,
+                  type: 'message',
+                });
+
+                // Play notification sound
+                playNotificationSound();
+
+                // Show browser notification if not focused
+                showBrowserNotification(senderName, messagePreview, { type: 'new-message', chatId: fc.id, senderId: fc.lastMessageSender });
+
+                // Also send FCM push (for mobile/background)
                 sendPushNotification(
                   currentUser.uid,
                   senderName,
-                  fc.lastMessage || 'Sent a message',
+                  messagePreview,
                   { type: 'new-message', chatId: fc.id, senderId: fc.lastMessageSender }
                 ).catch(() => {});
               }
@@ -291,7 +322,6 @@ export function useFirebaseBridge() {
                 participants: fc.participants,
                 participantProfiles: fc.participants.map(
                   (uid) => {
-                    // Always use latest store currentUser for self (source of truth)
                     if (latestCurrentUser && uid === latestCurrentUser.uid) {
                       return latestCurrentUser;
                     }
@@ -323,14 +353,17 @@ export function useFirebaseBridge() {
 
             uiChats.sort((a, b) => b.updatedAt - a.updatedAt);
             setChats(uiChats);
+
+            // Update message badge with total unread count
+            const totalUnread = uiChats.reduce((sum, c) => sum + c.unreadCount, 0);
+            updateMessageBadge(totalUnread);
           }
-          // No demo data fallback - only show real data
         });
 
         return unsub;
       },
-      3, // max retries
-      1000, // base delay
+      3,
+      1000,
       (attempt) => console.warn(`[Zixo] Chat subscription retry attempt ${attempt}`)
     );
 
@@ -342,7 +375,6 @@ export function useFirebaseBridge() {
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
-    // Clean up previous presence subscriptions
     Object.values(presenceUnsubs.current).forEach((unsub) => unsub());
     presenceUnsubs.current = {};
 
@@ -353,7 +385,6 @@ export function useFirebaseBridge() {
 
     if (otherUids.length === 0) return;
 
-    // Subscribe to presence for all chat participants
     const unsub = subscribeToMultiplePresence(otherUids, (statuses) => {
       const currentStore = useZixoStore.getState();
       const updatedProfiles = { ...currentStore.userProfiles };
@@ -370,7 +401,6 @@ export function useFirebaseBridge() {
 
       currentStore.setUserProfiles(updatedProfiles);
 
-      // Also update chats with the new presence info
       const updatedChats = currentStore.chats.map((chat) => ({
         ...chat,
         participantProfiles: chat.participantProfiles.map((p) =>
@@ -412,7 +442,6 @@ export function useFirebaseBridge() {
   }, [activeChatId, isAuthenticated, currentUser]);
 
   // 6. Subscribe to messages when active chat changes (Firestore)
-  //    With retry logic
   useEffect(() => {
     if (!activeChatId || !isAuthenticated) return;
 
@@ -486,7 +515,7 @@ export function useFirebaseBridge() {
       });
   }, [isAuthenticated, currentUser, setCallHistory]);
 
-  // 8. Listen for incoming calls (RTDB) - show incoming call screen
+  // 8. Listen for incoming calls (RTDB) - show incoming call screen with enhanced notifications
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -498,7 +527,6 @@ export function useFirebaseBridge() {
           const call = calls[0];
           console.log('[Zixo] Incoming call:', call);
 
-          // Look up the caller's profile from cache or Firestore
           const store = useZixoStore.getState();
           let callerProfile = store.userProfiles[call.data.callerId];
 
@@ -524,7 +552,6 @@ export function useFirebaseBridge() {
             }
           }
 
-          // Set incoming call state and navigate to incoming-call screen
           if (callerProfile) {
             setIncomingCall({
               callId: call.id,
@@ -534,7 +561,25 @@ export function useFirebaseBridge() {
             });
             useZixoStore.getState().setScreen('incoming-call');
 
-            // Send a forceful push notification for the incoming call
+            // Show prominent notification banner for incoming call
+            showBannerNotification({
+              senderName: callerProfile.displayName,
+              senderAvatar: callerProfile.avatar,
+              messagePreview: `Incoming ${call.data.type} call`,
+              type: 'call',
+            });
+
+            // Play ringing sound for call
+            playRingingSound();
+
+            // Show browser notification for call
+            showBrowserNotification(
+              `Incoming ${call.data.type} call`,
+              `${callerProfile.displayName} is calling you`,
+              { type: 'incoming-call', callId: call.id, callType: call.data.type }
+            );
+
+            // Also send FCM push
             sendPushNotification(
               currentUser.uid,
               `Incoming ${call.data.type} call`,
@@ -553,11 +598,7 @@ export function useFirebaseBridge() {
     };
   }, [isAuthenticated, currentUser, setIncomingCall]);
 
-  // 8b. Watch active call status - end call on receiver side when caller hangs up
-  // Uses the reactive `activeCallId` selector so this effect re-runs whenever
-  // activeCall.callId changes (call started / ended). The previous implementation
-  // used `useZixoStore.getState().activeCall?.callId` as a dependency, which is a
-  // non-reactive snapshot and never caused the effect to re-run.
+  // 8b. Watch active call status
   useEffect(() => {
     if (!activeCallId || !isAuthenticated) return;
 
@@ -566,12 +607,41 @@ export function useFirebaseBridge() {
     try {
       unsub = subscribeToCallStatus(activeCallId, (callData) => {
         if (!callData) {
-          // Call data was removed or status is 'ended' — remote party hung up
           console.log('[Zixo] Active call ended by remote party');
           const store = useZixoStore.getState();
-          // Guard: only end the call if it's still the same call (avoids double-cleanup)
           if (store.activeCall?.callId === activeCallId) {
-            store.endCall();
+            try { getWebRTC().endCall(); } catch {}
+            const call = store.activeCall;
+            if (call?.remoteUser) {
+              const currentUser = store.currentUser;
+              const actualDuration = call.startedAt
+                ? Math.floor((Date.now() - call.startedAt) / 1000)
+                : call.duration;
+              const direction: 'incoming' | 'outgoing' | 'missed' = call.isIncoming
+                ? 'incoming'
+                : 'outgoing';
+              const newCall: any = {
+                id: call.callId || `call-${Date.now()}`,
+                callerId: call.isIncoming ? call.remoteUser.uid : (currentUser?.uid || 'user-me'),
+                callerName: call.isIncoming ? call.remoteUser.displayName : (currentUser?.displayName || 'You'),
+                callerAvatar: '',
+                receiverId: call.isIncoming ? (currentUser?.uid || 'user-me') : call.remoteUser.uid,
+                receiverName: call.isIncoming ? (currentUser?.displayName || 'You') : call.remoteUser.displayName,
+                receiverAvatar: '',
+                type: call.type,
+                direction,
+                duration: actualDuration,
+                timestamp: Date.now(),
+              };
+              useZixoStore.setState((state: any) => ({
+                callHistory: [newCall, ...state.callHistory],
+                activeCall: null,
+                incomingCall: null,
+                currentScreen: 'home',
+              }));
+            } else {
+              useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
+            }
           }
         }
       });
@@ -584,7 +654,7 @@ export function useFirebaseBridge() {
     };
   }, [activeCallId, isAuthenticated]);
 
-  // 9. Listen for incoming group calls (RTDB) - show incoming group call screen
+  // 9. Listen for incoming group calls (RTDB)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -596,11 +666,9 @@ export function useFirebaseBridge() {
           const call = calls[0];
           console.log('[Zixo] Incoming group call:', call);
 
-          // Only show if not already in a group call or incoming group call
           const store = useZixoStore.getState();
           if (store.groupCall || store.incomingGroupCall) return;
 
-          // Build participant names from the call data
           const participantNames = Object.values(call.data.participants || {})
             .filter((p: any) => p.uid !== call.data.callerId && p.uid !== currentUser.uid)
             .map((p: any) => p.name || p.uid)
@@ -616,7 +684,24 @@ export function useFirebaseBridge() {
           });
           useZixoStore.getState().setScreen('incoming-group-call');
 
-          // Send a forceful push notification for the incoming group call
+          // Show notification banner for group call
+          showBannerNotification({
+            senderName: call.data.callerName || 'Unknown',
+            messagePreview: `Group ${call.data.type === 'group-video' ? 'Video' : 'Audio'} Call`,
+            type: 'call',
+          });
+
+          // Play ringing sound
+          playRingingSound();
+
+          // Show browser notification
+          showBrowserNotification(
+            `Group ${call.data.type === 'group-video' ? 'Video' : 'Audio'} Call`,
+            `${call.data.callerName || 'Unknown'} is calling`,
+            { type: 'incoming-group-call', callId: call.id, callType: call.data.type }
+          );
+
+          // Also send FCM push
           sendPushNotification(
             currentUser.uid,
             `Group ${call.data.type === 'group-video' ? 'Video' : 'Audio'} Call`,
@@ -645,6 +730,11 @@ export function useFirebaseBridge() {
       ).catch((error) => {
         console.warn('[Zixo] Failed to update online status:', error);
       });
+
+      // Clear badge when app comes to foreground
+      if (document.visibilityState === 'visible') {
+        updateMessageBadge(0);
+      }
     };
 
     document.addEventListener('visibilitychange', handleVisibility);
@@ -652,8 +742,6 @@ export function useFirebaseBridge() {
   }, [currentUser]);
 
   // 11. Listen to current user's Firestore profile for real-time updates
-  // This ensures profile edits (avatar, name, bio) reflect immediately
-  // across all screens without waiting for manual refresh.
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -664,10 +752,7 @@ export function useFirebaseBridge() {
           const store = useZixoStore.getState();
           const current = store.currentUser;
           if (current && current.uid === profile.uid) {
-            // Merge Firestore profile with current store state
-            // Always prefer the local currentUser for any field that was recently updated
             const merged = { ...profile, ...current };
-            // Only update if something actually changed to avoid unnecessary re-renders
             const changed = Object.keys(profile).some(
               (key) => (current as any)[key] !== (merged as any)[key]
             );
@@ -688,4 +773,11 @@ export function useFirebaseBridge() {
       if (unsub) unsub();
     };
   }, [isAuthenticated, currentUser]);
+
+  // Return notification banner state and handlers for the page component
+  return {
+    bannerNotifications,
+    onDismissBanner: handleDismissBanner,
+    onTapBanner: handleTapBanner,
+  };
 }

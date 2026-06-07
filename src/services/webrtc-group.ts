@@ -133,33 +133,20 @@ export class ZixoGroupWebRTC {
       video: callData.type === 'group-video' ? { width: 720, height: 1280 } : false,
     });
 
-    // Add self to participants
+    // Listen for signaling FIRST, so we catch offers/answers/candidates
+    // that arrive while we process existing participants.
+    // The onChildAdded listener will fire for existing participants too,
+    // and the deterministic initiator rule ensures only one side creates an offer.
+    this.listenForSignaling();
+
+    // Add self to participants AFTER listenForSignaling is set up,
+    // so existing participants' onChildAdded handlers will see us and send offers.
     const participantRef = ref(rtdb, `groupCalls/${callId}/participants/${uid}`);
     await set(participantRef, { uid, name, joinedAt: Date.now() });
 
     // Update status to active
     const statusRef = ref(rtdb, `groupCalls/${callId}/status`);
     await set(statusRef, 'active');
-
-    // Listen for signaling FIRST, so we catch offers/answers/candidates
-    // that arrive while we process existing participants
-    this.listenForSignaling();
-
-    // Get existing participants and create peer connections
-    // Note: onChildAdded in listenForSignaling will also fire for existing participants,
-    // but this.peers.has() check prevents duplicate connections
-    const participantsSnap = await get(ref(rtdb, `groupCalls/${callId}/participants`));
-    if (participantsSnap.exists()) {
-      const participants = participantsSnap.val() as Record<string, GroupCallParticipant>;
-      const otherUids = Object.keys(participants).filter((pUid) => pUid !== uid);
-
-      for (const otherUid of otherUids) {
-        if (participants[otherUid].joinedAt > 0) {
-          // This participant has already joined, create offer to them
-          await this.createPeerConnection(otherUid, true);
-        }
-      }
-    }
   }
 
   // ==================== LEAVE GROUP CALL ====================
@@ -384,9 +371,15 @@ export class ZixoGroupWebRTC {
         this.onParticipantJoined(participant.uid, participant.name);
       }
 
-      // If this participant joined after us and we haven't connected yet, create offer
-      if (!this.peers.has(participant.uid)) {
-        await this.createPeerConnection(participant.uid, true);
+      // Deterministic initiator rule: the participant with the lexicographically
+      // smaller UID creates the offer. This prevents both sides from trying
+      // to create offers simultaneously ("glare" condition).
+      if (!this.peers.has(participant.uid) && !this.connectingPeers.has(participant.uid)) {
+        if (this.localUid! < participant.uid) {
+          // We are the initiator – create offer
+          await this.createPeerConnection(participant.uid, true);
+        }
+        // If our UID is larger, we wait for their offer (handled by the offers listener)
       }
     });
     this.unsubCall.push(unsubParticipants);
@@ -421,7 +414,8 @@ export class ZixoGroupWebRTC {
       this.processedOffers.add(offerKey);
 
       // Create peer connection if not exists (we're the answerer)
-      if (!this.peers.has(fromUid)) {
+      if (!this.peers.has(fromUid) && !this.connectingPeers.has(fromUid)) {
+        this.connectingPeers.add(fromUid);
         const pc = new RTCPeerConnection(ICE_SERVERS);
         const remoteStream = new MediaStream();
 
@@ -432,6 +426,7 @@ export class ZixoGroupWebRTC {
           unsubFns: [],
         };
         this.peers.set(fromUid, peerEntry);
+        this.connectingPeers.delete(fromUid);
 
         // Add local tracks
         if (this.localStream) {

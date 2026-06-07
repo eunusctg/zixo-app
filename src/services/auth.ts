@@ -139,7 +139,6 @@ export function isAdmin(user: ZixoUserProfile | null): boolean {
  * Retries up to 10 times if collision occurs
  */
 export async function generateUniqueZixoNumber(): Promise<string> {
-  const { getDoc: getDocFn } = await import('firebase/firestore');
   const MAX_ATTEMPTS = 10;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -147,9 +146,9 @@ export async function generateUniqueZixoNumber(): Promise<string> {
     const num = Math.floor(Math.random() * 90000000) + 10000000;
     const zixoNumber = String(num);
 
-    // Check if it already exists
+    // Check if it already exists in the zixoNumbers collection
     const docRef = doc(db, 'zixoNumbers', zixoNumber);
-    const docSnap = await getDocFn(docRef);
+    const docSnap = await getDoc(docRef);
 
     if (!docSnap.exists()) {
       return zixoNumber;
@@ -164,11 +163,31 @@ export async function generateUniqueZixoNumber(): Promise<string> {
 /**
  * Ensure a user profile has a zixoNumber assigned.
  * If missing, generates one and saves it to both the user profile and the zixoNumbers mapping.
+ * Always checks Firestore first to avoid creating duplicate mappings.
  */
 export async function ensureZixoNumber(uid: string, existingProfile?: Record<string, any>): Promise<string> {
   // Check if the profile already has a zixoNumber
   if (existingProfile?.zixoNumber) {
     return existingProfile.zixoNumber;
+  }
+
+  // Double-check Firestore in case the profile data is stale
+  try {
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    if (userDoc.exists()) {
+      const data = userDoc.data();
+      if (data.zixoNumber) {
+        // Also ensure the mapping exists in zixoNumbers collection
+        const mappingRef = doc(db, 'zixoNumbers', data.zixoNumber);
+        const mappingSnap = await getDoc(mappingRef);
+        if (!mappingSnap.exists()) {
+          await setDoc(mappingRef, { uid });
+        }
+        return data.zixoNumber;
+      }
+    }
+  } catch (err) {
+    console.warn('[Zixo Auth] Failed to check Firestore for existing zixoNumber:', err);
   }
 
   // Generate and assign a new zixoNumber
@@ -188,20 +207,21 @@ export async function ensureZixoNumber(uid: string, existingProfile?: Record<str
  * Looks up the zixoNumbers collection, then fetches the user profile
  */
 export async function searchUserByZixoNumber(zixoNumber: string): Promise<ZixoUserProfile | null> {
-  const { getDoc: getDocFn } = await import('firebase/firestore');
+  if (!zixoNumber || zixoNumber.trim().length === 0) return null;
 
-  // Look up the mapping
-  const mappingRef = doc(db, 'zixoNumbers', zixoNumber);
-  const mappingSnap = await getDocFn(mappingRef);
+  // Look up the mapping in zixoNumbers collection (document ID is the number)
+  const mappingRef = doc(db, 'zixoNumbers', zixoNumber.trim());
+  const mappingSnap = await getDoc(mappingRef);
 
   if (!mappingSnap.exists()) {
     return null;
   }
 
-  const { uid } = mappingSnap.data();
+  const mappingData = mappingSnap.data();
+  const uid = mappingData?.uid;
   if (!uid) return null;
 
-  // Fetch the user profile
+  // Fetch the user profile from users collection
   return getUserProfile(uid);
 }
 
@@ -216,6 +236,28 @@ export function formatZixoNumber(zixoNumber?: string): string {
 }
 
 /**
+ * Sanitize user input by stripping HTML tags and dangerous characters.
+ * Prevents XSS attacks from user-supplied data stored in Firestore.
+ */
+export function sanitizeInput(input: string): string {
+  if (!input || typeof input !== 'string') return input;
+  return input
+    // Strip HTML tags
+    .replace(/<[^>]*>/g, '')
+    // Strip script event handlers (on* attributes that might survive tag stripping)
+    .replace(/\bon\w+\s*=\s*["'][^"']*["']/gi, '')
+    // Strip javascript: URLs
+    .replace(/javascript\s*:/gi, '')
+    // Strip data: URLs that could contain XSS
+    .replace(/data\s*:\s*text\/html/gi, '')
+    // Encode remaining angle brackets as a safety net
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // Trim whitespace
+    .trim();
+}
+
+/**
  * Register a new user with email/password
  */
 export async function registerWithEmail(
@@ -223,21 +265,25 @@ export async function registerWithEmail(
   password: string,
   displayName: string
 ): Promise<{ user: User; profile: ZixoUserProfile }> {
-  const credential = await createUserWithEmailAndPassword(auth, email, password);
+  // Sanitize user inputs
+  const safeDisplayName = sanitizeInput(displayName);
+  const safeEmail = sanitizeInput(email);
+
+  const credential = await createUserWithEmailAndPassword(auth, safeEmail, password);
   const user = credential.user;
 
   // Update Firebase Auth display name
-  await updateProfile(user, { displayName });
+  await updateProfile(user, { displayName: safeDisplayName });
 
   // Send email verification
   await sendEmailVerification(user).catch(console.error);
 
   // Create Firestore user profile
-  const username = `@${displayName.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
+  const username = `@${safeDisplayName.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
   const zixoNumber = await generateUniqueZixoNumber();
   const profile: ZixoUserProfile = {
     uid: user.uid,
-    displayName,
+    displayName: safeDisplayName,
     email,
     username,
     bio: 'Living free, connecting freely 🌍',
@@ -407,8 +453,18 @@ export async function updateUserProfile(
   uid: string,
   updates: Partial<Pick<ZixoUserProfile, 'displayName' | 'bio' | 'avatar' | 'username'>>
 ): Promise<void> {
+  // Sanitize text inputs to prevent XSS
+  const sanitizedUpdates: Record<string, any> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    if (typeof value === 'string' && key !== 'avatar') {
+      sanitizedUpdates[key] = sanitizeInput(value);
+    } else {
+      sanitizedUpdates[key] = value;
+    }
+  }
+
   const docRef = doc(db, 'users', uid);
-  await setDoc(docRef, updates, { merge: true });
+  await setDoc(docRef, sanitizedUpdates, { merge: true });
 
   // If username changed, update mapping
   if (updates.username) {

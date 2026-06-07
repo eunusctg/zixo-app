@@ -45,7 +45,17 @@ export default function SplashScreen({ onComplete }: SplashScreenProps) {
   }, [onComplete]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-zixo-bg flex items-center justify-center">
+    <div className="fixed inset-0 z-50 bg-zixo-bg flex items-center justify-center overflow-hidden">
+      {/* Animated background glow */}
+      {mounted && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={{ opacity: [0, 0.3, 0.15, 0.3, 0], scale: [0.5, 1.5, 2, 1.5, 0.5] }}
+          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          className="absolute w-64 h-64 rounded-full bg-zixo-primary/20 blur-3xl"
+        />
+      )}
+
       {mounted && (
         <div className="absolute inset-0 overflow-hidden">
           {PARTICLES.map((p, i) => (
@@ -62,19 +72,46 @@ export default function SplashScreen({ onComplete }: SplashScreenProps) {
 
       <div className="flex flex-col items-center gap-6">
         <motion.div
-          initial={{ scale: 0, rotate: -180 }}
-          animate={{ scale: 1, rotate: 0 }}
+          initial={{ scale: 0, rotateY: -180 }}
+          animate={{ scale: 1, rotateY: 0 }}
           transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.2 }}
           className="relative"
+          style={{ perspective: 800 }}
         >
           <motion.div
             animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0, 0.3] }}
             transition={{ duration: 2, repeat: Infinity }}
             className="absolute -inset-4 rounded-3xl border-2 border-zixo-primary"
           />
-          <div className="w-24 h-24 rounded-3xl gradient-primary flex items-center justify-center shadow-2xl glow-primary">
-            <span className="text-5xl font-extrabold text-white font-heading">Z</span>
-          </div>
+          {/* 3D rotating ring */}
+          <motion.div
+            initial={{ rotateX: 0, rotateY: 0 }}
+            animate={{ rotateX: [0, 360], rotateY: [0, 360] }}
+            transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+            className="absolute -inset-6 rounded-3xl border border-zixo-primary/20"
+            style={{ transformStyle: 'preserve-3d', perspective: 600 }}
+          />
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ delay: 0.4, duration: 0.6, type: 'spring', stiffness: 150 }}
+            className="w-24 h-24 rounded-3xl overflow-hidden shadow-2xl glow-primary relative"
+            style={{ transformStyle: 'preserve-3d' }}
+          >
+            <img
+              src="/logo-new.png"
+              alt="Zixo Logo"
+              className="w-full h-full object-cover"
+              style={{ transform: 'translateZ(10px)' }}
+            />
+            {/* 3D shine effect */}
+            <motion.div
+              animate={{ x: ['-100%', '200%'] }}
+              transition={{ duration: 2, repeat: Infinity, repeatDelay: 3, ease: 'easeInOut' }}
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+              style={{ transform: 'translateZ(15px)' }}
+            />
+          </motion.div>
         </motion.div>
 
         <motion.div

@@ -149,8 +149,15 @@ export default function ProfileEditScreen({ user, onBack, onSave }: ProfileEditS
       // Update Firestore via auth service
       await updateUserProfile(user.uid, updates);
 
-      // Update local Zustand store
-      useZixoStore.getState().updateUserProfile(updates);
+      // Update local Zustand store — use both mechanisms to guarantee update
+      const store = useZixoStore.getState();
+      store.updateUserProfile(updates);
+      // Also explicitly set currentUser to guarantee the home page reflects changes
+      if (store.currentUser) {
+        useZixoStore.setState({
+          currentUser: { ...store.currentUser, ...updates },
+        });
+      }
 
       // Call the parent onSave
       await onSave(updates);

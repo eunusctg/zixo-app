@@ -15,15 +15,26 @@ import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, type RTDBGrou
  */
 async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
   try {
-    // Check localStorage cache first (works on all browsers including Firefox)
+    // Check localStorage cache first — this is the most reliable and fastest check.
+    // After first permission grant, we aggressively trust the cache to skip the modal entirely.
     if (typeof window !== 'undefined') {
       const permCache = localStorage.getItem('zixo_call_permissions');
       if (permCache) {
         try {
           const cached = JSON.parse(permCache);
+          // If mic was previously granted, trust it for audio calls
           if (cached.micGranted) {
             if (type === 'audio') return true;
+            // For video calls, also check camera
             if (type === 'video' && cached.camGranted) return true;
+            // For video calls with mic granted but camera unknown, also skip
+            // since we can still do video without camera (audio-only video call)
+            if (type === 'video') return true;
+          }
+          // If permissions were previously decided (even denied), don't ask again
+          if (cached.micGranted === false && cached.camGranted === false) {
+            // User denied both — still skip modal, the call will fail gracefully
+            return true;
           }
         } catch {
           // Ignore parse errors
@@ -32,30 +43,40 @@ async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
     }
 
     // Try navigator.permissions API (not supported on Firefox for mic/cam)
-    const micStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-    if (micStatus.state === 'granted') {
-      // Cache the permission state
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: false }));
-      }
-      return true;
-    }
-    if (micStatus.state === 'denied') {
-      // Already decided, don't ask again
-      return true;
-    }
-
-    if (type === 'video') {
-      const camStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
-      if (camStatus.state === 'granted') {
+    try {
+      const micStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+      const micGranted = micStatus.state === 'granted';
+      const micDenied = micStatus.state === 'denied';
+      if (micGranted) {
+        // Cache the permission state
         if (typeof window !== 'undefined') {
-          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: micStatus.state === 'granted', camGranted: true }));
+          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: false }));
         }
-        return micStatus.state === 'granted'; // Still need mic
+        return true;
       }
-      if (camStatus.state === 'denied') {
-        return micStatus.state !== 'prompt'; // Only show if mic also needs asking
+      if (micDenied) {
+        // Already decided, don't ask again
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: false, camGranted: false }));
+        }
+        return true;
       }
+
+      if (type === 'video') {
+        const camStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        const camGranted = camStatus.state === 'granted';
+        if (camGranted) {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: micGranted, camGranted: true }));
+          }
+          return micGranted; // Still need mic
+        }
+        if (camStatus.state === 'denied') {
+          return !micGranted ? false : true; // Only show if mic also needs asking
+        }
+      }
+    } catch {
+      // navigator.permissions.query failed — fall through to localStorage check below
     }
 
     return false; // Mic is in 'prompt' state, need to show permission modal
@@ -66,7 +87,8 @@ async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
       if (permCache) {
         try {
           const cached = JSON.parse(permCache);
-          if (cached.micGranted) return true;
+          // If we have any cache entry, trust it
+          if (cached.micGranted !== undefined) return true;
         } catch {
           // Ignore
         }

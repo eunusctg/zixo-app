@@ -12,7 +12,7 @@ import { cn, formatDateGroup } from '@/lib/zixo-utils';
 import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/Onboarding';
 import Avatar from '@/components/zixo/Avatar';
 import { ChatList } from '@/components/zixo/ChatList';
-import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToBottomFAB } from '@/components/zixo/ChatScreen';
+import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToBottomFAB, RecordingOverlay } from '@/components/zixo/ChatScreen';
 import { AudioCallScreen, VideoCallScreen, PermissionModal } from '@/components/zixo/CallScreens';
 import { GroupAudioCallScreen, GroupVideoCallScreen, IncomingGroupCallScreen } from '@/components/zixo/GroupCallScreens';
 import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
@@ -22,11 +22,12 @@ import AdminPanel from '@/components/zixo/AdminPanel';
 import { BottomNav, FAB, SearchBar } from '@/components/zixo/Navigation';
 import { OnlineStatus, EncryptionBadge } from '@/components/zixo/Common';
 import ErrorBoundary from '@/components/zixo/ErrorBoundary';
+import NotificationBanner from '@/components/zixo/NotificationBanner';
 import type { ZixoUserProfile } from '@/services/auth';
 
 export default function ZixoApp() {
-  // Initialize Firebase bridge (auth state, real-time listeners)
-  useFirebaseBridge();
+  // Initialize Firebase bridge (auth state, real-time listeners, notification banners)
+  const { bannerNotifications, onDismissBanner, onTapBanner } = useFirebaseBridge();
 
   const {
     currentScreen,
@@ -303,8 +304,11 @@ export default function ZixoApp() {
 
   const handleVoiceRecord = useCallback(async () => {
     if (isRecording) {
-      // Stop recording
+      // Stop recording — request final data first, then stop
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.requestData();
+        } catch {}
         mediaRecorderRef.current.stop();
       }
       if (recordingTimerRef.current) {
@@ -334,7 +338,7 @@ export default function ZixoApp() {
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
-      let startTime = Date.now();
+      const startTime = Date.now();
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -346,10 +350,8 @@ export default function ZixoApp() {
         // Stop all audio tracks
         stream.getTracks().forEach(track => track.stop());
 
-        // Collect any remaining data
-        if (mediaRecorderRef.current?.state === 'recording') {
-          // Already stopped, but just in case
-        }
+        // Request any remaining data that hasn't been delivered yet
+        // (Some browsers buffer data until stop — collect it here)
 
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         const duration = Math.floor((Date.now() - startTime) / 1000);
@@ -376,12 +378,12 @@ export default function ZixoApp() {
         }
 
         setRecordingDuration(0);
+        audioChunksRef.current = [];
         mediaRecorderRef.current = null;
       };
 
       mediaRecorder.start(1000); // Request data every 1 second for more reliable recording
       setIsRecording(true);
-      startTime = Date.now();
       setRecordingDuration(0);
 
       // Update duration timer
@@ -392,6 +394,7 @@ export default function ZixoApp() {
       // Auto-stop after 5 minutes
       autoStopTimeoutRef.current = setTimeout(() => {
         if (mediaRecorderRef.current?.state === 'recording') {
+          try { mediaRecorderRef.current.requestData(); } catch {}
           mediaRecorderRef.current.stop();
           if (recordingTimerRef.current) {
             clearInterval(recordingTimerRef.current);
@@ -922,6 +925,16 @@ export default function ZixoApp() {
           )}
         </AnimatePresence>
 
+        {/* Recording Indicator */}
+        <AnimatePresence>
+          {isRecording && (
+            <RecordingOverlay
+              duration={recordingDuration}
+              onStop={handleVoiceRecord}
+            />
+          )}
+        </AnimatePresence>
+
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-2 relative" ref={messagesContainerRef} onScroll={handleMessageScroll}>
           <div className="flex justify-center mb-4">
@@ -979,26 +992,65 @@ export default function ZixoApp() {
 
   const [allUsers, setAllUsers] = useState<ZixoUserProfile[]>([]);
   const [usersLoaded, setUsersLoaded] = useState(false);
+  const [usersLoading, setUsersLoading] = useState(false);
 
   // Load all users for the contacts screen when navigating to it
   useEffect(() => {
-    if (currentScreen === 'contacts' && currentUser && !usersLoaded) {
+    if (currentScreen === 'contacts' && currentUser && !usersLoaded && !usersLoading) {
+      setUsersLoading(true);
       getAllUsers(currentUser.uid).then((users) => {
-        setAllUsers(users);
+        setAllUsers(users || []);
         setUsersLoaded(true);
-      }).catch(console.error);
+        setUsersLoading(false);
+      }).catch((err) => {
+        console.error('[Zixo] Failed to load users:', err);
+        setAllUsers([]);
+        setUsersLoaded(true); // Mark as loaded even on error so we don't retry infinitely
+        setUsersLoading(false);
+      });
     }
     if (currentScreen !== 'contacts') {
       setUsersLoaded(false);
+      setUsersLoading(false);
     }
-  }, [currentScreen, currentUser, usersLoaded]);
+  }, [currentScreen, currentUser, usersLoaded, usersLoading]);
 
   const renderContactsScreen = () => {
     if (!currentUser) return null;
     try {
-    const allContacts = chats
-      .map((c) => c.participantProfiles.find((p) => p.uid !== currentUser.uid))
+    const allContacts = (chats || [])
+      .map((c) => c?.participantProfiles?.find((p) => p?.uid !== currentUser?.uid))
       .filter(Boolean) as ZixoUserProfile[];
+
+    // Show loading state while users are being fetched
+    if (usersLoading && allUsers.length === 0) {
+      return (
+        <div className="h-screen flex flex-col bg-zixo-bg">
+          <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34] safe-area-top">
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setScreen('home')}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text transition-colors"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </motion.button>
+            <h2 className="text-lg font-semibold font-heading text-zixo-text">Find People</h2>
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                className="w-8 h-8 border-2 border-zixo-primary/30 border-t-zixo-primary rounded-full"
+              />
+              <p className="text-zixo-text-secondary text-sm">Loading people...</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div className="h-screen flex flex-col bg-zixo-bg">
@@ -1018,18 +1070,20 @@ export default function ZixoApp() {
         <div className="flex-1 overflow-y-auto">
           <ContactsScreen
             contacts={allContacts}
-            allUsers={allUsers}
+            allUsers={allUsers || []}
             currentUser={currentUser}
             onStartChat={async (userId) => {
+              if (!userId || !currentUser) return;
               // Create or get chat in Firestore, then navigate
               try {
                 const chatId = await createOrGetChat(currentUser.uid, userId);
 
                 // Check if the chat is already in the store
-                const existingChat = chats.find((c) => c.id === chatId);
+                const existingChat = (chats || []).find((c) => c?.id === chatId);
                 if (!existingChat) {
                   // Optimistically add the chat to the store so the chat screen can render
-                  const otherUserProfile = allUsers.find((u) => u.uid === userId);
+                  const otherUserProfile = (allUsers || []).find((u) => u?.uid === userId)
+                    || (chats || []).flatMap((c) => c?.participantProfiles || []).find((p) => p?.uid === userId);
                   if (otherUserProfile) {
                     const optimisticChat = {
                       id: chatId,
@@ -1044,7 +1098,7 @@ export default function ZixoApp() {
                     };
                     // Add to chats array in store
                     useZixoStore.setState((state: any) => ({
-                      chats: [optimisticChat, ...state.chats],
+                      chats: [optimisticChat, ...(state.chats || [])],
                     }));
                   }
                 }
@@ -1053,14 +1107,15 @@ export default function ZixoApp() {
               } catch (err) {
                 console.error('[Zixo] Failed to create/get chat:', err);
                 // Fallback: try finding existing chat in local state
-                const chat = chats.find((c) => c.participants.includes(userId));
+                const chat = (chats || []).find((c) => c?.participants?.includes(userId));
                 if (chat) handleChatClick(chat.id);
               }
             }}
             onStartCall={(userId, type) => {
+              if (!userId) return;
               // Find user from all loaded profiles or create a minimal profile
-              const user = allUsers.find((c) => c.uid === userId)
-                || chats.flatMap((c) => c.participantProfiles).find((p) => p.uid === userId);
+              const user = (allUsers || []).find((c) => c?.uid === userId)
+                || (chats || []).flatMap((c) => c?.participantProfiles || []).find((p) => p?.uid === userId);
               if (user) startCall(type, user);
             }}
             onSearchUsers={async (query: string) => {
@@ -1140,14 +1195,22 @@ export default function ZixoApp() {
   return (
     <ErrorBoundary>
     <div className="min-h-screen bg-zixo-bg text-zixo-text flex justify-center">
-      <div className="w-full max-w-lg relative">
+      {/* Notification Banners */}
+      <NotificationBanner
+        notifications={bannerNotifications}
+        onDismiss={onDismissBanner}
+        onTap={onTapBanner}
+      />
+
+      <div className="w-full max-w-lg relative page-transition-container">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentScreen}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+            className="will-change-transform"
           >
             {renderScreen()}
           </motion.div>

@@ -53,8 +53,8 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
             className={cn(
-              'relative flex flex-col items-center justify-center gap-0.5 w-16 h-full transition-colors',
-              activeTab === tab.id ? 'text-[#25D366]' : 'text-zixo-text-secondary'
+              'relative flex flex-col items-center justify-center gap-0.5 w-16 h-full transition-all duration-200 micro-glow ripple',
+              activeTab === tab.id ? 'text-[#25D366]' : 'text-zixo-text-secondary hover:text-zixo-text'
             )}
           >
             {/* Active indicator line at top */}
@@ -67,8 +67,10 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
             )}
             <div className="relative">
               <motion.div
-                whileTap={{ scale: 0.9 }}
+                whileTap={{ scale: 0.85 }}
+                whileHover={{ scale: 1.1, y: -2 }}
                 transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                className="transition-transform duration-200"
               >
                 {tab.icon}
               </motion.div>
@@ -126,7 +128,7 @@ export function FAB({ isOpen, onToggle, onNewChat, onNewGroup, onQuickCall }: FA
                 exit={{ opacity: 0, x: 20, scale: 0.8 }}
                 transition={{ delay: i * 0.05 }}
                 onClick={action.onClick}
-                className="flex items-center gap-2 glass rounded-full px-4 py-2.5 text-sm font-medium text-zixo-text hover:bg-zixo-surface-light/80 transition-colors"
+                className="flex items-center gap-2 glass rounded-full px-4 py-2.5 text-sm font-medium text-zixo-text hover:bg-zixo-surface-light/80 transition-all duration-200 micro-glow ripple card-3d"
               >
                 <span>{action.label}</span>
                 <span className="text-lg">{action.icon}</span>
@@ -138,10 +140,10 @@ export function FAB({ isOpen, onToggle, onNewChat, onNewGroup, onQuickCall }: FA
 
       <motion.button
         whileTap={{ scale: 0.9 }}
-        whileHover={{ scale: 1.05 }}
+        whileHover={{ scale: 1.05, y: -2 }}
         onClick={onToggle}
         className={cn(
-          'w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300',
+          'w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 btn-3d ripple',
           isOpen
             ? 'bg-zixo-error rotate-45 glow-error'
             : 'bg-[#25D366]'

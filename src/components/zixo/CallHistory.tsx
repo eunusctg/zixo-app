@@ -7,6 +7,8 @@ import Avatar from './Avatar';
 import { cn, formatCallDuration, formatCallTime } from '@/lib/zixo-utils';
 import type { CallRecord } from '@/stores/useZixoStore';
 import type { ZixoUserProfile } from '@/services/auth';
+import { rtdb } from '@/services/firebase';
+import { ref as rtdbRef, set as rtdbSet, onValue as rtdbOnValue, off as rtdbOff, remove as rtdbRemove, get as rtdbGet } from 'firebase/database';
 
 // Dynamic import to avoid SSR issues on Cloudflare Pages / edge runtime
 const QRCodeSVG = dynamic(
@@ -375,13 +377,36 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
   }, [showQRScanner, onSearchByZixoNumber, stopCamera]);
 
   // ==================== NEARBY DISCOVERY LOGIC ====================
-  const RTDB_BASE = 'https://zixo-call-default-rtdb.firebaseio.com';
 
   const getTimeAgo = useCallback((timestamp: number) => {
     const diff = Date.now() - timestamp;
     if (diff < 60000) return 'Just now';
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     return `${Math.floor(diff / 3600000)}h ago`;
+  }, []);
+
+  const computeNearbyUsers = useCallback((data: Record<string, any>, myLat: number, myLng: number, myUid: string): NearbyUser[] => {
+    const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
+    const users: NearbyUser[] = [];
+    Object.entries(data).forEach(([uid, info]: [string, any]) => {
+      if (uid === myUid) return;
+      if (!info || !info.lat || !info.lng) return;
+      if (info.timestamp < thirtyMinAgo) return;
+      const distance = haversineDistance(myLat, myLng, info.lat, info.lng);
+      if (distance <= 1) {
+        users.push({
+          uid,
+          displayName: info.displayName || 'Unknown',
+          zixoNumber: info.zixoNumber || '',
+          lat: info.lat,
+          lng: info.lng,
+          timestamp: info.timestamp,
+          distance,
+        });
+      }
+    });
+    users.sort((a, b) => a.distance - b.distance);
+    return users;
   }, []);
 
   const startNearbyDiscovery = useCallback(async () => {
@@ -405,88 +430,49 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
       const lng = position.coords.longitude;
       setMyLocation({ lat, lng });
 
-      // Store our location in RTDB
-      const secret = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_SECRET || '';
-      const storeUrl = `${RTDB_BASE}/nearby/${currentUser.uid}.json${secret ? `?auth=${secret}` : ''}`;
-      await fetch(storeUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // Store our location in RTDB using the SDK (not REST API)
+      const myNearbyRef = rtdbRef(rtdb, `nearby/${currentUser.uid}`);
+      await rtdbSet(myNearbyRef, {
+        lat,
+        lng,
+        timestamp: Date.now(),
+        displayName: currentUser.displayName,
+        zixoNumber: currentUser.zixoNumber || '',
+      });
+
+      // Fetch all nearby entries from RTDB using SDK
+      const nearbyRef = rtdbRef(rtdb, 'nearby');
+      const snap = await rtdbGet(nearbyRef);
+      if (snap.exists()) {
+        const data = snap.val();
+        if (data && typeof data === 'object') {
+          setNearbyUsers(computeNearbyUsers(data, lat, lng, currentUser.uid));
+        }
+      }
+
+      // Set up real-time listener for nearby users
+      const nearbyListenerRef = rtdbRef(rtdb, 'nearby');
+      const unsub = rtdbOnValue(nearbyListenerRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          if (data && typeof data === 'object') {
+            setNearbyUsers(computeNearbyUsers(data, lat, lng, currentUser.uid));
+          }
+        } else {
+          setNearbyUsers([]);
+        }
+      });
+      nearbyRtdbUnsubRef.current = () => rtdbOff(nearbyListenerRef);
+
+      // Refresh our timestamp every 30 seconds to stay "live"
+      nearbyIntervalRef.current = setInterval(async () => {
+        await rtdbSet(myNearbyRef, {
           lat,
           lng,
           timestamp: Date.now(),
           displayName: currentUser.displayName,
           zixoNumber: currentUser.zixoNumber || '',
-        }),
-      }).catch(() => {});
-
-      // Fetch all nearby entries from RTDB
-      const fetchUrl = `${RTDB_BASE}/nearby.json${secret ? `?auth=${secret}` : ''}`;
-      const res = await fetch(fetchUrl);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && typeof data === 'object') {
-          const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
-          const users: NearbyUser[] = [];
-          Object.entries(data).forEach(([uid, info]: [string, any]) => {
-            if (uid === currentUser.uid) return;
-            if (!info || !info.lat || !info.lng) return;
-            if (info.timestamp < thirtyMinAgo) return;
-            const distance = haversineDistance(lat, lng, info.lat, info.lng);
-            if (distance <= 1) {
-              users.push({
-                uid,
-                displayName: info.displayName || 'Unknown',
-                zixoNumber: info.zixoNumber || '',
-                lat: info.lat,
-                lng: info.lng,
-                timestamp: info.timestamp,
-                distance,
-              });
-            }
-          });
-          users.sort((a, b) => a.distance - b.distance);
-          setNearbyUsers(users);
-        }
-      }
-
-      // Refresh every 30 seconds
-      nearbyIntervalRef.current = setInterval(async () => {
-        // Update our timestamp
-        await fetch(storeUrl, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ timestamp: Date.now() }),
         }).catch(() => {});
-
-        // Re-fetch nearby
-        const refreshRes = await fetch(fetchUrl);
-        if (refreshRes.ok) {
-          const refreshData = await refreshRes.json();
-          if (refreshData && typeof refreshData === 'object') {
-            const thirtyMinAgo = Date.now() - 30 * 60 * 1000;
-            const users: NearbyUser[] = [];
-            Object.entries(refreshData).forEach(([uid, info]: [string, any]) => {
-              if (uid === currentUser.uid) return;
-              if (!info || !info.lat || !info.lng) return;
-              if (info.timestamp < thirtyMinAgo) return;
-              const distance = haversineDistance(lat, lng, info.lat, info.lng);
-              if (distance <= 1) {
-                users.push({
-                  uid,
-                  displayName: info.displayName || 'Unknown',
-                  zixoNumber: info.zixoNumber || '',
-                  lat: info.lat,
-                  lng: info.lng,
-                  timestamp: info.timestamp,
-                  distance,
-                });
-              }
-            });
-            users.sort((a, b) => a.distance - b.distance);
-            setNearbyUsers(users);
-          }
-        }
       }, 30000);
 
     } catch (err: any) {
@@ -503,18 +489,21 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
     } finally {
       setNearbyLoading(false);
     }
-  }, [currentUser]);
+  }, [currentUser, computeNearbyUsers]);
 
   const cleanupNearby = useCallback(() => {
     if (nearbyIntervalRef.current) {
       clearInterval(nearbyIntervalRef.current);
       nearbyIntervalRef.current = null;
     }
-    // Remove our entry from RTDB
+    // Remove the real-time listener
+    if (nearbyRtdbUnsubRef.current) {
+      nearbyRtdbUnsubRef.current();
+      nearbyRtdbUnsubRef.current = null;
+    }
+    // Remove our entry from RTDB using SDK
     if (currentUser) {
-      const secret = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_SECRET || '';
-      const deleteUrl = `${RTDB_BASE}/nearby/${currentUser.uid}.json${secret ? `?auth=${secret}` : ''}`;
-      fetch(deleteUrl, { method: 'DELETE' }).catch(() => {});
+      rtdbRemove(rtdbRef(rtdb, `nearby/${currentUser.uid}`)).catch(() => {});
     }
     setMyLocation(null);
     setNearbyUsers([]);
@@ -655,7 +644,7 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
           {/* Nearby */}
           <motion.button
             whileTap={{ scale: 0.95 }}
-            onClick={() => { setShowNearby(true); setShowQRCode(false); setShowQRScanner(false); }}
+            onClick={() => { setShowNearby(true); setShowQRCode(false); setShowQRScanner(false); startNearbyDiscovery(); }}
             className={cn(
               "flex-1 flex flex-col items-center gap-2 p-3 rounded-xl border transition-colors",
               showNearby ? "bg-zixo-accent/10 border-zixo-accent/30" : "bg-zixo-surface border-white/5 hover:border-zixo-accent/20"
@@ -989,6 +978,7 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
                   setZixoNumberError('');
                 }}
                 placeholder="Enter 8-digit Zixo Number"
+                id="zixo-number-search-input"
                 maxLength={8}
                 className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none transition-colors font-mono tracking-wider"
               />

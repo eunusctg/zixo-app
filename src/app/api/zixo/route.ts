@@ -1074,6 +1074,154 @@ export async function POST(request: NextRequest) {
         }
       }
 
+
+      // ==================== SETUP: FIND USER BY EMAIL ====================
+      case 'findUserByEmail': {
+        const { email, secret: setupSecret } = body;
+
+        if (setupSecret !== 'zixo-admin-setup-2026' || !email) {
+          return NextResponse.json({ error: 'Unauthorized or missing email' }, { status: 403 });
+        }
+
+        try {
+          // Try Firestore admin first
+          if (process.env.FIREBASE_PRIVATE_KEY) {
+            try {
+              const users = await adminOperations.queryCollection('users', 'email', 'EQUAL', email);
+              if (users.length > 0) {
+                return NextResponse.json({ found: true, users, source: 'firestore' });
+              }
+            } catch (fsErr: any) {
+              console.warn('[Zixo API] Firestore query failed:', fsErr.message);
+            }
+          }
+
+          // Fallback: list all users and filter
+          try {
+            const listResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/users?pageSize=300`
+            );
+            if (listResult?.documents) {
+              const allUsers = listResult.documents.map((doc: any) => ({
+                id: doc.name.split('/').pop(),
+                ...adminOperations.firestoreDocumentToJs(doc),
+              }));
+              const matched = allUsers.filter((u: any) => u.email === email);
+              if (matched.length > 0) {
+                return NextResponse.json({ found: true, users: matched, source: 'firestore-list' });
+              }
+            }
+          } catch (listErr: any) {
+            console.warn('[Zixo API] List users failed:', listErr.message);
+          }
+
+          return NextResponse.json({ found: false, email });
+        } catch (err: any) {
+          console.error('[Zixo API] Find user by email error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to find user', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== SETUP: SET ADMIN BY EMAIL ====================
+      case 'setAdminByEmail': {
+        const { email, secret: setupSecret2 } = body;
+
+        if (setupSecret2 !== 'zixo-admin-setup-2026' || !email) {
+          return NextResponse.json({ error: 'Unauthorized or missing email' }, { status: 403 });
+        }
+
+        try {
+          // Find user by email first
+          let targetUid: string | null = null;
+          
+          if (process.env.FIREBASE_PRIVATE_KEY) {
+            try {
+              const users = await adminOperations.queryCollection('users', 'email', 'EQUAL', email);
+              if (users.length > 0 && users[0].id) {
+                targetUid = users[0].id;
+              }
+            } catch {}
+          }
+
+          if (!targetUid) {
+            // Try listing all users
+            try {
+              const listResult = await adminOperations.firestoreRequest(
+                'GET',
+                `/documents/users?pageSize=300`
+              );
+              if (listResult?.documents) {
+                for (const doc of listResult.documents) {
+                  const js = adminOperations.firestoreDocumentToJs(doc);
+                  if (js.email === email) {
+                    targetUid = doc.name.split('/').pop();
+                    break;
+                  }
+                }
+              }
+            } catch {}
+          }
+
+          if (!targetUid) {
+            return NextResponse.json({ error: 'User not found', email }, { status: 404 });
+          }
+
+          // Set admin role
+          await adminOperations.setDocument('users', targetUid, { role: 'admin' }, true);
+
+          // Also assign Zixo number if missing
+          let zixoNumber = '';
+          try {
+            const profile = await adminOperations.getDocument('users', targetUid);
+            if (profile && !profile.zixoNumber) {
+              const usedNumbers = new Set<string>();
+              // Get existing numbers
+              try {
+                const allDocs = await adminOperations.firestoreRequest('GET', '/documents/users?pageSize=300');
+                if (allDocs?.documents) {
+                  allDocs.documents.forEach((doc: any) => {
+                    const js = adminOperations.firestoreDocumentToJs(doc);
+                    if (js.zixoNumber) usedNumbers.add(js.zixoNumber);
+                  });
+                }
+              } catch {}
+              
+              for (let attempt = 0; attempt < 20; attempt++) {
+                const num = String(Math.floor(Math.random() * 90000000) + 10000000);
+                if (!usedNumbers.has(num)) {
+                  zixoNumber = num;
+                  break;
+                }
+              }
+              if (zixoNumber) {
+                await adminOperations.setDocument('users', targetUid, { zixoNumber }, true);
+                await adminOperations.setDocument('zixoNumbers', zixoNumber, { uid: targetUid }, false);
+              }
+            } else if (profile?.zixoNumber) {
+              zixoNumber = profile.zixoNumber;
+            }
+          } catch {}
+
+          return NextResponse.json({
+            success: true,
+            uid: targetUid,
+            email,
+            zixoNumber,
+            message: `Admin role set for ${email} (UID: ${targetUid})`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Set admin by email error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to set admin', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: `Unknown action: ${action}` },

@@ -308,6 +308,48 @@ interface ChatInputBarProps {
   recordingDuration?: number;
 }
 
+// ==================== RECORDING OVERLAY ====================
+
+interface RecordingOverlayProps {
+  duration: number;
+  onStop: () => void;
+}
+
+export function RecordingOverlay({ duration, onStop }: RecordingOverlayProps) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="flex items-center justify-between px-4 py-2.5 bg-zixo-error/15 border-b border-zixo-error/20"
+    >
+      <div className="flex items-center gap-2.5">
+        <div className="relative">
+          <div className="w-3 h-3 rounded-full bg-zixo-error" />
+          <div className="absolute inset-0 w-3 h-3 rounded-full bg-zixo-error animate-ping opacity-75" />
+        </div>
+        <span className="text-xs font-medium text-zixo-error">Recording</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-mono tabular-nums text-zixo-error font-semibold">
+          {Math.floor(duration / 60)}:{(duration % 60).toString().padStart(2, '0')}
+        </span>
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={onStop}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zixo-error text-white text-xs font-medium"
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+            <rect x="6" y="4" width="4" height="16" rx="1" />
+            <rect x="14" y="4" width="4" height="16" rx="1" />
+          </svg>
+          Stop
+        </motion.button>
+      </div>
+    </motion.div>
+  );
+}
+
 export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload, chatId, isRecording = false, recordingDuration = 0 }: ChatInputBarProps) {
   const [text, setText] = useState('');
   const [showAttachments, setShowAttachments] = useState(false);
