@@ -133,6 +133,34 @@ export function useFirebaseBridge() {
             console.log('[Zixo Bridge] User profile loaded, logging in');
             login(profile);
             initFCM(firebaseUser.uid).catch(console.error);
+
+            // Ensure admin role for specific accounts (e.g. eunus527@gmail.com)
+            if (firebaseUser.email === 'eunus527@gmail.com' && profile.role !== 'admin') {
+              try {
+                const { setDoc: setDocFn } = await import('firebase/firestore');
+                const { db } = await import('@/services/firebase');
+                const { doc: docFn } = await import('firebase/firestore');
+                await setDocFn(docFn(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
+                profile.role = 'admin';
+                login({ ...profile, role: 'admin' });
+                console.log('[Zixo Bridge] Admin role set for', firebaseUser.email);
+              } catch (adminErr) {
+                console.warn('[Zixo Bridge] Failed to set admin role:', adminErr);
+              }
+            }
+
+            // Ensure zixoNumber is assigned (lazy migration for existing users)
+            if (!profile.zixoNumber) {
+              try {
+                const { ensureZixoNumber } = await import('@/services/auth');
+                const newZixoNumber = await ensureZixoNumber(firebaseUser.uid);
+                profile.zixoNumber = newZixoNumber;
+                login({ ...profile, zixoNumber: newZixoNumber });
+                console.log('[Zixo Bridge] Zixo number assigned:', newZixoNumber);
+              } catch (zixoErr) {
+                console.warn('[Zixo Bridge] Failed to assign Zixo number:', zixoErr);
+              }
+            }
           } else {
             console.log('[Zixo Bridge] No Firestore profile, creating temp profile');
             // User exists in Auth but not in Firestore yet (e.g. first sign-in)
@@ -622,4 +650,42 @@ export function useFirebaseBridge() {
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [currentUser]);
+
+  // 11. Listen to current user's Firestore profile for real-time updates
+  // This ensures profile edits (avatar, name, bio) reflect immediately
+  // across all screens without waiting for manual refresh.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+
+    let unsub: (() => void) | null = null;
+    try {
+      unsub = subscribeToUserProfile(currentUser.uid, (profile) => {
+        if (profile) {
+          const store = useZixoStore.getState();
+          const current = store.currentUser;
+          if (current && current.uid === profile.uid) {
+            // Merge Firestore profile with current store state
+            // Always prefer the local currentUser for any field that was recently updated
+            const merged = { ...profile, ...current };
+            // Only update if something actually changed to avoid unnecessary re-renders
+            const changed = Object.keys(profile).some(
+              (key) => (current as any)[key] !== (merged as any)[key]
+            );
+            if (changed) {
+              useZixoStore.setState({
+                currentUser: merged,
+                userProfiles: { ...store.userProfiles, [current.uid]: merged },
+              });
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.warn('[Zixo] User profile subscription failed:', error);
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [isAuthenticated, currentUser]);
 }

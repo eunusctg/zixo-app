@@ -15,22 +15,74 @@ import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, type RTDBGrou
  */
 async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
   try {
+    // Check localStorage cache first (works on all browsers including Firefox)
+    if (typeof window !== 'undefined') {
+      const permCache = localStorage.getItem('zixo_call_permissions');
+      if (permCache) {
+        try {
+          const cached = JSON.parse(permCache);
+          if (cached.micGranted) {
+            if (type === 'audio') return true;
+            if (type === 'video' && cached.camGranted) return true;
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    // Try navigator.permissions API (not supported on Firefox for mic/cam)
     const micStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-    if (micStatus.state === 'granted') return true;
-    if (micStatus.state === 'denied') return true; // Already decided, don't ask again
-    // micStatus.state === 'prompt' - need to ask
+    if (micStatus.state === 'granted') {
+      // Cache the permission state
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: false }));
+      }
+      return true;
+    }
+    if (micStatus.state === 'denied') {
+      // Already decided, don't ask again
+      return true;
+    }
+
     if (type === 'video') {
       const camStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
-      if (camStatus.state === 'granted' || camStatus.state === 'denied') {
-        // Camera is decided, only show modal if mic still needs asking
-        return micStatus.state !== 'prompt';
+      if (camStatus.state === 'granted') {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: micStatus.state === 'granted', camGranted: true }));
+        }
+        return micStatus.state === 'granted'; // Still need mic
       }
-      // Camera is also in 'prompt' state
-      return false;
+      if (camStatus.state === 'denied') {
+        return micStatus.state !== 'prompt'; // Only show if mic also needs asking
+      }
     }
+
     return false; // Mic is in 'prompt' state, need to show permission modal
   } catch {
-    return false; // permissions.query not supported, show modal
+    // navigator.permissions.query not supported (Firefox) — check localStorage cache as fallback
+    if (typeof window !== 'undefined') {
+      const permCache = localStorage.getItem('zixo_call_permissions');
+      if (permCache) {
+        try {
+          const cached = JSON.parse(permCache);
+          if (cached.micGranted) return true;
+        } catch {
+          // Ignore
+        }
+      }
+    }
+    return false; // No cached permission, show modal
+  }
+}
+
+/**
+ * Save call permission grants to localStorage cache.
+ * Call this after user grants microphone/camera permissions.
+ */
+export function saveCallPermissionCache(micGranted: boolean, camGranted: boolean): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted, camGranted }));
   }
 }
 

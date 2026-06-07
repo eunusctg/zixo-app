@@ -244,8 +244,8 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
     : search.trim().length > 0 && search.trim().length < 2
       ? allUsers.filter(
           (c) =>
-            c.displayName.toLowerCase().includes(search.toLowerCase()) ||
-            c.username.toLowerCase().includes(search.toLowerCase())
+            (c.displayName || '').toLowerCase().includes(search.toLowerCase()) ||
+            (c.username || '').toLowerCase().includes(search.toLowerCase())
         )
       : allUsers;
 
@@ -587,7 +587,7 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => {
-              const link = `https://zixo-app-cfy.pages.dev`;
+              const link = `https://zixo.pages.dev`;
               setShareLink(link);
               setShowShareDialog(true);
               if (navigator.share) {
@@ -635,8 +635,11 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
           <motion.button
             whileTap={{ scale: 0.95 }}
             onClick={() => {
-              const input = document.querySelector('input[placeholder*="Zixo Number"]') as HTMLInputElement;
-              if (input) input.focus();
+              const input = document.getElementById('zixo-number-search-input') as HTMLInputElement;
+              if (input) {
+                input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => input.focus(), 300);
+              }
             }}
             className="flex-1 flex flex-col items-center gap-2 p-3 rounded-xl bg-zixo-surface border border-white/5 hover:border-zixo-primary/20 transition-colors"
           >

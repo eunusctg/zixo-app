@@ -497,15 +497,9 @@ export class ZixoWebRTC {
     }
 
     // Clean up RTDB signaling
-    if (this.callId) {
-      try {
-        endCallSignal(this.callId);
-      } catch (e) {
-        // Document may already be deleted
-      }
-    }
-
-    // Unsubscribe from signaling
+    // NOTE: Don't call endCallSignal here — the store's endCall action
+    // already handles signaling. Calling it twice causes a race condition
+    // where the signal data is removed before the receiver gets the 'ended' status.
     if (this.unsubscribeSignaling) {
       this.unsubscribeSignaling();
     }

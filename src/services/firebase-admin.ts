@@ -290,6 +290,8 @@ async function sendFCMMessage(
         notification: {
           sound: 'default',
           channel_id: 'zixo_messages',
+          default_sound: true,
+          visibility: 'public' as const,
         },
       },
       apns: {
@@ -297,13 +299,25 @@ async function sendFCMMessage(
           aps: {
             sound: 'default',
             badge: 1,
+            'content-available': 1,
           },
+        },
+      },
+      webpush: {
+        headers: {
+          Urgency: 'high',
+          TTL: '0',
         },
       },
     };
 
+    // Always include data payload so the notification is delivered even
+    // when the app is in the foreground (FCM data messages are not throttled)
     if (data) {
-      message.data = data;
+      message.data = { ...data, title: notification.title, body: notification.body };
+    } else {
+      // Ensure data payload exists for reliable delivery
+      message.data = { title: notification.title, body: notification.body, type: 'default' };
     }
 
     const response = await fetch(url, {

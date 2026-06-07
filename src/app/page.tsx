@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useZixoStore } from '@/stores/useZixoStore';
 import { useFirebaseBridge } from '@/hooks/useFirebaseBridge';
 import { logoutUser } from '@/services/auth';
+import { saveCallPermissionCache } from '@/stores/useZixoStore';
 import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead, searchMessages as firestoreSearchMessages, createOrGetChat } from '@/services/firestore';
 import { searchUserByUsername, searchUsers, getAllUsers, searchUserByZixoNumber } from '@/services/auth';
 import { cn, formatDateGroup } from '@/lib/zixo-utils';
@@ -20,6 +21,7 @@ import ProfileEditScreen from '@/components/zixo/ProfileEditScreen';
 import AdminPanel from '@/components/zixo/AdminPanel';
 import { BottomNav, FAB, SearchBar } from '@/components/zixo/Navigation';
 import { OnlineStatus, EncryptionBadge } from '@/components/zixo/Common';
+import ErrorBoundary from '@/components/zixo/ErrorBoundary';
 import type { ZixoUserProfile } from '@/services/auth';
 
 export default function ZixoApp() {
@@ -136,6 +138,9 @@ export default function ZixoApp() {
     if (nextIndex >= updatedRequests.length) {
       // All permissions processed - check if mic was granted (minimum required)
       const micGranted = updatedRequests.find(r => r.type === 'microphone')?.status === 'granted';
+      const camGranted = updatedRequests.find(r => r.type === 'camera')?.status === 'granted';
+      // Cache the permission state so we don't ask again next time
+      saveCallPermissionCache(micGranted || false, camGranted || false);
       setTimeout(() => {
         useZixoStore.setState({ showPermissionModal: false });
         permissionCallback?.(micGranted || false);
@@ -155,6 +160,8 @@ export default function ZixoApp() {
     const nextIndex = permCurrentIndex + 1;
     if (nextIndex >= updatedRequests.length) {
       const micGranted = updatedRequests.find(r => r.type === 'microphone')?.status === 'granted';
+      const camGranted = updatedRequests.find(r => r.type === 'camera')?.status === 'granted';
+      saveCallPermissionCache(micGranted || false, camGranted || false);
       setTimeout(() => {
         useZixoStore.setState({ showPermissionModal: false });
         permissionCallback?.(micGranted || false);
@@ -339,6 +346,11 @@ export default function ZixoApp() {
         // Stop all audio tracks
         stream.getTracks().forEach(track => track.stop());
 
+        // Collect any remaining data
+        if (mediaRecorderRef.current?.state === 'recording') {
+          // Already stopped, but just in case
+        }
+
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         const duration = Math.floor((Date.now() - startTime) / 1000);
 
@@ -358,12 +370,16 @@ export default function ZixoApp() {
             // Fallback: send as voice message without media URL
             handleSendMessage('🎤 Voice note', 'voice', { duration });
           }
+        } else if (audioBlob.size > 0) {
+          // Duration is 0 but we have data — send anyway with minimum duration
+          handleSendMessage('🎤 Voice note', 'voice', { duration: 1 });
         }
 
         setRecordingDuration(0);
+        mediaRecorderRef.current = null;
       };
 
-      mediaRecorder.start();
+      mediaRecorder.start(1000); // Request data every 1 second for more reliable recording
       setIsRecording(true);
       startTime = Date.now();
       setRecordingDuration(0);
@@ -622,7 +638,7 @@ export default function ZixoApp() {
         return renderChatScreen();
 
       case 'contacts':
-        return renderContactsScreen();
+        return <ErrorBoundary>{renderContactsScreen()}</ErrorBoundary>;
 
       case 'profile-edit':
         if (!currentUser) return null;
@@ -674,7 +690,7 @@ export default function ZixoApp() {
                   <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
               </motion.button>
-              <Avatar name={currentUser.displayName} uid={currentUser.uid} avatarUrl={currentUser.avatar} size="sm" online={currentUser.online} />
+              <Avatar key={currentUser.avatar} name={currentUser.displayName} uid={currentUser.uid} avatarUrl={currentUser.avatar} size="sm" online={currentUser.online} />
             </div>
           </div>
 
@@ -1122,6 +1138,7 @@ export default function ZixoApp() {
   };
 
   return (
+    <ErrorBoundary>
     <div className="min-h-screen bg-zixo-bg text-zixo-text flex justify-center">
       <div className="w-full max-w-lg relative">
         <AnimatePresence mode="wait">
@@ -1271,5 +1288,6 @@ export default function ZixoApp() {
         )}
       </AnimatePresence>
     </div>
+    </ErrorBoundary>
   );
 }

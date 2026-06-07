@@ -494,12 +494,21 @@ export class ZixoGroupWebRTC {
     this.unsubCall.push(unsubOffers);
 
     // Listen for call status changes (ended by creator)
+    // Only auto-leave for non-creator participants to prevent the creator
+    // from accidentally leaving when they set the status
     const statusRef = ref(rtdb, `groupCalls/${this.callId}/status`);
-    const unsubStatus = onValue(statusRef, (snap) => {
+    const unsubStatus = onValue(statusRef, async (snap) => {
       if (snap.exists() && snap.val() === 'ended') {
         // Call was ended by the creator - leave the call
         console.log('[Zixo Group] Call ended by creator, leaving...');
-        this.leaveGroupCall();
+        // Use the store's leaveGroupCall to ensure proper cleanup
+        try {
+          const { useZixoStore } = await import('@/stores/useZixoStore');
+          useZixoStore.getState().leaveGroupCall();
+        } catch {
+          // Fallback to direct leave
+          this.leaveGroupCall();
+        }
       }
     });
     this.unsubCall.push(unsubStatus);

@@ -165,7 +165,7 @@ export async function generateUniqueZixoNumber(): Promise<string> {
  * Ensure a user profile has a zixoNumber assigned.
  * If missing, generates one and saves it to both the user profile and the zixoNumbers mapping.
  */
-async function ensureZixoNumber(uid: string, existingProfile?: Record<string, any>): Promise<string> {
+export async function ensureZixoNumber(uid: string, existingProfile?: Record<string, any>): Promise<string> {
   // Check if the profile already has a zixoNumber
   if (existingProfile?.zixoNumber) {
     return existingProfile.zixoNumber;
