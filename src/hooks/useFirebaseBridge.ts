@@ -122,83 +122,65 @@ export function useFirebaseBridge() {
   }, []);
 
   // 1. Listen to Firebase auth state changes
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
+  // Use useRef for the callback to avoid stale closures and dependency issues
+  const authCallbackRef = useRef<(firebaseUser: any) => void>();
 
-    const unsub = onAuthChange(async (firebaseUser) => {
-      setFirebaseReady();
-      console.log('[Zixo Bridge] Auth state changed:', firebaseUser ? `uid=${firebaseUser.uid}` : 'null');
+  authCallbackRef.current = async (firebaseUser: any) => {
+    setFirebaseReady();
+    console.log('[Zixo Bridge] Auth state changed:', firebaseUser ? `uid=${firebaseUser.uid}` : 'null');
 
-      if (firebaseUser) {
-        try {
-          const profile = await getUserProfile(firebaseUser.uid);
-          if (profile) {
-            // Check if user is banned
-            if ((profile as any).banned === true) {
-              console.log('[Zixo Bridge] User is banned, signing out');
-              try {
-                const { signOut } = await import('firebase/auth');
-                const { auth } = await import('@/services/firebase');
-                await signOut(auth);
-              } catch (signOutErr) {
-                console.error('[Zixo Bridge] Failed to sign out banned user:', signOutErr);
-              }
-              if (typeof window !== 'undefined') {
-                alert('Your account has been suspended. Please contact support if you believe this is an error.');
-              }
-              return;
+    if (firebaseUser) {
+      try {
+        const profile = await getUserProfile(firebaseUser.uid);
+        if (profile) {
+          // Check if user is banned
+          if ((profile as any).banned === true) {
+            console.log('[Zixo Bridge] User is banned, signing out');
+            try {
+              const { signOut } = await import('firebase/auth');
+              const { auth } = await import('@/services/firebase');
+              await signOut(auth);
+            } catch (signOutErr) {
+              console.error('[Zixo Bridge] Failed to sign out banned user:', signOutErr);
             }
-            console.log('[Zixo Bridge] User profile loaded, logging in');
-            login(profile);
-            initFCM(firebaseUser.uid).catch(console.error);
-
-            // Ensure admin role for specific accounts
-            if (firebaseUser.email === 'eunus527@gmail.com' && profile.role !== 'admin') {
-              try {
-                const { setDoc: setDocFn } = await import('firebase/firestore');
-                const { db } = await import('@/services/firebase');
-                const { doc: docFn } = await import('firebase/firestore');
-                await setDocFn(docFn(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
-                profile.role = 'admin';
-                login({ ...profile, role: 'admin' });
-                console.log('[Zixo Bridge] Admin role set for', firebaseUser.email);
-              } catch (adminErr) {
-                console.warn('[Zixo Bridge] Failed to set admin role:', adminErr);
-              }
+            if (typeof window !== 'undefined') {
+              alert('Your account has been suspended. Please contact support if you believe this is an error.');
             }
-
-            // Ensure zixoNumber is assigned
-            if (!profile.zixoNumber) {
-              try {
-                const { ensureZixoNumber } = await import('@/services/auth');
-                const newZixoNumber = await ensureZixoNumber(firebaseUser.uid);
-                profile.zixoNumber = newZixoNumber;
-                login({ ...profile, zixoNumber: newZixoNumber });
-                console.log('[Zixo Bridge] Zixo number assigned:', newZixoNumber);
-              } catch (zixoErr) {
-                console.warn('[Zixo Bridge] Failed to assign Zixo number:', zixoErr);
-              }
-            }
-          } else {
-            console.log('[Zixo Bridge] No Firestore profile, creating temp profile');
-            const tempProfile: ZixoUserProfile = {
-              uid: firebaseUser.uid,
-              displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-              email: firebaseUser.email || '',
-              username: `@${(firebaseUser.displayName || 'user').toLowerCase().replace(/\s+/g, '')}`,
-              bio: 'Living free, connecting freely',
-              avatar: firebaseUser.photoURL || '',
-              online: true,
-              lastSeen: Date.now(),
-              createdAt: Date.now(),
-              role: 'user',
-              zixoNumber: '',
-            };
-            login(tempProfile);
+            return;
           }
-        } catch (error) {
-          console.error('[Zixo Bridge] Error loading user profile:', error);
+          console.log('[Zixo Bridge] User profile loaded, logging in');
+          login(profile);
+          initFCM(firebaseUser.uid).catch(console.error);
+
+          // Ensure admin role for specific accounts
+          if (firebaseUser.email === 'eunus527@gmail.com' && profile.role !== 'admin') {
+            try {
+              const { setDoc: setDocFn } = await import('firebase/firestore');
+              const { db } = await import('@/services/firebase');
+              const { doc: docFn } = await import('firebase/firestore');
+              await setDocFn(docFn(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
+              profile.role = 'admin';
+              login({ ...profile, role: 'admin' });
+              console.log('[Zixo Bridge] Admin role set for', firebaseUser.email);
+            } catch (adminErr) {
+              console.warn('[Zixo Bridge] Failed to set admin role:', adminErr);
+            }
+          }
+
+          // Ensure zixoNumber is assigned
+          if (!profile.zixoNumber) {
+            try {
+              const { ensureZixoNumber } = await import('@/services/auth');
+              const newZixoNumber = await ensureZixoNumber(firebaseUser.uid);
+              profile.zixoNumber = newZixoNumber;
+              login({ ...profile, zixoNumber: newZixoNumber });
+              console.log('[Zixo Bridge] Zixo number assigned:', newZixoNumber);
+            } catch (zixoErr) {
+              console.warn('[Zixo Bridge] Failed to assign Zixo number:', zixoErr);
+            }
+          }
+        } else {
+          console.log('[Zixo Bridge] No Firestore profile, creating temp profile');
           const tempProfile: ZixoUserProfile = {
             uid: firebaseUser.uid,
             displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
@@ -212,26 +194,52 @@ export function useFirebaseBridge() {
             role: 'user',
             zixoNumber: '',
           };
-          console.log('[Zixo Bridge] Using temp profile due to error');
           login(tempProfile);
-
-          setTimeout(async () => {
-            try {
-              const profile = await getUserProfile(firebaseUser.uid);
-              if (profile) {
-                console.log('[Zixo Bridge] Profile loaded on retry');
-                login(profile);
-              }
-            } catch (retryError) {
-              console.error('[Zixo Bridge] Profile load retry also failed:', retryError);
-            }
-          }, 2000);
         }
+      } catch (error) {
+        console.error('[Zixo Bridge] Error loading user profile:', error);
+        const tempProfile: ZixoUserProfile = {
+          uid: firebaseUser.uid,
+          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+          email: firebaseUser.email || '',
+          username: `@${(firebaseUser.displayName || 'user').toLowerCase().replace(/\s+/g, '')}`,
+          bio: 'Living free, connecting freely',
+          avatar: firebaseUser.photoURL || '',
+          online: true,
+          lastSeen: Date.now(),
+          createdAt: Date.now(),
+          role: 'user',
+          zixoNumber: '',
+        };
+        console.log('[Zixo Bridge] Using temp profile due to error');
+        login(tempProfile);
+
+        setTimeout(async () => {
+          try {
+            const profile = await getUserProfile(firebaseUser.uid);
+            if (profile) {
+              console.log('[Zixo Bridge] Profile loaded on retry');
+              login(profile);
+            }
+          } catch (retryError) {
+            console.error('[Zixo Bridge] Profile load retry also failed:', retryError);
+          }
+        }, 2000);
       }
+    }
+  };
+
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+
+    const unsub = onAuthChange((firebaseUser) => {
+      // Use ref to always call the latest callback without stale closures
+      authCallbackRef.current?.(firebaseUser);
     });
 
     return () => unsub();
-  }, [setFirebaseReady, login]);
+  }, []);
 
   // 2. Set up RTDB presence when authenticated
   useEffect(() => {

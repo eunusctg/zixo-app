@@ -23,6 +23,7 @@ import { BottomNav, FAB, SearchBar } from '@/components/zixo/Navigation';
 import { OnlineStatus, EncryptionBadge } from '@/components/zixo/Common';
 import ErrorBoundary from '@/components/zixo/ErrorBoundary';
 import NotificationBanner from '@/components/zixo/NotificationBanner';
+import PWAInstallPrompt from '@/components/zixo/PWAInstallPrompt';
 import type { ZixoUserProfile } from '@/services/auth';
 
 export default function ZixoApp() {
@@ -526,7 +527,26 @@ export default function ZixoApp() {
         return (
           <AuthScreen
             mode="login"
-            onAuth={() => {}} // Auth handled by useFirebaseBridge
+            onAuth={(data) => {
+              // The Firebase bridge (useFirebaseBridge) handles auth state changes
+              // via onAuthStateChanged, but there can be a race condition where
+              // the bridge hasn't called login() yet when the user clicks Continue
+              // on the Zixo Number screen. This callback ensures we navigate to home.
+              if (isAuthenticated && currentUser) {
+                setScreen('home');
+              } else {
+                // Bridge hasn't fired yet — check again shortly
+                const checkInterval = setInterval(() => {
+                  const state = useZixoStore.getState();
+                  if (state.isAuthenticated && state.currentUser) {
+                    state.setScreen('home');
+                    clearInterval(checkInterval);
+                  }
+                }, 200);
+                // Safety: stop checking after 10 seconds
+                setTimeout(() => clearInterval(checkInterval), 10000);
+              }
+            }}
             onSwitchMode={() => {}}
             onBack={() => setScreen('onboarding')}
           />
@@ -1201,6 +1221,9 @@ export default function ZixoApp() {
         onDismiss={onDismissBanner}
         onTap={onTapBanner}
       />
+
+      {/* PWA Install Prompt & Offline Banner */}
+      <PWAInstallPrompt />
 
       <div className="w-full max-w-lg relative page-transition-container">
         <AnimatePresence mode="wait">

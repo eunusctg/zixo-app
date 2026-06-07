@@ -5,13 +5,48 @@ export const metadata: Metadata = {
   title: "Zixo - Free Video and Audio Calling App",
   description: "Connect freely. No social clutter. Free video and audio calling app with end-to-end encryption.",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Zixo",
+  },
+  openGraph: {
+    title: "Zixo - Free Video and Audio Calling App",
+    description: "Connect freely. No social clutter. Free video and audio calling with end-to-end encryption.",
+    siteName: "Zixo",
+    type: "website",
+    images: [
+      {
+        url: "/icon-512.png",
+        width: 512,
+        height: 512,
+        alt: "Zixo App",
+      },
+    ],
+  },
+  icons: {
+    icon: [
+      { url: "/icon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-48.png", sizes: "48x48", type: "image/png" },
+      { url: "/icon-96.png", sizes: "96x96", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icon-152.png", sizes: "152x152", type: "image/png" },
+      { url: "/icon-180.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#0A0A1A",
+  userScalable: false,
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#0A0A1A" },
+    { media: "(prefers-color-scheme: light)", color: "#25D366" },
+  ],
 };
 
 export default function RootLayout({
@@ -27,6 +62,31 @@ export default function RootLayout({
         <link
           href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
           rel="stylesheet"
+        />
+        {/* PWA Meta Tags */}
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Zixo" />
+        <meta name="application-name" content="Zixo" />
+        <meta name="msapplication-TileColor" content="#0A0A1A" />
+        <meta name="msapplication-TileImage" content="/icon-144.png" />
+        <link rel="apple-touch-icon" href="/icon-180.png" />
+        <link rel="apple-touch-icon" sizes="152x152" href="/icon-152.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
+        {/* Service Worker Registration */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {
+                    console.warn('SW registration failed:', err);
+                  });
+                });
+              }
+            `,
+          }}
         />
       </head>
       <body className="font-body antialiased bg-zixo-bg text-zixo-text min-h-screen">
