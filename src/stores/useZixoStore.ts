@@ -5,6 +5,7 @@ import type { UploadProgress } from '@/services/storage';
 import { getWebRTC, resetWebRTC } from '@/services/webrtc';
 import { getGroupWebRTC, resetGroupWebRTC } from '@/services/webrtc-group';
 import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, endGroupCallSignal, type RTDBGroupCallSignal } from '@/services/presence';
+import { playOutgoingRingSound, stopOutgoingRingSound } from '@/services/messaging';
 
 // ==================== PERMISSION HELPERS ====================
 
@@ -617,13 +618,27 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   setCallHistory: (calls) => set({ callHistory: calls }),
 
   setCallStatus: (status) =>
-    set((state) => ({
-      activeCall: state.activeCall ? { ...state.activeCall, status, startedAt: status === 'connected' && !state.activeCall.startedAt ? Date.now() : state.activeCall.startedAt } : null,
-    })),
+    set((state) => {
+      // Stop outgoing ring sound when call transitions from ringing/connecting to connected or ended
+      if (status === 'connected' || status === 'ended') {
+        stopOutgoingRingSound();
+      }
+      return {
+        activeCall: state.activeCall ? { ...state.activeCall, status, startedAt: status === 'connected' && !state.activeCall.startedAt ? Date.now() : state.activeCall.startedAt } : null,
+      };
+    }),
 
   startCall: (type, user) => {
     const currentUser = get().currentUser;
     if (!currentUser) return;
+
+    // Guard: Prevent starting a new call if already in an active call or incoming call
+    const currentActiveCall = get().activeCall;
+    const currentIncomingCall = get().incomingCall;
+    if (currentActiveCall || currentIncomingCall) {
+      console.warn('[Zixo] Cannot start a new call — already in an active or incoming call');
+      return;
+    }
 
     // Build permission requests list (no 'location' - not needed for calls)
     const neededPermissions: PermissionRequest[] = [];
@@ -639,6 +654,12 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       const state = useZixoStore.getState();
       const currentUser = state.currentUser;
       if (!currentUser) return;
+
+      // Double-check: don't start if already in a call (may have changed during permission dialog)
+      if (state.activeCall || state.incomingCall) {
+        console.warn('[Zixo] Cannot proceed with call — already in an active or incoming call');
+        return;
+      }
 
       // Reset any previous WebRTC instance
       resetWebRTC();
@@ -680,6 +701,9 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         currentScreen: type === 'audio' ? 'audio-call' : 'video-call',
       });
 
+      // Play outgoing ring sound (what the caller hears while waiting)
+      playOutgoingRingSound();
+
       // Initiate WebRTC call asynchronously
       webrtc.startCall(currentUser.uid, currentUser.displayName, user.uid, type)
         .then((callId) => {
@@ -693,6 +717,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         .catch((err: any) => {
           console.error('[Zixo] Failed to start call:', err);
           try { webrtc.endCall(); } catch {}
+          stopOutgoingRingSound();
           useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
           if (err?.name === 'NotAllowedError') {
             // Permission was revoked after our pre-check — invalidate cache
@@ -834,9 +859,51 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
   rejectCall: () => {
     const incoming = get().incomingCall;
+    const currentUser = get().currentUser;
     if (incoming) {
       // End the call signal so the caller knows it was rejected
       endCallSignal(incoming.callId);
+
+      // Record as missed call (receiver rejected / declined)
+      if (currentUser) {
+        const missedCall: CallRecord = {
+          id: incoming.callId || `call-${Date.now()}`,
+          callerId: incoming.callerProfile.uid,
+          callerName: incoming.callerProfile.displayName,
+          callerAvatar: incoming.callerProfile.avatar || '',
+          receiverId: currentUser.uid,
+          receiverName: currentUser.displayName,
+          receiverAvatar: currentUser.avatar || '',
+          type: incoming.callType,
+          direction: 'missed',
+          duration: 0,
+          timestamp: Date.now(),
+        };
+
+        set((state) => ({
+          callHistory: [missedCall, ...state.callHistory],
+          incomingCall: null,
+          activeCall: null,
+          currentScreen: 'home',
+        }));
+
+        // Save missed call to Firestore
+        import('@/services/firestore').then(({ saveCallRecord }) => {
+          saveCallRecord({
+            callerId: missedCall.callerId,
+            callerName: missedCall.callerName,
+            callerAvatar: missedCall.callerAvatar,
+            receiverId: missedCall.receiverId,
+            receiverName: missedCall.receiverName,
+            receiverAvatar: missedCall.receiverAvatar,
+            type: missedCall.type,
+            direction: 'missed',
+            duration: 0,
+          }).catch(console.error);
+        }).catch(console.error);
+
+        return;
+      }
     }
     set({ incomingCall: null, activeCall: null, currentScreen: 'home' });
   },
@@ -846,6 +913,9 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
     // Guard: if there's no active call and no incoming call, nothing to do
     if (!activeCall && !incomingCall) return;
+
+    // Stop outgoing ring sound (in case the call was still in ringing/connecting)
+    stopOutgoingRingSound();
 
     // Always send endCallSignal FIRST to ensure RTDB data is cleaned up, even if WebRTC throws
     if (activeCall?.callId) {

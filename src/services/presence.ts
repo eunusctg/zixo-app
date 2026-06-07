@@ -177,34 +177,80 @@ export function createCallSignal(signal: Omit<RTDBCallSignal, 'createdAt'>): str
 }
 
 /**
- * Listen for incoming calls for a user
+ * Listen for incoming calls for a user.
+ * Uses onChildAdded for NEW calls only (avoids re-triggering on every
+ * data change in the calls node like ICE candidates, offer updates, etc.)
+ * combined with a per-call status listener to detect when the caller hangs up.
  */
 export function subscribeToIncomingCalls(
   uid: string,
   callback: (calls: Array<{ id: string; data: RTDBCallSignal }>) => void
 ): () => void {
   const callsRef = ref(rtdb, 'calls');
+  const activeCallIds = new Set<string>();
+  const perCallUnsubs: Record<string, () => void> = {};
 
-  const unsubscribe = onValue(callsRef, (snap) => {
-    if (snap.exists()) {
-      const data = snap.val();
-      const calls: Array<{ id: string; data: RTDBCallSignal }> = [];
+  // Helper: build the current list of active incoming calls and call the callback
+  const notifyCallback = () => {
+    // Read current data for all tracked call IDs
+    const results: Array<{ id: string; data: RTDBCallSignal }> = [];
+    const pendingReads: Promise<void>[] = [];
 
-      Object.entries(data).forEach(([id, callData]: [string, any]) => {
-        if (callData.receiverId === uid && callData.status === 'ringing') {
-          calls.push({ id, data: callData as RTDBCallSignal });
+    activeCallIds.forEach((callId) => {
+      pendingReads.push(
+        get(ref(rtdb, `calls/${callId}`)).then((snap) => {
+          if (snap.exists()) {
+            const data = snap.val() as RTDBCallSignal;
+            if (data.receiverId === uid && data.status === 'ringing') {
+              results.push({ id: callId, data });
+            }
+          }
+        }).catch(() => {})
+      );
+    });
+
+    Promise.all(pendingReads).then(() => {
+      callback(results);
+    });
+  };
+
+  // Use onChildAdded to detect NEW calls only
+  const childAddedUnsub = onChildAdded(callsRef, (snap) => {
+    if (!snap.exists()) return;
+    const callData = snap.val() as RTDBCallSignal;
+    const callId = snap.key!;
+
+    // Only care about calls where this user is the receiver and the call is ringing
+    if (callData.receiverId === uid && callData.status === 'ringing') {
+      if (activeCallIds.has(callId)) return; // Already tracking
+      activeCallIds.add(callId);
+
+      // Set up a per-call status listener to detect when the caller cancels
+      const callRef = ref(rtdb, `calls/${callId}`);
+      perCallUnsubs[callId] = onValue(callRef, (callSnap) => {
+        if (!callSnap.exists() || (callSnap.exists() && callSnap.val().status === 'ended')) {
+          // Call was cancelled/ended by caller
+          activeCallIds.delete(callId);
+          if (perCallUnsubs[callId]) {
+            off(callRef);
+            perCallUnsubs[callId]();
+            delete perCallUnsubs[callId];
+          }
+          notifyCallback();
         }
       });
 
-      callback(calls);
-    } else {
-      callback([]);
+      notifyCallback();
     }
   });
 
   return () => {
     off(callsRef);
-    unsubscribe();
+    childAddedUnsub();
+    Object.values(perCallUnsubs).forEach((unsub) => unsub());
+    Object.keys(perCallUnsubs).forEach((callId) => {
+      off(ref(rtdb, `calls/${callId}`));
+    });
   };
 }
 

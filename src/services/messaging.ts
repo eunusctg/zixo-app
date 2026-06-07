@@ -99,6 +99,88 @@ export function playRingingSound(): void {
   }
 }
 
+/**
+ * Play an outgoing ring sound (what the caller hears while waiting for the receiver to answer).
+ * Uses a repeating dual-tone pattern that sounds like a standard phone ring.
+ * Returns a stop function to end the repeating sound when the call is answered or ended.
+ */
+let outgoingRingInterval: ReturnType<typeof setInterval> | null = null;
+let outgoingRingAudioCtx: AudioContext | null = null;
+
+export function playOutgoingRingSound(): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  // Stop any existing outgoing ring
+  stopOutgoingRingSound();
+
+  try {
+    outgoingRingAudioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+    const playRingCycle = () => {
+      if (!outgoingRingAudioCtx) return;
+      const ctx = outgoingRingAudioCtx;
+      const now = ctx.currentTime;
+
+      // Standard ring pattern: two tones (440Hz + 480Hz) for 1 second, then 3 seconds silence
+      // Play ring tone burst
+      for (let i = 0; i < 8; i++) {
+        const offset = i * 0.125;
+
+        // First tone (440Hz - North American ring)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(440, now + offset);
+        gain1.gain.setValueAtTime(0.15, now + offset);
+        gain1.gain.setValueAtTime(0.15, now + offset + 0.1);
+        gain1.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.12);
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.start(now + offset);
+        osc1.stop(now + offset + 0.12);
+
+        // Second tone (480Hz)
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(480, now + offset);
+        gain2.gain.setValueAtTime(0.12, now + offset);
+        gain2.gain.setValueAtTime(0.12, now + offset + 0.1);
+        gain2.gain.exponentialRampToValueAtTime(0.01, now + offset + 0.12);
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.start(now + offset);
+        osc2.stop(now + offset + 0.12);
+      }
+    };
+
+    // Play immediately, then repeat every 4 seconds (1s ring + 3s silence)
+    playRingCycle();
+    outgoingRingInterval = setInterval(playRingCycle, 4000);
+
+  } catch (err) {
+    console.warn('[Zixo] Could not play outgoing ring sound:', err);
+  }
+
+  return stopOutgoingRingSound;
+}
+
+/**
+ * Stop the outgoing ring sound
+ */
+export function stopOutgoingRingSound(): void {
+  if (outgoingRingInterval) {
+    clearInterval(outgoingRingInterval);
+    outgoingRingInterval = null;
+  }
+  if (outgoingRingAudioCtx) {
+    try {
+      outgoingRingAudioCtx.close();
+    } catch {}
+    outgoingRingAudioCtx = null;
+  }
+}
+
 export function setNotificationSoundEnabled(enabled: boolean): void {
   notificationSoundEnabled = enabled;
 }
