@@ -7,7 +7,7 @@
  * enable phone authentication for the Firebase project.
  */
 
-// runtime = 'edge' (Cloudflare Pages runs all routes on the edge by default)
+export const runtime = 'edge';
 
 // Simple setup secret to prevent unauthorized access
 // Set SETUP_SECRET env var or use the default for initial setup
@@ -18,27 +18,32 @@ function validateSetupRequest(url: URL): boolean {
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  
-  if (!validateSetupRequest(url)) {
-    return Response.json({ error: 'Unauthorized. Add ?token=zixo-setup-2024 parameter.' }, { status: 401 });
-  }
-  
-  const action = url.searchParams.get('action');
+  try {
+    const url = new URL(request.url);
+    
+    if (!validateSetupRequest(url)) {
+      return Response.json({ error: 'Unauthorized. Add ?token=zixo-setup-2024 parameter.' }, { status: 401 });
+    }
+    
+    const action = url.searchParams.get('action');
 
-  if (action === 'enable-phone-auth') {
-    return enablePhoneAuth(request);
-  }
+    if (action === 'enable-phone-auth') {
+      return await enablePhoneAuth(request);
+    }
 
-  if (action === 'add-domain') {
-    return addAuthorizedDomain(request, url.searchParams.get('domain') || '');
-  }
+    if (action === 'add-domain') {
+      return await addAuthorizedDomain(request, url.searchParams.get('domain') || '');
+    }
 
-  if (action === 'status') {
-    return getAuthConfig(request);
-  }
+    if (action === 'status') {
+      return await getAuthConfig(request);
+    }
 
-  return Response.json({ error: 'Unknown action. Use: enable-phone-auth, add-domain, status' }, { status: 400 });
+    return Response.json({ error: 'Unknown action. Use: enable-phone-auth, add-domain, status' }, { status: 400 });
+  } catch (error: any) {
+    console.error('[Setup API] Error:', error);
+    return Response.json({ error: 'Internal server error', details: error.message }, { status: 500 });
+  }
 }
 
 // ==================== JWT SIGNING ====================
@@ -51,26 +56,94 @@ function base64urlEncode(buffer: ArrayBuffer): string {
 }
 
 async function importPrivateKey(pemKey: string): Promise<CryptoKey> {
-  const pem = pemKey
-    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
-    .replace(/-----END PRIVATE KEY-----/g, '')
-    .replace(/-----BEGIN RSA PRIVATE KEY-----/g, '')
-    .replace(/-----END RSA PRIVATE KEY-----/g, '')
-    .replace(/\s/g, '');
+  // Handle various private key formats
+  let normalizedKey = pemKey;
+  
+  // Replace escaped newlines with actual newlines
+  normalizedKey = normalizedKey.replace(/\\n/g, '\n');
+  
+  // Extract the content between BEGIN and END markers
+  const beginMatch = normalizedKey.match(/-----BEGIN [A-Z ]*PRIVATE KEY-----/);
+  const endMatch = normalizedKey.match(/-----END [A-Z ]*PRIVATE KEY-----/);
+  
+  let pem: string;
+  if (beginMatch && endMatch) {
+    // Extract only the content between markers
+    const beginIdx = normalizedKey.indexOf(beginMatch[0]) + beginMatch[0].length;
+    const endIdx = normalizedKey.indexOf(endMatch[0]);
+    const rawContent = normalizedKey.substring(beginIdx, endIdx);
+    
+    // Split into lines and filter out garbage lines.
+    // Valid PEM base64 lines are typically 64 chars long (except the last line which can be shorter).
+    // Garbage lines (like "A6B9D2E5F8H1K4N7Q0R3T6W2") are typically short and all uppercase+digits.
+    const lines = rawContent.split(/\n/).filter((line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false; // skip empty lines
+      // Keep lines that look like valid PEM base64:
+      // - Long lines (60+ chars) are definitely part of the key
+      // - Short lines are only valid if they end with '=' (base64 padding) or are the last data line
+      if (trimmed.length >= 60) return true;
+      // For shorter lines, check if they contain base64 padding
+      if (trimmed.includes('=')) return true;
+      // Reject lines that look like hex strings (all uppercase letters and digits, no +/=)
+      if (/^[A-Z0-9]+$/.test(trimmed) && trimmed.length < 40) return false;
+      return true; // Keep other lines by default
+    });
+    pem = lines.join('');
+    // Final cleanup: only keep valid base64 characters
+    pem = pem.replace(/[^A-Za-z0-9+/=]/g, '');
+  } else {
+    // No markers - just strip whitespace
+    pem = normalizedKey.replace(/[\s\n\r]/g, '');
+  }
 
-  const binaryStr = atob(pem);
-  const bytes = new Uint8Array(binaryStr.length);
+  if (!pem || pem.length < 100) {
+    throw new Error(`Invalid private key: too short (${pem?.length || 0} chars after cleaning)`);
+  }
+
+  let binaryStr: string;
+  try {
+    binaryStr = atob(pem);
+  } catch (e: any) {
+    throw new Error(`Failed to decode base64 private key: ${e.message}. PEM length: ${pem.length}`);
+  }
+  
+  let bytes = new Uint8Array(binaryStr.length);
   for (let i = 0; i < binaryStr.length; i++) {
     bytes[i] = binaryStr.charCodeAt(i);
   }
 
-  return crypto.subtle.importKey(
-    'pkcs8',
-    bytes.buffer,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
+  // Parse DER length to find actual key size (trim any trailing garbage)
+  if (bytes[0] === 0x30) { // SEQUENCE tag
+    let length = 0;
+    let offset = 1;
+    if (bytes[1] === 0x82) {
+      length = (bytes[2] << 8) | bytes[3];
+      offset = 4;
+    } else if (bytes[1] === 0x81) {
+      length = bytes[2];
+      offset = 3;
+    } else if (bytes[1] < 0x80) {
+      length = bytes[1];
+      offset = 2;
+    }
+    const totalExpected = offset + length;
+    if (totalExpected > 0 && totalExpected < bytes.length) {
+      bytes = bytes.slice(0, totalExpected);
+    }
+  }
+
+  try {
+    return await crypto.subtle.importKey(
+      'pkcs8',
+      bytes.slice().buffer,
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+  } catch (e: any) {
+    throw new Error(`Failed to import PKCS8 key (${bytes.length} bytes): ${e.message}`);
+  }
 }
 
 async function createSignedJWT(payload: object, privateKeyPem: string): Promise<string> {

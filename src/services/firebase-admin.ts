@@ -33,23 +33,63 @@ function base64urlEncode(buffer: ArrayBuffer): string {
  * Import a PEM-formatted private key for use with Web Crypto API
  */
 async function importPrivateKey(pemKey: string): Promise<CryptoKey> {
-  // Clean up the PEM key
-  const pem = pemKey
-    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
-    .replace(/-----END PRIVATE KEY-----/g, '')
-    .replace(/-----BEGIN RSA PRIVATE KEY-----/g, '')
-    .replace(/-----END RSA PRIVATE KEY-----/g, '')
-    .replace(/\s/g, '');
+  // Handle escaped newlines in the private key
+  let normalizedKey = pemKey.replace(/\\n/g, '\n');
+  
+  // Extract the content between BEGIN and END markers (ignore garbage data)
+  const beginMatch = normalizedKey.match(/-----BEGIN [A-Z ]*PRIVATE KEY-----/);
+  const endMatch = normalizedKey.match(/-----END [A-Z ]*PRIVATE KEY-----/);
+  
+  let pem: string;
+  if (beginMatch && endMatch) {
+    const beginIdx = normalizedKey.indexOf(beginMatch[0]) + beginMatch[0].length;
+    const endIdx = normalizedKey.indexOf(endMatch[0]);
+    const rawContent = normalizedKey.substring(beginIdx, endIdx);
+    
+    // Split into lines and filter out garbage lines
+    const lines = rawContent.split(/\n/).filter((line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      if (trimmed.length >= 60) return true;
+      if (trimmed.includes('=')) return true;
+      if (/^[A-Z0-9]+$/.test(trimmed) && trimmed.length < 40) return false;
+      return true;
+    });
+    pem = lines.join('');
+    pem = pem.replace(/[^A-Za-z0-9+/=]/g, '');
+  } else {
+    pem = normalizedKey.replace(/[\s\n\r]/g, '');
+  }
 
   const binaryStr = atob(pem);
-  const bytes = new Uint8Array(binaryStr.length);
+  let bytes = new Uint8Array(binaryStr.length);
   for (let i = 0; i < binaryStr.length; i++) {
     bytes[i] = binaryStr.charCodeAt(i);
   }
 
+  // Parse DER length to find actual key size (trim trailing garbage)
+  if (bytes[0] === 0x30) {
+    let length = 0;
+    let offset = 1;
+    if (bytes[1] === 0x82) {
+      length = (bytes[2] << 8) | bytes[3];
+      offset = 4;
+    } else if (bytes[1] === 0x81) {
+      length = bytes[2];
+      offset = 3;
+    } else if (bytes[1] < 0x80) {
+      length = bytes[1];
+      offset = 2;
+    }
+    const totalExpected = offset + length;
+    if (totalExpected > 0 && totalExpected < bytes.length) {
+      bytes = bytes.slice(0, totalExpected);
+    }
+  }
+
   return crypto.subtle.importKey(
     'pkcs8',
-    bytes.buffer,
+    bytes.length === bytes.buffer.byteLength ? bytes.buffer : bytes.slice().buffer,
     { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
     false,
     ['sign']

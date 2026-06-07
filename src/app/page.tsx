@@ -740,7 +740,51 @@ export default function ZixoApp() {
   };
 
   const renderChatScreen = () => {
-    if (!activeChat || !otherUser || !currentUser) return null;
+    if (!currentUser) return null;
+
+    // Fallback: if we have an activeChatId but no activeChat yet (just created),
+    // show a loading/empty chat screen
+    if (activeChatId && !activeChat) {
+      return (
+        <div className="h-screen flex flex-col bg-zixo-bg">
+          <div className="shrink-0 bg-[#1F2C34] z-10 safe-area-top">
+            <div className="flex items-center gap-3 px-3 py-2.5">
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setScreen('home')}
+                className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text hover:bg-zixo-surface-light transition-colors"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </motion.button>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-zixo-text">Chat</h3>
+                <p className="text-xs text-zixo-text-secondary">Loading...</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-zixo-text-secondary text-sm">Starting chat...</div>
+          </div>
+          <ChatInputBar
+            onSend={(text) => handleSendMessage(text)}
+            onAttachment={(type) => {
+              if (type === 'image') handleSendMessage('📷 Photo shared', 'image');
+              else if (type === 'file') handleSendMessage('📄 Document shared', 'file');
+              else if (type === 'location') handleSendMessage('📍 Location shared', 'location');
+            }}
+            onVoiceRecord={handleVoiceRecord}
+            isRecording={isRecording}
+            recordingDuration={recordingDuration}
+            onFileUpload={handleFileUpload}
+            chatId={activeChatId || ''}
+          />
+        </div>
+      );
+    }
+
+    if (!activeChat || !otherUser) return null;
 
     // Group messages by date
     const groupedMessages: { date: string; messages: typeof activeChatMessages }[] = [];
@@ -931,6 +975,31 @@ export default function ZixoApp() {
               // Create or get chat in Firestore, then navigate
               try {
                 const chatId = await createOrGetChat(currentUser.uid, userId);
+
+                // Check if the chat is already in the store
+                const existingChat = chats.find((c) => c.id === chatId);
+                if (!existingChat) {
+                  // Optimistically add the chat to the store so the chat screen can render
+                  const otherUserProfile = allUsers.find((u) => u.uid === userId);
+                  if (otherUserProfile) {
+                    const optimisticChat = {
+                      id: chatId,
+                      participants: [currentUser.uid, userId],
+                      participantProfiles: [currentUser, otherUserProfile],
+                      lastMessage: undefined,
+                      unreadCount: 0,
+                      isGroup: false,
+                      typing: [],
+                      createdAt: Date.now(),
+                      updatedAt: Date.now(),
+                    };
+                    // Add to chats array in store
+                    useZixoStore.setState((state: any) => ({
+                      chats: [optimisticChat, ...state.chats],
+                    }));
+                  }
+                }
+
                 handleChatClick(chatId);
               } catch (err) {
                 console.error('[Zixo] Failed to create/get chat:', err);
