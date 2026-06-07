@@ -97,3 +97,24 @@ Stage Summary:
 - Fixed active call controls not showing for answered incoming calls
 - Added proper call end UX with brief "Call ended" feedback
 - All changes deployed to production
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix incoming call duplication and black screen issues
+
+Work Log:
+- Read all call-related source files: CallScreens.tsx, webrtc.ts, useFirebaseBridge.ts, useZixoStore.ts, presence.ts, page.tsx
+- Diagnosed root cause: subscribeToIncomingCalls uses onValue on entire `calls` RTDB node, which fires on EVERY data change (ICE candidates, offer/answer updates), causing duplicate incoming call notifications
+- Diagnosed root cause: onConnectionStateChange calls endCall() on 'disconnected' state, which can be temporary during ICE renegotiation
+- Diagnosed root cause: subscribeToCallStatus triggers false call ends from brief RTDB data flickers
+- Fixed useFirebaseBridge.ts: Added deduplication for incoming calls (skip if same callId already in state, skip if already in active call, re-check after async profile fetch)
+- Fixed useZixoStore.ts: Changed onConnectionStateChange to only end call on 'failed' state, not 'disconnected'
+- Fixed useFirebaseBridge.ts: Added 1.5s debounce to subscribeToCallStatus to prevent false call ends from RTDB flickers, with logic to cancel debounce if data reappears
+- Fixed useZixoStore.ts: answerCall error handler now properly clears incomingCall and sends endCallSignal
+- Built and deployed to Cloudflare Pages successfully
+- Pushed to GitHub
+
+Stage Summary:
+- Deployed to https://zixo.pages.dev
+- Key fixes: call deduplication, no premature call end on 'disconnected', debounced call status monitoring
+- Files modified: useFirebaseBridge.ts, useZixoStore.ts, webrtc.ts
