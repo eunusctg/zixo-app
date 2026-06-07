@@ -1038,7 +1038,12 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     })),
 
   setIncomingCall: (incoming) =>
-    set({ incomingCall: incoming }),
+    set((state) => {
+      if (incoming === null && state.currentScreen === 'incoming-call') {
+        return { incomingCall: null, currentScreen: 'home' };
+      }
+      return { incomingCall: incoming };
+    }),
 
   // ==================== GROUP CALL ACTIONS ====================
 

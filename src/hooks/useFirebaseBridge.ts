@@ -616,15 +616,14 @@ export function useFirebaseBridge() {
       });
   }, [isAuthenticated, currentUser, setCallHistory]);
 
-  // 8. Listen for incoming calls (RTDB) - show incoming call screen with enhanced notifications
+  // 8. Listen for incoming calls (RTDB)
   // subscribeToIncomingCalls now uses onChildAdded with "first call wins" strategy
   // to prevent duplicate call screens.
   //
-  // CRITICAL FIX: We use a processing guard (incomingCallProcessingRef) to ensure that
-  // only ONE incoming call is processed at a time. This prevents the race condition where
-  // multiple callback invocations (from onChildAdded re-firing on reconnection) each
-  // set the incomingCall state, causing the screen to flicker between states and go black.
-  const incomingCallProcessingRef = useRef(false);
+  // CRITICAL FIX: We set incomingCall state IMMEDIATELY (synchronously) when the
+  // callback fires, then do async profile enrichment afterward. This eliminates the
+  // race condition where the async profile fetch created a timing gap where
+  // incomingCall was null but currentScreen was 'incoming-call', causing a black screen.
   // Track which call IDs have already been recorded as missed (prevents duplicate missed call entries)
   const recordedMissedCallIds = useRef<Set<string>>(new Set());
 
@@ -639,125 +638,113 @@ export function useFirebaseBridge() {
     let unsub: (() => void) | null = null;
 
     try {
-      unsub = subscribeToIncomingCalls(currentUser.uid, async (calls) => {
-        if (incomingCallProcessingRef.current) {
-          // Already processing an incoming call — skip to prevent duplicate processing
-          return;
-        }
+      unsub = subscribeToIncomingCalls(currentUser.uid, (calls) => {
+        const store = useZixoStore.getState();
 
         if (calls.length > 0) {
           const call = calls[0];
 
-          const store = useZixoStore.getState();
-
-          // If we already have this call as our incomingCall, skip re-processing
+          // Skip if already processing this exact call
           if (store.incomingCall?.callId === call.id) {
             return;
           }
 
-          // If we're in an active call, skip incoming call processing
+          // Skip if already in an active call
           if (store.activeCall) {
             return;
           }
 
-          // Set processing guard BEFORE any async work
-          incomingCallProcessingRef.current = true;
-
-          // New incoming call - process it
-          console.log('[Zixo] New incoming call:', call.id);
-
-          let callerProfile = store.userProfiles[call.data.callerId];
-
-          if (!callerProfile) {
-            try {
-              const fetched = await getUserProfile(call.data.callerId);
-              if (fetched) callerProfile = fetched;
-            } catch (err) {
-              console.warn('[Zixo] Failed to fetch caller profile:', err);
-              callerProfile = {
-                uid: call.data.callerId,
-                displayName: call.data.callerName || 'Unknown',
-                email: '',
-                username: '',
-                bio: '',
-                avatar: '',
-                online: false,
-                lastSeen: Date.now(),
-                createdAt: Date.now(),
-                role: 'user',
-                zixoNumber: '',
-              };
-            }
-          }
-
-          // Re-check state after async profile fetch (user may have answered/declined already)
-          const currentState = useZixoStore.getState();
-          if (currentState.incomingCall || currentState.activeCall) {
-            console.log('[Zixo] Skipping incoming call - already in call or already showing incoming');
-            incomingCallProcessingRef.current = false;
+          // Skip if we already have a different incoming call being shown
+          if (store.incomingCall && store.incomingCall.callId !== call.id) {
             return;
           }
 
-          if (callerProfile) {
-            // ATOMIC STATE UPDATE: Set incomingCall AND screen in a single setState call
-            // to prevent the black screen race condition where incomingCall is null
-            // but currentScreen is still 'incoming-call'
-            useZixoStore.setState({
-              incomingCall: {
-                callId: call.id,
-                callerProfile,
-                callType: call.data.type,
-                callData: call.data,
-              },
-              currentScreen: 'incoming-call' as const,
-              previousScreen: useZixoStore.getState().currentScreen as any,
-            });
+          console.log('[Zixo] New incoming call:', call.id);
 
-            // Auto-miss timeout: if the user doesn't answer within 60 seconds,
-            // automatically record as missed and go back to home screen.
-            // This prevents the ringing screen from staying open indefinitely.
-            setTimeout(() => {
-              const latestState = useZixoStore.getState();
-              if (latestState.incomingCall?.callId === call.id && !latestState.activeCall) {
-                console.log('[Zixo] Incoming call auto-miss timeout (60s)');
-                // The missed call will be recorded by the subscribeToCallStatus
-                // listener (8b) when we end the signal, or by the subscribeToIncomingCalls
-                // empty-callback handler. We just need to end the signal.
-                try {
-                  endCallSignal(call.id);
-                } catch {}
+          // Build caller profile from what we have immediately (no async fetch)
+          const callerProfile: ZixoUserProfile = store.userProfiles[call.data.callerId] || {
+            uid: call.data.callerId,
+            displayName: call.data.callerName || 'Unknown',
+            email: '',
+            username: '',
+            bio: '',
+            avatar: '',
+            online: false,
+            lastSeen: Date.now(),
+            createdAt: Date.now(),
+            role: 'user',
+            zixoNumber: '',
+          };
+
+          // SET STATE IMMEDIATELY — no async gap where incomingCall is null but screen is 'incoming-call'
+          useZixoStore.setState({
+            incomingCall: {
+              callId: call.id,
+              callerProfile,
+              callType: call.data.type,
+              callData: call.data,
+            },
+            currentScreen: 'incoming-call' as const,
+            previousScreen: store.currentScreen as any,
+          });
+
+          // Now do async profile enrichment (update the profile if we can fetch a better one)
+          if (!store.userProfiles[call.data.callerId]) {
+            getUserProfile(call.data.callerId).then((fetched) => {
+              if (fetched) {
+                const latestStore = useZixoStore.getState();
+                // Only update if this is still the same incoming call
+                if (latestStore.incomingCall?.callId === call.id) {
+                  useZixoStore.setState({
+                    incomingCall: {
+                      ...latestStore.incomingCall,
+                      callerProfile: fetched,
+                    },
+                  });
+                }
+                // Also update userProfiles cache
+                latestStore.setUserProfiles({ [call.data.callerId]: fetched });
               }
-            }, 60000);
-
-            // Show prominent notification banner for incoming call
-            showBannerNotification({
-              senderName: callerProfile.displayName,
-              senderAvatar: callerProfile.avatar,
-              messagePreview: `Incoming ${call.data.type} call`,
-              type: 'call',
-            });
-
-            // Play ringing sound for incoming call
-            playRingingSound();
-
-            // Show browser notification for call
-            showBrowserNotification(
-              `Incoming ${call.data.type} call`,
-              `${callerProfile.displayName} is calling you`,
-              { type: 'incoming-call', callId: call.id, callType: call.data.type }
-            );
-
-            // Also send FCM push
-            sendPushNotification(
-              currentUser.uid,
-              `Incoming ${call.data.type} call`,
-              `${callerProfile.displayName} is calling you`,
-              { type: 'incoming-call', callId: call.id, callType: call.data.type }
-            ).catch(() => {});
+            }).catch(() => {});
           }
 
-          // Release processing guard after we're done
-          incomingCallProcessingRef.current = false;
+          // Auto-miss timeout: if the user doesn't answer within 60 seconds,
+          // automatically record as missed and go back to home screen.
+          // This prevents the ringing screen from staying open indefinitely.
+          setTimeout(() => {
+            const latestState = useZixoStore.getState();
+            if (latestState.incomingCall?.callId === call.id && !latestState.activeCall) {
+              console.log('[Zixo] Incoming call auto-miss timeout (60s)');
+              try { endCallSignal(call.id); } catch {}
+            }
+          }, 60000);
+
+          // Show prominent notification banner for incoming call
+          showBannerNotification({
+            senderName: callerProfile.displayName,
+            senderAvatar: callerProfile.avatar,
+            messagePreview: `Incoming ${call.data.type} call`,
+            type: 'call',
+          });
+
+          // Play ringing sound for incoming call
+          playRingingSound();
+
+          // Show browser notification for call
+          showBrowserNotification(
+            `Incoming ${call.data.type} call`,
+            `${callerProfile.displayName} is calling you`,
+            { type: 'incoming-call', callId: call.id, callType: call.data.type }
+          );
+
+          // Also send FCM push
+          sendPushNotification(
+            currentUser.uid,
+            `Incoming ${call.data.type} call`,
+            `${callerProfile.displayName} is calling you`,
+            { type: 'incoming-call', callId: call.id, callType: call.data.type }
+          ).catch(() => {});
+
         } else {
           // No ringing calls — if we have an incomingCall in state, the caller
           // must have hung up before we answered. Record as missed call.
@@ -820,7 +807,6 @@ export function useFirebaseBridge() {
 
     return () => {
       if (unsub) unsub();
-      incomingCallProcessingRef.current = false;
     };
   }, [isAuthenticated, currentUser, setIncomingCall]);
 
