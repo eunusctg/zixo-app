@@ -181,6 +181,11 @@ export function createCallSignal(signal: Omit<RTDBCallSignal, 'createdAt'>): str
  * Uses onChildAdded for NEW calls only (avoids re-triggering on every
  * data change in the calls node like ICE candidates, offer updates, etc.)
  * combined with a per-call status listener to detect when the caller hangs up.
+ *
+ * IMPORTANT: We use a "first call wins" strategy — only the FIRST incoming
+ * ringing call is delivered to the callback. This prevents duplicate call
+ * screens when onChildAdded fires multiple times (e.g., on reconnection or
+ * when multiple call signals exist in RTDB simultaneously).
  */
 export function subscribeToIncomingCalls(
   uid: string,
@@ -189,9 +194,13 @@ export function subscribeToIncomingCalls(
   const callsRef = ref(rtdb, 'calls');
   const activeCallIds = new Set<string>();
   const perCallUnsubs: Record<string, () => void> = {};
+  let disposed = false;
 
   // Helper: build the current list of active incoming calls and call the callback
+  // Only delivers the FIRST ringing call ("first call wins" strategy)
   const notifyCallback = () => {
+    if (disposed) return;
+
     // Read current data for all tracked call IDs
     const results: Array<{ id: string; data: RTDBCallSignal }> = [];
     const pendingReads: Promise<void>[] = [];
@@ -199,35 +208,56 @@ export function subscribeToIncomingCalls(
     activeCallIds.forEach((callId) => {
       pendingReads.push(
         get(ref(rtdb, `calls/${callId}`)).then((snap) => {
+          if (disposed) return;
           if (snap.exists()) {
             const data = snap.val() as RTDBCallSignal;
             if (data.receiverId === uid && data.status === 'ringing') {
               results.push({ id: callId, data });
+            } else {
+              // Call is no longer ringing or not for us — stop tracking
+              activeCallIds.delete(callId);
             }
+          } else {
+            // Call was deleted — stop tracking
+            activeCallIds.delete(callId);
           }
         }).catch(() => {})
       );
     });
 
     Promise.all(pendingReads).then(() => {
-      callback(results);
+      if (disposed) return;
+      // Only deliver the FIRST call — prevents duplicate call screens
+      if (results.length > 0) {
+        callback([results[0]]);
+      } else {
+        callback([]);
+      }
     });
   };
 
   // Use onChildAdded to detect NEW calls only
   const childAddedUnsub = onChildAdded(callsRef, (snap) => {
-    if (!snap.exists()) return;
+    if (disposed || !snap.exists()) return;
     const callData = snap.val() as RTDBCallSignal;
     const callId = snap.key!;
 
     // Only care about calls where this user is the receiver and the call is ringing
     if (callData.receiverId === uid && callData.status === 'ringing') {
       if (activeCallIds.has(callId)) return; // Already tracking
+
+      // "First call wins": if we're already tracking a ringing call, ignore additional ones
+      if (activeCallIds.size > 0) {
+        console.log(`[Zixo] Ignoring additional incoming call ${callId} — already have a ringing call`);
+        return;
+      }
+
       activeCallIds.add(callId);
 
       // Set up a per-call status listener to detect when the caller cancels
       const callRef = ref(rtdb, `calls/${callId}`);
       perCallUnsubs[callId] = onValue(callRef, (callSnap) => {
+        if (disposed) return;
         if (!callSnap.exists() || (callSnap.exists() && callSnap.val().status === 'ended')) {
           // Call was cancelled/ended by caller
           activeCallIds.delete(callId);
@@ -245,13 +275,59 @@ export function subscribeToIncomingCalls(
   });
 
   return () => {
+    disposed = true;
     off(callsRef);
     childAddedUnsub();
     Object.values(perCallUnsubs).forEach((unsub) => unsub());
     Object.keys(perCallUnsubs).forEach((callId) => {
       off(ref(rtdb, `calls/${callId}`));
     });
+    activeCallIds.clear();
   };
+}
+
+/**
+ * Clean up stale call signals for a user.
+ * When the app starts or a user logs in, any call signals where the user is the
+ * receiver AND the call is still in "ringing" status are stale (the user wasn't
+ * online to see them). These should be ended so they don't trigger onChildAdded
+ * for the incoming calls listener.
+ *
+ * Also cleans up calls where the user is the caller and the call is still "ringing"
+ * (the caller's app crashed/reloaded before ending the call).
+ */
+export async function cleanupStaleCallSignals(uid: string): Promise<void> {
+  try {
+    const callsRef = ref(rtdb, 'calls');
+    const snap = await get(callsRef);
+
+    if (!snap.exists()) return;
+
+    const data = snap.val();
+    const staleCallIds: string[] = [];
+
+    Object.entries(data).forEach(([callId, callData]: [string, any]) => {
+      // End any ringing call where this user is the receiver (stale incoming call)
+      // or the caller (stale outgoing call that was never ended)
+      if (callData.status === 'ringing' &&
+          (callData.receiverId === uid || callData.callerId === uid)) {
+        staleCallIds.push(callId);
+      }
+    });
+
+    // End all stale calls
+    for (const callId of staleCallIds) {
+      console.log(`[Zixo] Cleaning up stale call signal: ${callId}`);
+      update(ref(rtdb, `calls/${callId}`), { status: 'ended' });
+      // Remove after a short delay
+      const callRef = ref(rtdb, `calls/${callId}`);
+      setTimeout(() => {
+        remove(callRef).catch(() => {});
+      }, 1000);
+    }
+  } catch (err) {
+    console.warn('[Zixo] Failed to cleanup stale call signals:', err);
+  }
 }
 
 /**

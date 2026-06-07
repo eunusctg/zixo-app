@@ -5,7 +5,7 @@ import { useZixoStore } from '@/stores/useZixoStore';
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
 import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory, subscribeToUserProfile } from '@/services/firestore';
 import { initFCM, sendPushNotification, onNotificationBanner, updateMessageBadge, playNotificationSound, playRingingSound, stopOutgoingRingSound, showBrowserNotification, showBannerNotification } from '@/services/messaging';
-import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToCallStatus, subscribeToMultiplePresence, subscribeToGroupCalls, type RTDBCallSignal } from '@/services/presence';
+import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToCallStatus, subscribeToMultiplePresence, subscribeToGroupCalls, cleanupStaleCallSignals, endCallSignal, type RTDBCallSignal } from '@/services/presence';
 import { getWebRTC } from '@/services/webrtc';
 import type { BannerNotification } from '@/components/zixo/NotificationBanner';
 
@@ -617,15 +617,34 @@ export function useFirebaseBridge() {
   }, [isAuthenticated, currentUser, setCallHistory]);
 
   // 8. Listen for incoming calls (RTDB) - show incoming call screen with enhanced notifications
-  // subscribeToIncomingCalls now uses onChildAdded which only fires for NEW calls,
-  // not on every data change (ICE candidates, offer updates, etc.)
+  // subscribeToIncomingCalls now uses onChildAdded with "first call wins" strategy
+  // to prevent duplicate call screens.
+  //
+  // CRITICAL FIX: We use a processing guard (incomingCallProcessingRef) to ensure that
+  // only ONE incoming call is processed at a time. This prevents the race condition where
+  // multiple callback invocations (from onChildAdded re-firing on reconnection) each
+  // set the incomingCall state, causing the screen to flicker between states and go black.
+  const incomingCallProcessingRef = useRef(false);
+  // Track which call IDs have already been recorded as missed (prevents duplicate missed call entries)
+  const recordedMissedCallIds = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
+
+    // Clean up stale call signals before subscribing to incoming calls.
+    // This prevents onChildAdded from firing for old "ringing" calls
+    // that are no longer valid (e.g., from a previous session).
+    cleanupStaleCallSignals(currentUser.uid).catch(() => {});
 
     let unsub: (() => void) | null = null;
 
     try {
       unsub = subscribeToIncomingCalls(currentUser.uid, async (calls) => {
+        if (incomingCallProcessingRef.current) {
+          // Already processing an incoming call — skip to prevent duplicate processing
+          return;
+        }
+
         if (calls.length > 0) {
           const call = calls[0];
 
@@ -640,6 +659,9 @@ export function useFirebaseBridge() {
           if (store.activeCall) {
             return;
           }
+
+          // Set processing guard BEFORE any async work
+          incomingCallProcessingRef.current = true;
 
           // New incoming call - process it
           console.log('[Zixo] New incoming call:', call.id);
@@ -672,17 +694,40 @@ export function useFirebaseBridge() {
           const currentState = useZixoStore.getState();
           if (currentState.incomingCall || currentState.activeCall) {
             console.log('[Zixo] Skipping incoming call - already in call or already showing incoming');
+            incomingCallProcessingRef.current = false;
             return;
           }
 
           if (callerProfile) {
-            setIncomingCall({
-              callId: call.id,
-              callerProfile,
-              callType: call.data.type,
-              callData: call.data,
+            // ATOMIC STATE UPDATE: Set incomingCall AND screen in a single setState call
+            // to prevent the black screen race condition where incomingCall is null
+            // but currentScreen is still 'incoming-call'
+            useZixoStore.setState({
+              incomingCall: {
+                callId: call.id,
+                callerProfile,
+                callType: call.data.type,
+                callData: call.data,
+              },
+              currentScreen: 'incoming-call' as const,
+              previousScreen: useZixoStore.getState().currentScreen as any,
             });
-            useZixoStore.getState().setScreen('incoming-call');
+
+            // Auto-miss timeout: if the user doesn't answer within 60 seconds,
+            // automatically record as missed and go back to home screen.
+            // This prevents the ringing screen from staying open indefinitely.
+            setTimeout(() => {
+              const latestState = useZixoStore.getState();
+              if (latestState.incomingCall?.callId === call.id && !latestState.activeCall) {
+                console.log('[Zixo] Incoming call auto-miss timeout (60s)');
+                // The missed call will be recorded by the subscribeToCallStatus
+                // listener (8b) when we end the signal, or by the subscribeToIncomingCalls
+                // empty-callback handler. We just need to end the signal.
+                try {
+                  endCallSignal(call.id);
+                } catch {}
+              }
+            }, 60000);
 
             // Show prominent notification banner for incoming call
             showBannerNotification({
@@ -710,11 +755,22 @@ export function useFirebaseBridge() {
               { type: 'incoming-call', callId: call.id, callType: call.data.type }
             ).catch(() => {});
           }
+
+          // Release processing guard after we're done
+          incomingCallProcessingRef.current = false;
         } else {
           // No ringing calls — if we have an incomingCall in state, the caller
           // must have hung up before we answered. Record as missed call.
           const store = useZixoStore.getState();
           if (store.incomingCall && !store.activeCall) {
+            const callId = store.incomingCall.callId;
+
+            // Prevent duplicate missed call recording
+            if (recordedMissedCallIds.current.has(callId)) {
+              return;
+            }
+            recordedMissedCallIds.current.add(callId);
+
             console.log('[Zixo] Incoming call was cancelled by caller — recording as missed call');
             const incoming = store.incomingCall;
 
@@ -733,6 +789,8 @@ export function useFirebaseBridge() {
               timestamp: Date.now(),
             };
 
+            // ATOMIC STATE UPDATE: Clear incomingCall AND set screen to 'home'
+            // in a single setState call to prevent the black screen race condition
             useZixoStore.setState((state: any) => ({
               callHistory: [missedCall, ...state.callHistory],
               incomingCall: null,
@@ -762,11 +820,14 @@ export function useFirebaseBridge() {
 
     return () => {
       if (unsub) unsub();
+      incomingCallProcessingRef.current = false;
     };
   }, [isAuthenticated, currentUser, setIncomingCall]);
 
   // 8b. Watch incoming call status — detect when caller hangs up before we answer
   // Records the call as "missed" in call history
+  // Uses the same recordedMissedCallIds guard to prevent duplicate recording
+  // with the subscribeToIncomingCalls empty-callback handler above.
   useEffect(() => {
     if (!incomingCallId || !isAuthenticated || !currentUser) return;
 
@@ -776,9 +837,17 @@ export function useFirebaseBridge() {
       unsub = subscribeToCallStatus(incomingCallId, (callData) => {
         if (!callData) {
           // Caller ended the call before we answered — this is a missed call
-          console.log('[Zixo] Incoming call ended by caller (status subscription) — missed call');
           const store = useZixoStore.getState();
           if (store.incomingCall && !store.activeCall) {
+            const callId = store.incomingCall.callId;
+
+            // Prevent duplicate missed call recording
+            if (recordedMissedCallIds.current.has(callId)) {
+              return;
+            }
+            recordedMissedCallIds.current.add(callId);
+
+            console.log('[Zixo] Incoming call ended by caller (status subscription) — missed call');
             const incoming = store.incomingCall;
 
             // Record the missed call
@@ -796,6 +865,8 @@ export function useFirebaseBridge() {
               timestamp: Date.now(),
             };
 
+            // ATOMIC STATE UPDATE: Clear incomingCall AND set screen to 'home'
+            // in a single setState call to prevent the black screen race condition
             useZixoStore.setState((state: any) => ({
               callHistory: [missedCall, ...state.callHistory],
               incomingCall: null,

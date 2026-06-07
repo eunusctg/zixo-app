@@ -560,7 +560,18 @@ export default function ZixoApp() {
         );
 
       case 'incoming-call':
-        if (!incomingCall) return null;
+        // If incomingCall is null but screen is still 'incoming-call', navigate home
+        // to prevent the black screen. This is a safety net for race conditions.
+        if (!incomingCall) {
+          // Use setTimeout to avoid setState during render
+          setTimeout(() => {
+            const store = useZixoStore.getState();
+            if (store.currentScreen === 'incoming-call' && !store.incomingCall) {
+              useZixoStore.setState({ currentScreen: 'home' });
+            }
+          }, 0);
+          return null;
+        }
         return (
           <IncomingCallScreen
             remoteUser={incomingCall.callerProfile}
@@ -572,7 +583,16 @@ export default function ZixoApp() {
 
       case 'audio-call':
       case 'video-call':
-        if (!activeCall?.remoteUser) return null;
+        // If activeCall is null but screen is still on a call screen, navigate home
+        if (!activeCall?.remoteUser) {
+          setTimeout(() => {
+            const store = useZixoStore.getState();
+            if ((store.currentScreen === 'audio-call' || store.currentScreen === 'video-call') && !store.activeCall?.remoteUser) {
+              useZixoStore.setState({ currentScreen: 'home' });
+            }
+          }, 0);
+          return null;
+        }
         if (currentScreen === 'audio-call') {
           return (
             <AudioCallScreen
