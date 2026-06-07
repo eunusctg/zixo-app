@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useZixoStore } from '@/stores/useZixoStore';
 import { useFirebaseBridge } from '@/hooks/useFirebaseBridge';
 import { logoutUser } from '@/services/auth';
-import { saveCallPermissionCache } from '@/stores/useZixoStore';
+import { saveCallPermissionCache, initPermissionChangeListeners } from '@/stores/useZixoStore';
 import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead, searchMessages as firestoreSearchMessages, createOrGetChat } from '@/services/firestore';
 import { searchUserByUsername, searchUsers, getAllUsers, searchUserByZixoNumber } from '@/services/auth';
 import { cn, formatDateGroup } from '@/lib/zixo-utils';
@@ -29,6 +29,13 @@ import type { ZixoUserProfile } from '@/services/auth';
 export default function ZixoApp() {
   // Initialize Firebase bridge (auth state, real-time listeners, notification banners)
   const { bannerNotifications, onDismissBanner, onTapBanner } = useFirebaseBridge();
+
+  // Set up permission change listeners to detect when user revokes mic/camera/location
+  // in browser settings. When revoked, the cache is invalidated so we re-ask next call.
+  useEffect(() => {
+    const cleanup = initPermissionChangeListeners();
+    return cleanup;
+  }, []);
 
   const {
     currentScreen,

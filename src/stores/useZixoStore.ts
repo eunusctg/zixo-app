@@ -9,93 +9,210 @@ import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, type RTDBGrou
 // ==================== PERMISSION HELPERS ====================
 
 /**
- * Check if call permissions have already been decided (granted or denied).
- * Returns true if all required permissions are already decided (no need to show modal).
- * Returns false if at least one permission is in 'prompt' state (need to show modal).
+ * Query the actual browser permission status for a given permission name.
+ * Returns 'granted' | 'denied' | 'prompt' | 'unsupported'.
+ * Falls back gracefully on browsers that don't support the Permissions API
+ * for mic/camera (e.g. Firefox).
+ */
+async function queryBrowserPermission(
+  name: 'microphone' | 'camera' | 'geolocation'
+): Promise<'granted' | 'denied' | 'prompt' | 'unsupported'> {
+  try {
+    const result = await navigator.permissions.query({ name: name as PermissionName });
+    return result.state as 'granted' | 'denied' | 'prompt';
+  } catch {
+    // Firefox doesn't support 'microphone'/'camera' as PermissionName
+    return 'unsupported';
+  }
+}
+
+/**
+ * Check if call permissions have already been granted and are still valid.
+ *
+ * Strategy:
+ *  1. Always verify actual browser permission status via navigator.permissions API
+ *  2. If the browser says a previously-cached permission is now revoked (prompt/denied),
+ *     invalidate the cache and re-ask the user.
+ *  3. If the Permissions API is unsupported (Firefox), fall back to the cache — but
+ *     invalidate it if the user hasn't been asked in the current session.
+ *  4. Never permanently suppress the permission modal. The "one device, one time"
+ *     guarantee comes from the browser itself: once granted, navigator.permissions
+ *     returns 'granted' and we skip the modal. If the user revokes the permission
+ *     in browser settings, navigator.permissions returns 'prompt' or 'denied', and
+ *     we re-ask.
+ *
+ * Returns true if all required permissions are already granted (skip modal).
+ * Returns false if at least one required permission needs user action (show modal).
  */
 async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
-  try {
-    // Check localStorage cache first — this is the most reliable and fastest check.
-    // After first permission grant, we aggressively trust the cache to skip the modal entirely.
-    if (typeof window !== 'undefined') {
-      const permCache = localStorage.getItem('zixo_call_permissions');
-      if (permCache) {
-        try {
-          const cached = JSON.parse(permCache);
-          // If mic was previously granted, trust it for audio calls
-          if (cached.micGranted) {
-            if (type === 'audio') return true;
-            // For video calls, also check camera
-            if (type === 'video' && cached.camGranted) return true;
-            // For video calls with mic granted but camera unknown, also skip
-            // since we can still do video without camera (audio-only video call)
-            if (type === 'video') return true;
-          }
-          // If permissions were previously decided (even denied), don't ask again
-          if (cached.micGranted === false && cached.camGranted === false) {
-            // User denied both — still skip modal, the call will fail gracefully
-            return true;
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-    }
+  if (typeof window === 'undefined') return false;
 
-    // Try navigator.permissions API (not supported on Firefox for mic/cam)
+  // --- Step 1: Check actual browser permission state via Permissions API ---
+  const micStatus = await queryBrowserPermission('microphone');
+  const camStatus = type === 'video'
+    ? await queryBrowserPermission('camera')
+    : 'unsupported' as const; // Don't need camera for audio-only calls
+
+  const isMicGranted = micStatus === 'granted';
+  const isCamGranted = camStatus === 'granted';
+  const isMicDenied = micStatus === 'denied';
+  const isCamDenied = camStatus === 'denied';
+
+  // --- Step 2: If the Permissions API gave us definitive answers, use them ---
+  // At least one permission API responded with a real state (not all 'unsupported')
+  const anyPermissionSupported = micStatus !== 'unsupported' || (type === 'video' && camStatus !== 'unsupported');
+
+  if (anyPermissionSupported) {
+    // Update cache to reflect actual state
+    const cachedMic = isMicGranted ? true : isMicDenied ? false : undefined;
+    const cachedCam = type === 'video'
+      ? (isCamGranted ? true : isCamDenied ? false : undefined)
+      : undefined;
+
+    // Read existing cache to preserve values for permissions we didn't check
+    let existingCache: Record<string, boolean | undefined> = {};
     try {
-      const micStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
-      const micGranted = micStatus.state === 'granted';
-      const micDenied = micStatus.state === 'denied';
-      if (micGranted) {
-        // Cache the permission state
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: false }));
-        }
-        return true;
-      }
-      if (micDenied) {
-        // Already decided, don't ask again
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: false, camGranted: false }));
-        }
-        return true;
-      }
+      const raw = localStorage.getItem('zixo_call_permissions');
+      if (raw) existingCache = JSON.parse(raw);
+    } catch {}
 
-      if (type === 'video') {
-        const camStatus = await navigator.permissions.query({ name: 'camera' as PermissionName });
-        const camGranted = camStatus.state === 'granted';
-        if (camGranted) {
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: micGranted, camGranted: true }));
-          }
-          return micGranted; // Still need mic
-        }
-        if (camStatus.state === 'denied') {
-          return !micGranted ? false : true; // Only show if mic also needs asking
-        }
-      }
-    } catch {
-      // navigator.permissions.query failed — fall through to localStorage check below
+    // Write updated cache
+    const newCache = {
+      micGranted: cachedMic !== undefined ? cachedMic : existingCache.micGranted,
+      camGranted: cachedCam !== undefined ? cachedCam : existingCache.camGranted,
+    };
+    localStorage.setItem('zixo_call_permissions', JSON.stringify(newCache));
+
+    // For audio calls: skip modal only if mic is granted
+    if (type === 'audio') {
+      if (isMicGranted) return true;   // Mic is granted → skip modal
+      if (isMicDenied) return true;     // Mic is permanently denied → skip modal (call will fail gracefully with a message)
+      return false;                     // Mic is 'prompt' → show modal
     }
 
-    return false; // Mic is in 'prompt' state, need to show permission modal
-  } catch {
-    // navigator.permissions.query not supported (Firefox) — check localStorage cache as fallback
-    if (typeof window !== 'undefined') {
-      const permCache = localStorage.getItem('zixo_call_permissions');
-      if (permCache) {
-        try {
-          const cached = JSON.parse(permCache);
-          // If we have any cache entry, trust it
-          if (cached.micGranted !== undefined) return true;
-        } catch {
-          // Ignore
-        }
-      }
+    // For video calls: need both mic and camera granted
+    if (type === 'video') {
+      // Both granted → skip modal
+      if (isMicGranted && isCamGranted) return true;
+      // Either one is permanently denied → skip modal (call will fail gracefully)
+      if (isMicDenied || isCamDenied) return true;
+      // At least one is 'prompt' → show modal so user can grant it
+      return false;
     }
-    return false; // No cached permission, show modal
   }
+
+  // --- Step 3: Permissions API unsupported (Firefox) — use localStorage cache ---
+  // On Firefox, we can't programmatically check mic/camera status.
+  // We rely on the cache, but add a session-level flag so we re-ask
+  // at least once per browser session if the user hasn't explicitly granted.
+  try {
+    const permCache = localStorage.getItem('zixo_call_permissions');
+    if (permCache) {
+      const cached = JSON.parse(permCache);
+
+      // Check if we've already verified permissions this browser session
+      const sessionVerified = sessionStorage.getItem('zixo_permissions_verified');
+
+      if (sessionVerified === 'true') {
+        // Already verified this session — trust the cache
+        if (cached.micGranted) {
+          if (type === 'audio') return true;
+          if (type === 'video' && cached.camGranted) return true;
+          if (type === 'video') return true; // mic granted, camera may or may not be
+        }
+        if (cached.micGranted === false && cached.camGranted === false) {
+          return true; // Both denied previously, skip modal
+        }
+      } else {
+        // Haven't verified this session — try a lightweight getUserMedia probe
+        // to confirm the cache is still valid. If it fails, invalidate cache.
+        try {
+          const probeStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          probeStream.getTracks().forEach(t => t.stop());
+          // Mic is still granted — update cache
+          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: cached.camGranted || false }));
+          sessionStorage.setItem('zixo_permissions_verified', 'true');
+          if (type === 'audio') return true;
+          // For video, also probe camera if needed
+          if (type === 'video' && !cached.camGranted) {
+            try {
+              const camStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+              camStream.getTracks().forEach(t => t.stop());
+              localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: true }));
+              return true;
+            } catch {
+              // Camera not granted, but mic is — skip modal, video call will be audio-only
+              return true;
+            }
+          }
+          return true;
+        } catch {
+          // Mic access failed — cache is stale, clear it and show modal
+          localStorage.removeItem('zixo_call_permissions');
+          sessionStorage.removeItem('zixo_permissions_verified');
+          return false;
+        }
+      }
+    }
+  } catch {
+    // Ignore cache errors
+  }
+
+  return false; // No cached permission or cache stale → show modal
+}
+
+/**
+ * Set up permission change listeners to detect when the user revokes
+ * mic/camera/location permissions in browser settings. When a revocation
+ * is detected, the localStorage cache is cleared so the next call will
+ * re-prompt the user.
+ */
+export function initPermissionChangeListeners(): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  const cleanups: Array<() => void> = [];
+
+  const watchPermission = async (name: 'microphone' | 'camera' | 'geolocation') => {
+    try {
+      const status = await navigator.permissions.query({ name: name as PermissionName });
+      const handler = () => {
+        if (status.state === 'prompt' || status.state === 'denied') {
+          // Permission was revoked — clear the cache so we re-ask next time
+          try {
+            const raw = localStorage.getItem('zixo_call_permissions');
+            if (raw) {
+              const cached = JSON.parse(raw);
+              if (name === 'microphone') cached.micGranted = false;
+              if (name === 'camera') cached.camGranted = false;
+              localStorage.setItem('zixo_call_permissions', JSON.stringify(cached));
+            }
+          } catch {}
+          // Also clear session verification
+          try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
+        } else if (status.state === 'granted') {
+          // Permission was granted — update cache
+          try {
+            const raw = localStorage.getItem('zixo_call_permissions');
+            const cached = raw ? JSON.parse(raw) : {};
+            if (name === 'microphone') cached.micGranted = true;
+            if (name === 'camera') cached.camGranted = true;
+            localStorage.setItem('zixo_call_permissions', JSON.stringify(cached));
+          } catch {}
+          try { sessionStorage.setItem('zixo_permissions_verified', 'true'); } catch {}
+        }
+      };
+      status.addEventListener('change', handler);
+      cleanups.push(() => status.removeEventListener('change', handler));
+    } catch {
+      // Permission not supported on this browser
+    }
+  };
+
+  watchPermission('microphone');
+  watchPermission('camera');
+  watchPermission('geolocation');
+
+  return () => cleanups.forEach(fn => fn());
 }
 
 /**
@@ -105,6 +222,8 @@ async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
 export function saveCallPermissionCache(micGranted: boolean, camGranted: boolean): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted, camGranted }));
+    // Mark permissions as verified for this session
+    try { sessionStorage.setItem('zixo_permissions_verified', 'true'); } catch {}
   }
 }
 
@@ -567,6 +686,10 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
           try { webrtc.endCall(); } catch {}
           useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
           if (err?.name === 'NotAllowedError') {
+            // Permission was revoked after our pre-check — invalidate cache
+            // so next call will show the permission modal again
+            try { localStorage.removeItem('zixo_call_permissions'); } catch {}
+            try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
             alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
           } else {
             alert('Failed to start call. Please try again.');
@@ -667,6 +790,8 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
           try { webrtc.endCall(); } catch {}
           useZixoStore.setState({ activeCall: null, currentScreen: 'home' });
           if (err?.name === 'NotAllowedError') {
+            try { localStorage.removeItem('zixo_call_permissions'); } catch {}
+            try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
             alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
           } else {
             alert('Failed to answer call. Please try again.');
@@ -825,126 +950,138 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     }
     neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for group calls' });
 
-    // Show permission modal, then proceed with call on grant
-    set({
-      showPermissionModal: true,
-      permissionRequests: neededPermissions,
-      permissionCallback: (granted: boolean) => {
-        if (!granted) return;
+    // Define the callback that proceeds with the group call after permissions are granted
+    const proceedWithGroupCall = (granted: boolean) => {
+      if (!granted) return;
 
-        const state = useZixoStore.getState();
-        const currentUser = state.currentUser;
-        if (!currentUser) return;
+      const state = useZixoStore.getState();
+      const currentUser = state.currentUser;
+      if (!currentUser) return;
 
-        // Reset any previous group WebRTC instance
-        resetGroupWebRTC();
-        const groupWebrtc = getGroupWebRTC();
+      // Reset any previous group WebRTC instance
+      resetGroupWebRTC();
+      const groupWebrtc = getGroupWebRTC();
 
-        // Set up callbacks
-        groupWebrtc.onRemoteStream = (uid, stream) => {
+      // Set up callbacks
+      groupWebrtc.onRemoteStream = (uid, stream) => {
+        const s = useZixoStore.getState();
+        if (s.groupCall) {
+          const existing = s.groupCall.participants.find(p => p.uid === uid);
+          if (existing) {
+            useZixoStore.setState({
+              groupCall: {
+                ...s.groupCall,
+                participants: s.groupCall.participants.map(p =>
+                  p.uid === uid ? { ...p, stream } : p
+                ),
+              },
+            });
+          }
+        }
+      };
+
+      groupWebrtc.onRemoteStreamRemoved = (uid) => {
+        useZixoStore.getState().removeGroupCallParticipant(uid);
+      };
+
+      groupWebrtc.onParticipantJoined = (uid, name) => {
+        const s = useZixoStore.getState();
+        if (s.groupCall) {
+          const existing = s.groupCall.participants.find(p => p.uid === uid);
+          if (!existing) {
+            useZixoStore.setState({
+              groupCall: {
+                ...s.groupCall,
+                participants: [...s.groupCall.participants, {
+                  uid,
+                  displayName: name,
+                  avatar: '',
+                  stream: null,
+                  isMuted: false,
+                  isVideoOn: s.groupCall.type === 'group-video',
+                }],
+              },
+            });
+          }
+        }
+      };
+
+      groupWebrtc.onParticipantLeft = (uid) => {
+        useZixoStore.getState().removeGroupCallParticipant(uid);
+      };
+
+      groupWebrtc.onConnectionStateChange = (uid, connState) => {
+        if (connState === 'connected') {
           const s = useZixoStore.getState();
-          if (s.groupCall) {
-            const existing = s.groupCall.participants.find(p => p.uid === uid);
-            if (existing) {
-              useZixoStore.setState({
-                groupCall: {
-                  ...s.groupCall,
-                  participants: s.groupCall.participants.map(p =>
-                    p.uid === uid ? { ...p, stream } : p
-                  ),
-                },
-              });
-            }
+          if (s.groupCall && s.groupCall.status !== 'active') {
+            useZixoStore.setState({
+              groupCall: { ...s.groupCall, status: 'active', startedAt: Date.now() },
+            });
           }
-        };
+        }
+      };
 
-        groupWebrtc.onRemoteStreamRemoved = (uid) => {
-          useZixoStore.getState().removeGroupCallParticipant(uid);
-        };
-
-        groupWebrtc.onParticipantJoined = (uid, name) => {
-          const s = useZixoStore.getState();
-          if (s.groupCall) {
-            const existing = s.groupCall.participants.find(p => p.uid === uid);
-            if (!existing) {
-              useZixoStore.setState({
-                groupCall: {
-                  ...s.groupCall,
-                  participants: [...s.groupCall.participants, {
-                    uid,
-                    displayName: name,
-                    avatar: '',
-                    stream: null,
-                    isMuted: false,
-                    isVideoOn: s.groupCall.type === 'group-video',
-                  }],
-                },
-              });
-            }
-          }
-        };
-
-        groupWebrtc.onParticipantLeft = (uid) => {
-          useZixoStore.getState().removeGroupCallParticipant(uid);
-        };
-
-        groupWebrtc.onConnectionStateChange = (uid, connState) => {
-          if (connState === 'connected') {
-            const s = useZixoStore.getState();
-            if (s.groupCall && s.groupCall.status !== 'active') {
-              useZixoStore.setState({
-                groupCall: { ...s.groupCall, status: 'active', startedAt: Date.now() },
-              });
-            }
-          }
-        };
-
-        // Set initial UI state
-        const participantUids = participants.map(p => p.uid);
-        useZixoStore.setState({
-          groupCall: {
-            callId: null,
-            status: 'ringing',
-            type,
-            participants: participants.map(p => ({
-              uid: p.uid,
-              displayName: p.displayName,
-              avatar: p.avatar || '',
-              stream: null,
-              isMuted: false,
-              isVideoOn: type === 'group-video',
-            })),
-            localStream: null,
+      // Set initial UI state
+      const participantUids = participants.map(p => p.uid);
+      useZixoStore.setState({
+        groupCall: {
+          callId: null,
+          status: 'ringing',
+          type,
+          participants: participants.map(p => ({
+            uid: p.uid,
+            displayName: p.displayName,
+            avatar: p.avatar || '',
+            stream: null,
             isMuted: false,
-            isSpeakerOn: type === 'group-audio',
             isVideoOn: type === 'group-video',
-            isIncoming: false,
-            startedAt: null,
-          },
-          currentScreen: type === 'group-audio' ? 'group-audio-call' : 'group-video-call',
-        });
+          })),
+          localStream: null,
+          isMuted: false,
+          isSpeakerOn: type === 'group-audio',
+          isVideoOn: type === 'group-video',
+          isIncoming: false,
+          startedAt: null,
+        },
+        currentScreen: type === 'group-audio' ? 'group-audio-call' : 'group-video-call',
+      });
 
-        // Initiate group WebRTC call asynchronously
-        groupWebrtc.startGroupCall(currentUser.uid, currentUser.displayName, participantUids, type)
-          .then((callId) => {
-            const localStream = groupWebrtc.getLocalStream();
-            useZixoStore.setState((s: any) => ({
-              groupCall: s.groupCall
-                ? { ...s.groupCall, callId, localStream, status: 'connecting' }
-                : null,
-            }));
-          })
-          .catch((err: any) => {
-            console.error('[Zixo] Failed to start group call:', err);
-            try { groupWebrtc.leaveGroupCall(); } catch {}
-            useZixoStore.setState({ groupCall: null, currentScreen: 'home' });
-            if (err?.name === 'NotAllowedError') {
-              alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
-            } else {
-              alert('Failed to start group call. Please try again.');
-            }
-          });
-      },
+      // Initiate group WebRTC call asynchronously
+      groupWebrtc.startGroupCall(currentUser.uid, currentUser.displayName, participantUids, type)
+        .then((callId) => {
+          const localStream = groupWebrtc.getLocalStream();
+          useZixoStore.setState((s: any) => ({
+            groupCall: s.groupCall
+              ? { ...s.groupCall, callId, localStream, status: 'connecting' }
+              : null,
+          }));
+        })
+        .catch((err: any) => {
+          console.error('[Zixo] Failed to start group call:', err);
+          try { groupWebrtc.leaveGroupCall(); } catch {}
+          useZixoStore.setState({ groupCall: null, currentScreen: 'home' });
+          if (err?.name === 'NotAllowedError') {
+            try { localStorage.removeItem('zixo_call_permissions'); } catch {}
+            try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
+            alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
+          } else {
+            alert('Failed to start group call. Please try again.');
+          }
+        });
+    };
+
+    // Check if permissions have already been decided - skip modal if so
+    const callType = type === 'group-video' ? 'video' : 'audio';
+    checkCallPermissions(callType).then((alreadyDecided) => {
+      if (alreadyDecided) {
+        proceedWithGroupCall(true);
+      } else {
+        set({
+          showPermissionModal: true,
+          permissionRequests: neededPermissions,
+          permissionCallback: proceedWithGroupCall,
+        });
+      }
     });
   },
 
@@ -962,130 +1099,143 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     }
     neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for group calls' });
 
-    set({
-      showPermissionModal: true,
-      permissionRequests: neededPermissions,
-      permissionCallback: (granted: boolean) => {
-        if (!granted) {
-          useZixoStore.setState({ incomingGroupCall: null });
-          return;
+    // Define the callback that proceeds with answering after permissions are granted
+    const proceedWithGroupAnswer = (granted: boolean) => {
+      if (!granted) {
+        useZixoStore.setState({ incomingGroupCall: null });
+        return;
+      }
+
+      const currentIncoming = useZixoStore.getState().incomingGroupCall;
+      if (!currentIncoming) return;
+
+      // Reset any previous group WebRTC instance
+      resetGroupWebRTC();
+      const groupWebrtc = getGroupWebRTC();
+
+      // Set up callbacks
+      groupWebrtc.onRemoteStream = (uid, stream) => {
+        const s = useZixoStore.getState();
+        if (s.groupCall) {
+          useZixoStore.setState({
+            groupCall: {
+              ...s.groupCall,
+              participants: s.groupCall.participants.map(p =>
+                p.uid === uid ? { ...p, stream } : p
+              ),
+            },
+          });
         }
+      };
 
-        const currentIncoming = useZixoStore.getState().incomingGroupCall;
-        if (!currentIncoming) return;
+      groupWebrtc.onRemoteStreamRemoved = (uid) => {
+        useZixoStore.getState().removeGroupCallParticipant(uid);
+      };
 
-        // Reset any previous group WebRTC instance
-        resetGroupWebRTC();
-        const groupWebrtc = getGroupWebRTC();
-
-        // Set up callbacks
-        groupWebrtc.onRemoteStream = (uid, stream) => {
-          const s = useZixoStore.getState();
-          if (s.groupCall) {
+      groupWebrtc.onParticipantJoined = (uid, name) => {
+        const s = useZixoStore.getState();
+        if (s.groupCall) {
+          const existing = s.groupCall.participants.find(p => p.uid === uid);
+          if (!existing) {
             useZixoStore.setState({
               groupCall: {
                 ...s.groupCall,
-                participants: s.groupCall.participants.map(p =>
-                  p.uid === uid ? { ...p, stream } : p
-                ),
+                participants: [...s.groupCall.participants, {
+                  uid,
+                  displayName: name,
+                  avatar: '',
+                  stream: null,
+                  isMuted: false,
+                  isVideoOn: s.groupCall.type === 'group-video',
+                }],
               },
             });
           }
-        };
+        }
+      };
 
-        groupWebrtc.onRemoteStreamRemoved = (uid) => {
-          useZixoStore.getState().removeGroupCallParticipant(uid);
-        };
+      groupWebrtc.onParticipantLeft = (uid) => {
+        useZixoStore.getState().removeGroupCallParticipant(uid);
+      };
 
-        groupWebrtc.onParticipantJoined = (uid, name) => {
+      groupWebrtc.onConnectionStateChange = (uid, connState) => {
+        if (connState === 'connected') {
           const s = useZixoStore.getState();
-          if (s.groupCall) {
-            const existing = s.groupCall.participants.find(p => p.uid === uid);
-            if (!existing) {
-              useZixoStore.setState({
-                groupCall: {
-                  ...s.groupCall,
-                  participants: [...s.groupCall.participants, {
-                    uid,
-                    displayName: name,
-                    avatar: '',
-                    stream: null,
-                    isMuted: false,
-                    isVideoOn: s.groupCall.type === 'group-video',
-                  }],
-                },
-              });
-            }
+          if (s.groupCall && s.groupCall.status !== 'active') {
+            useZixoStore.setState({
+              groupCall: { ...s.groupCall, status: 'active', startedAt: Date.now() },
+            });
           }
-        };
+        }
+      };
 
-        groupWebrtc.onParticipantLeft = (uid) => {
-          useZixoStore.getState().removeGroupCallParticipant(uid);
-        };
+      // Build participant list from callData
+      const callData = currentIncoming.callData;
+      const participantList = Object.values(callData.participants || {})
+        .filter(p => p.joinedAt > 0 && p.uid !== currentUser.uid)
+        .map(p => ({
+          uid: p.uid,
+          displayName: p.name || p.uid,
+          avatar: '',
+          stream: null,
+          isMuted: false,
+          isVideoOn: currentIncoming.callType === 'group-video',
+        }));
 
-        groupWebrtc.onConnectionStateChange = (uid, connState) => {
-          if (connState === 'connected') {
-            const s = useZixoStore.getState();
-            if (s.groupCall && s.groupCall.status !== 'active') {
-              useZixoStore.setState({
-                groupCall: { ...s.groupCall, status: 'active', startedAt: Date.now() },
-              });
-            }
-          }
-        };
+      // Set initial UI state
+      useZixoStore.setState({
+        groupCall: {
+          callId: currentIncoming.callId,
+          status: 'connecting',
+          type: currentIncoming.callType,
+          participants: participantList,
+          localStream: null,
+          isMuted: false,
+          isSpeakerOn: currentIncoming.callType === 'group-audio',
+          isVideoOn: currentIncoming.callType === 'group-video',
+          isIncoming: true,
+          startedAt: null,
+        },
+        incomingGroupCall: null,
+        currentScreen: currentIncoming.callType === 'group-audio' ? 'group-audio-call' : 'group-video-call',
+      });
 
-        // Build participant list from callData
-        const callData = currentIncoming.callData;
-        const participantList = Object.values(callData.participants || {})
-          .filter(p => p.joinedAt > 0 && p.uid !== currentUser.uid)
-          .map(p => ({
-            uid: p.uid,
-            displayName: p.name || p.uid,
-            avatar: '',
-            stream: null,
-            isMuted: false,
-            isVideoOn: currentIncoming.callType === 'group-video',
+      // Join the group call
+      groupWebrtc.joinGroupCall(currentIncoming.callId, currentUser.uid, currentUser.displayName)
+        .then(() => {
+          const localStream = groupWebrtc.getLocalStream();
+          useZixoStore.setState((s: any) => ({
+            groupCall: s.groupCall
+              ? { ...s.groupCall, localStream, status: 'connecting', startedAt: Date.now() }
+              : null,
           }));
-
-        // Set initial UI state
-        useZixoStore.setState({
-          groupCall: {
-            callId: currentIncoming.callId,
-            status: 'connecting',
-            type: currentIncoming.callType,
-            participants: participantList,
-            localStream: null,
-            isMuted: false,
-            isSpeakerOn: currentIncoming.callType === 'group-audio',
-            isVideoOn: currentIncoming.callType === 'group-video',
-            isIncoming: true,
-            startedAt: null,
-          },
-          incomingGroupCall: null,
-          currentScreen: currentIncoming.callType === 'group-audio' ? 'group-audio-call' : 'group-video-call',
+        })
+        .catch((err: any) => {
+          console.error('[Zixo] Failed to join group call:', err);
+          try { groupWebrtc.leaveGroupCall(); } catch {}
+          useZixoStore.setState({ groupCall: null, currentScreen: 'home' });
+          if (err?.name === 'NotAllowedError') {
+            try { localStorage.removeItem('zixo_call_permissions'); } catch {}
+            try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
+            alert('Camera/Microphone permission denied.');
+          } else {
+            alert('Failed to join group call. Please try again.');
+          }
         });
+    };
 
-        // Join the group call
-        groupWebrtc.joinGroupCall(currentIncoming.callId, currentUser.uid, currentUser.displayName)
-          .then(() => {
-            const localStream = groupWebrtc.getLocalStream();
-            useZixoStore.setState((s: any) => ({
-              groupCall: s.groupCall
-                ? { ...s.groupCall, localStream, status: 'connecting', startedAt: Date.now() }
-                : null,
-            }));
-          })
-          .catch((err: any) => {
-            console.error('[Zixo] Failed to join group call:', err);
-            try { groupWebrtc.leaveGroupCall(); } catch {}
-            useZixoStore.setState({ groupCall: null, currentScreen: 'home' });
-            if (err?.name === 'NotAllowedError') {
-              alert('Camera/Microphone permission denied.');
-            } else {
-              alert('Failed to join group call. Please try again.');
-            }
-          });
-      },
+    // Check if permissions have already been decided - skip modal if so
+    const callType = incoming.callType === 'group-video' ? 'video' : 'audio';
+    checkCallPermissions(callType).then((alreadyDecided) => {
+      if (alreadyDecided) {
+        proceedWithGroupAnswer(true);
+      } else {
+        set({
+          showPermissionModal: true,
+          permissionRequests: neededPermissions,
+          permissionCallback: proceedWithGroupAnswer,
+        });
+      }
     });
   },
 

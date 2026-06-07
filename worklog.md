@@ -104,3 +104,45 @@
 - The `firestore.ts` sendMessage TS error at line 148 was pre-existing and unrelated to these changes
 - Next.js lint check passes for all modified source files
 - Dev server compiles successfully with changes
+
+---
+Task ID: 1
+Agent: main
+Task: Fix mic, camera, and location permissions to ask only once per device unless revoked
+
+Work Log:
+- Read and analyzed permission handling code across 6 files
+- Identified the root cause: `checkCallPermissions()` blindly trusted localStorage cache and never re-verified actual browser permission status
+- Identified that group calls always showed the permission modal, bypassing the check entirely
+- Identified no mechanism to detect when permissions were revoked in browser settings
+
+- Rewrote `checkCallPermissions()` in `src/stores/useZixoStore.ts`:
+  - Now always verifies actual browser permission status via `navigator.permissions.query()` first
+  - If browser says a previously-cached permission is now revoked (prompt/denied), invalidates cache and re-asks user
+  - For browsers where Permissions API is unsupported (Firefox), uses sessionStorage flag + getUserMedia probe to verify once per session
+  - Cache is only used as a performance optimization, never as the source of truth
+
+- Added `initPermissionChangeListeners()` function:
+  - Listens for `change` events on microphone, camera, and geolocation permissions
+  - When a permission is revoked in browser settings, automatically clears the cache
+  - When a permission is re-granted, updates the cache
+  - Initialized in `page.tsx` on app startup
+
+- Fixed `saveCallPermissionCache()` to also set `sessionStorage.setItem('zixo_permissions_verified', 'true')` flag
+
+- Updated group call actions (`startGroupCall`, `answerGroupCall`) to use `checkCallPermissions()` instead of always showing the modal
+
+- Added cache invalidation (`localStorage.removeItem('zixo_call_permissions')` + `sessionStorage.removeItem('zixo_permissions_verified')`) to all NotAllowedError handlers in:
+  - `startCall` catch block
+  - `answerCall` catch block
+  - `startGroupCall` catch block
+  - `answerGroupCall` catch block
+
+- Built and deployed to Cloudflare Pages: https://464b75b9.zixo.pages.dev
+
+Stage Summary:
+- Permissions now ask only ONCE per device (enforced by browser's own permission state)
+- If user revokes permissions in browser settings, the app detects this and re-asks on next call
+- Group calls now also respect the one-time-grant behavior (previously always showed modal)
+- Cache invalidation on NotAllowedError ensures the permission modal shows again if something goes wrong
+- All 4 call types (1:1 audio, 1:1 video, group audio, group video) now use consistent permission flow
