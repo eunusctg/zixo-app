@@ -3,7 +3,7 @@
 name = "zixo-app"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat_v2"]
-pages_build_output_dir = ".vercel/output/static"
+pages_build_output_dir = ".open-next/assets"
 
 # R2 bucket binding for media storage
 [[r2_buckets]]

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const runtime = 'edge';
+// runtime = 'edge' (Cloudflare Pages runs all routes on the edge by default)
 
 /**
  * Zixo API Routes - Cloudflare Workers Compatible

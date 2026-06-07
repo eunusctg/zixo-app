@@ -7,7 +7,7 @@
  * enable phone authentication for the Firebase project.
  */
 
-export const runtime = 'edge';
+// runtime = 'edge' (Cloudflare Pages runs all routes on the edge by default)
 
 // Simple setup secret to prevent unauthorized access
 // Set SETUP_SECRET env var or use the default for initial setup
