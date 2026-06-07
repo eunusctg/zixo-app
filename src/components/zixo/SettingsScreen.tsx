@@ -1,11 +1,18 @@
 'use client';
 
 import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
 import type { ZixoUserProfile } from '@/services/auth';
 import { formatZixoNumber } from '@/services/auth';
+
+// Dynamic import to avoid SSR issues
+const QRCodeSVG = dynamic(
+  () => import('qrcode.react').then((mod) => ({ default: mod.QRCodeSVG })),
+  { ssr: false, loading: () => <div className="w-[120px] h-[120px] bg-white/10 rounded-xl" /> }
+);
 
 // Moved outside of component to avoid "Cannot create components during render" error
 function SettingSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -110,6 +117,18 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
             </svg>
           </motion.button>
         </div>
+
+        {/* QR Code */}
+        {user.zixoNumber && (
+          <div className="mt-3 pt-3 border-t border-white/5">
+            <div className="flex items-center justify-center">
+              <div className="p-2 bg-white rounded-lg">
+                <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={100} level="M" />
+              </div>
+            </div>
+            <p className="text-[10px] text-zixo-text-secondary text-center mt-1.5">Scan to add on Zixo</p>
+          </div>
+        )}
       </motion.div>
 
       {/* Appearance */}

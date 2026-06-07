@@ -241,15 +241,18 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
   const nearbyRtdbUnsubRef = useRef<(() => void) | null>(null);
 
   // Use allUsers as the default list, filter locally if search is short
-  const displayUsers = searchResults.length > 0
+  // Filter out null/undefined entries and ensure valid uid
+  const displayUsers = (searchResults.length > 0
     ? searchResults
     : search.trim().length > 0 && search.trim().length < 2
-      ? allUsers.filter(
+      ? (allUsers || []).filter(
           (c) =>
-            (c.displayName || '').toLowerCase().includes(search.toLowerCase()) ||
-            (c.username || '').toLowerCase().includes(search.toLowerCase())
+            c && c.uid &&
+            ((c.displayName || '').toLowerCase().includes(search.toLowerCase()) ||
+            (c.username || '').toLowerCase().includes(search.toLowerCase()))
         )
-      : allUsers;
+      : (allUsers || [])
+  ).filter(u => u && u.uid);
 
   // Handle search - search Firestore when user types 2+ chars
   const handleSearch = useCallback(async (query: string) => {
@@ -519,18 +522,18 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
 
   const renderUserItem = (contact: ZixoUserProfile, i: number) => (
     <motion.div
-      key={contact.uid}
+      key={contact?.uid || i}
       initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: Math.min(i * 0.03, 0.3) }}
       className="flex items-center gap-3 px-4 py-3 hover:bg-zixo-surface/50 transition-colors cursor-pointer"
-      onClick={() => onStartChat(contact.uid)}
+      onClick={() => contact?.uid && onStartChat(contact.uid)}
     >
-      <Avatar name={contact.displayName} uid={contact.uid} avatarUrl={contact.avatar} size="lg" online={contact.online} />
+      <Avatar name={contact?.displayName || 'Unknown'} uid={contact?.uid || ''} avatarUrl={contact?.avatar} size="lg" online={contact?.online} />
 
       <div className="flex-1 min-w-0">
-        <h4 className="text-sm font-medium text-zixo-text truncate">{contact.displayName}</h4>
-        <p className="text-xs text-zixo-text-secondary truncate">{contact.username}</p>
+        <h4 className="text-sm font-medium text-zixo-text truncate">{contact?.displayName || 'Unknown'}</h4>
+        <p className="text-xs text-zixo-text-secondary truncate">{contact?.username || ''}</p>
       </div>
 
       <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>

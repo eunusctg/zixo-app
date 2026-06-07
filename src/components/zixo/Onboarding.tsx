@@ -532,16 +532,22 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
               transition={{ delay: 0.7 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => {
-                setShowZixoNumber(false);
-                // Navigate to home screen — the Firebase bridge may have already
-                // logged us in via onAuthStateChanged, but in case of a race
-                // condition, we directly set the screen here.
-                onAuth({ email: '', displayName: '' });
-                // Also directly navigate using the store as a safety net
+                // Don't call onAuth - the Firebase bridge has already logged us in
+                // via onAuthStateChanged. Just navigate directly to home screen.
                 import('@/stores/useZixoStore').then(({ useZixoStore }) => {
                   const store = useZixoStore.getState();
                   if (store.isAuthenticated && store.currentUser) {
                     store.setScreen('home');
+                  } else {
+                    // Safety: if bridge hasn't fired yet, check periodically
+                    const checkInterval = setInterval(() => {
+                      const s = useZixoStore.getState();
+                      if (s.isAuthenticated && s.currentUser) {
+                        s.setScreen('home');
+                        clearInterval(checkInterval);
+                      }
+                    }, 100);
+                    setTimeout(() => clearInterval(checkInterval), 5000);
                   }
                 });
               }}

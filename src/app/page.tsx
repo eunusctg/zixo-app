@@ -692,13 +692,19 @@ export default function ZixoApp() {
     if (!isAuthenticated || !currentUser) return null;
 
     return (
-      <div className="h-screen flex flex-col bg-zixo-bg">
+      <div className="h-[100dvh] flex flex-col bg-zixo-bg">
         {/* Top Bar */}
         <div className="shrink-0 bg-[#1F2C34]">
           <div className="flex items-center justify-between px-4 py-3 safe-area-top">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl gradient-primary flex items-center justify-center">
-                <span className="text-lg font-extrabold text-white font-heading">Z</span>
+                <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8 6L22 6C23.1046 6 24 6.89543 24 8L24 12L20 12L20 8L12 8L12 12L8 12L8 6Z" fill="white" fillOpacity="0.9"/>
+                  <path d="M8 20L8 26L22 26C23.1046 26 24 25.1046 24 24L24 20L20 20L20 24L12 24L12 20L8 20Z" fill="white" fillOpacity="0.9"/>
+                  <path d="M6 14L14 14L14 18L6 18L6 14Z" fill="white" fillOpacity="0.7"/>
+                  <path d="M18 14L26 14L26 18L18 18L18 14Z" fill="white" fillOpacity="0.7"/>
+                  <circle cx="24" cy="8" r="3" fill="white" fillOpacity="0.5"/>
+                </svg>
               </div>
               <h1 className="text-xl font-bold font-heading gradient-primary bg-clip-text text-transparent">Zixo</h1>
             </div>
@@ -726,7 +732,7 @@ export default function ZixoApp() {
         </div>
 
         {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto pb-20">
+        <div className="flex-1 overflow-y-auto pb-24">
           <AnimatePresence mode="wait">
             {activeTab === 'chats' && (
               <motion.div
@@ -816,7 +822,7 @@ export default function ZixoApp() {
     // show a loading/empty chat screen
     if (activeChatId && !activeChat) {
       return (
-        <div className="h-screen flex flex-col bg-zixo-bg">
+        <div className="h-[100dvh] flex flex-col bg-zixo-bg">
           <div className="shrink-0 bg-[#1F2C34] z-10 safe-area-top">
             <div className="flex items-center gap-3 px-3 py-2.5">
               <motion.button
@@ -871,7 +877,7 @@ export default function ZixoApp() {
     });
 
     return (
-      <div className="h-screen flex flex-col bg-zixo-bg">
+      <div className="h-[100dvh] flex flex-col bg-zixo-bg">
         {/* Chat Header */}
         <div className="shrink-0 bg-[#1F2C34] z-10 safe-area-top">
           <div className="flex items-center gap-3 px-3 py-2.5">
@@ -1045,7 +1051,7 @@ export default function ZixoApp() {
     // Show loading state while users are being fetched
     if (usersLoading && allUsers.length === 0) {
       return (
-        <div className="h-screen flex flex-col bg-zixo-bg">
+        <div className="h-[100dvh] flex flex-col bg-zixo-bg">
           <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34] safe-area-top">
             <motion.button
               whileTap={{ scale: 0.9 }}
@@ -1073,7 +1079,7 @@ export default function ZixoApp() {
     }
 
     return (
-      <div className="h-screen flex flex-col bg-zixo-bg">
+      <div className="h-[100dvh] flex flex-col bg-zixo-bg">
         <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34] safe-area-top">
           <motion.button
             whileTap={{ scale: 0.9 }}
@@ -1161,7 +1167,7 @@ export default function ZixoApp() {
     } catch (err) {
       console.error('[Zixo] Contacts screen render error:', err);
       return (
-        <div className="h-screen flex flex-col bg-zixo-bg">
+        <div className="h-[100dvh] flex flex-col bg-zixo-bg">
           <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34]">
             <motion.button whileTap={{ scale: 0.9 }} onClick={() => setScreen('home')} className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text transition-colors">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6" /></svg>
@@ -1192,7 +1198,7 @@ export default function ZixoApp() {
   const renderSettingsScreen = () => {
     if (!currentUser) return null;
     return (
-      <div className="h-screen flex flex-col bg-zixo-bg">
+      <div className="h-[100dvh] flex flex-col bg-zixo-bg">
         <div className="shrink-0 flex items-center gap-3 px-4 py-3 bg-[#1F2C34] safe-area-top">
           <motion.button
             whileTap={{ scale: 0.9 }}
@@ -1214,7 +1220,7 @@ export default function ZixoApp() {
 
   return (
     <ErrorBoundary>
-    <div className="min-h-screen bg-zixo-bg text-zixo-text flex justify-center">
+    <div className="min-h-[100dvh] bg-zixo-bg text-zixo-text flex justify-center">
       {/* Notification Banners */}
       <NotificationBanner
         notifications={bannerNotifications}

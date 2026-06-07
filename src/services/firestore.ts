@@ -596,28 +596,49 @@ export async function saveCallRecord(call: Omit<FirestoreCall, 'id' | 'timestamp
  * Get call history for a user
  */
 export async function getCallHistory(uid: string): Promise<FirestoreCall[]> {
-  const q1 = query(
-    collection(db, 'calls'),
-    where('callerId', '==', uid),
-    orderBy('timestamp', 'desc'),
-    limit(50)
-  );
-  const q2 = query(
-    collection(db, 'calls'),
-    where('receiverId', '==', uid),
-    orderBy('timestamp', 'desc'),
-    limit(50)
-  );
-
-  const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-
   const calls: FirestoreCall[] = [];
-  snap1.forEach((docSnap) => {
-    calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
-  });
-  snap2.forEach((docSnap) => {
-    calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
-  });
+
+  try {
+    const q1 = query(
+      collection(db, 'calls'),
+      where('callerId', '==', uid),
+      orderBy('timestamp', 'desc'),
+      limit(50)
+    );
+    const q2 = query(
+      collection(db, 'calls'),
+      where('receiverId', '==', uid),
+      orderBy('timestamp', 'desc'),
+      limit(50)
+    );
+    const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+    snap1.forEach((docSnap) => {
+      calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
+    });
+    snap2.forEach((docSnap) => {
+      if (!calls.find(c => c.id === docSnap.id)) {
+        calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
+      }
+    });
+  } catch (err) {
+    console.warn('[Zixo] Call history query with orderBy failed, trying fallback:', err);
+    // Fallback: query without orderBy (no composite index needed)
+    try {
+      const q1 = query(collection(db, 'calls'), where('callerId', '==', uid), limit(50));
+      const q2 = query(collection(db, 'calls'), where('receiverId', '==', uid), limit(50));
+      const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+      snap1.forEach((docSnap) => {
+        calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
+      });
+      snap2.forEach((docSnap) => {
+        if (!calls.find(c => c.id === docSnap.id)) {
+          calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
+        }
+      });
+    } catch (fallbackErr) {
+      console.warn('[Zixo] Call history fallback query also failed:', fallbackErr);
+    }
+  }
 
   // Sort by timestamp descending
   calls.sort((a, b) => {

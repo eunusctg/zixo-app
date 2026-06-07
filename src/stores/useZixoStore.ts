@@ -750,6 +750,21 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         incomingCall: null,
         currentScreen: 'home',
       }));
+
+      // Save call record to Firestore for call history persistence
+      import('@/services/firestore').then(({ saveCallRecord }) => {
+        saveCallRecord({
+          callerId: newCall.callerId,
+          callerName: newCall.callerName,
+          callerAvatar: newCall.callerAvatar,
+          receiverId: newCall.receiverId,
+          receiverName: newCall.receiverName,
+          receiverAvatar: newCall.receiverAvatar,
+          type: newCall.type,
+          direction: newCall.direction,
+          duration: newCall.duration,
+        }).catch(console.error);
+      }).catch(console.error);
     } else {
       set({ activeCall: null, incomingCall: null, currentScreen: 'home' });
     }
