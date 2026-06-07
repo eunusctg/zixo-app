@@ -82,7 +82,7 @@ export function AudioCallScreen({
   const isActive = callStatus === 'connected' || (callStatus === 'ringing' && !isIncoming) || callStatus === 'connecting';
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-between overflow-hidden"
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-between overflow-hidden safe-area-top safe-area-bottom"
       style={{
         background: 'radial-gradient(ellipse at 50% 30%, #0d2818 0%, #0a0f14 50%, #050809 100%)',
       }}
@@ -154,7 +154,7 @@ export function AudioCallScreen({
       </div>
 
       {/* Top area - Contact Info */}
-      <div className="relative z-10 flex flex-col items-center pt-16 pb-8">
+      <div className="relative z-10 flex flex-col items-center pt-8 sm:pt-16 pb-4 sm:pb-8">
         <motion.div
           initial={{ opacity: 0, y: -30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -385,7 +385,7 @@ export function AudioCallScreen({
       </div>
 
       {/* Bottom area - Controls */}
-      <div className="relative z-10 w-full pb-12 pt-4">
+      <div className="relative z-10 w-full pb-6 sm:pb-12 pt-4 safe-area-bottom">
         {/* Incoming Call Buttons */}
         {isIncoming && callStatus === 'ringing' && (
           <motion.div
@@ -669,7 +669,7 @@ export function VideoCallScreen({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black"
+      className="fixed inset-0 z-50 bg-black safe-area-top safe-area-bottom"
       onClick={() => setShowControls(!showControls)}
     >
       {/* Remote Video */}
@@ -742,8 +742,8 @@ export function VideoCallScreen({
       {/* Self View (PiP) with neon border */}
       <motion.div
         drag
-        dragConstraints={{ top: 50, left: 20, right: typeof window !== 'undefined' ? window.innerWidth - 140 : 300, bottom: typeof window !== 'undefined' ? window.innerHeight - 200 : 600 }}
-        className="absolute top-12 right-4 w-28 h-40 rounded-2xl overflow-hidden z-10 cursor-grab active:cursor-grabbing"
+        dragConstraints={{ top: 50, left: 10, right: 250, bottom: 400 }}
+        className="absolute top-10 right-3 w-24 h-32 sm:top-12 sm:right-4 sm:w-28 sm:h-40 rounded-2xl overflow-hidden z-10 cursor-grab active:cursor-grabbing"
         style={{
           border: '2px solid rgba(37, 211, 102, 0.4)',
           boxShadow: '0 0 25px rgba(37, 211, 102, 0.2), 0 8px 32px rgba(0,0,0,0.5)',
@@ -833,7 +833,7 @@ export function VideoCallScreen({
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 30 }}
-            className="absolute bottom-0 left-0 right-0 p-6 pb-10 z-20"
+            className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 pb-8 sm:pb-10 z-20 safe-area-bottom"
           >
             <div className="flex items-center justify-center gap-5">
               {/* Mute */}

@@ -173,6 +173,8 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<ZixoUserProfile[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareLink, setShareLink] = useState('');
 
   // Use allUsers as the default list, filter locally if search is short
   const displayUsers = searchResults.length > 0
@@ -272,6 +274,137 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
 
   return (
     <div className="pb-4">
+      {/* Quick Add Methods */}
+      <div className="px-4 py-3">
+        <h3 className="text-xs font-semibold text-zixo-text-secondary uppercase tracking-wider mb-3">Add Friends</h3>
+        <div className="flex gap-3">
+          {/* Share Link */}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              const link = `https://zixo-app-cfy.pages.dev`;
+              setShareLink(link);
+              setShowShareDialog(true);
+              if (navigator.share) {
+                navigator.share({
+                  title: 'Join me on Zixo!',
+                  text: 'Free video and audio calling app. No ads, no social media.',
+                  url: link,
+                }).catch(() => {});
+              }
+            }}
+            className="flex-1 flex flex-col items-center gap-2 p-3 rounded-xl bg-zixo-surface border border-white/5 hover:border-zixo-primary/20 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full bg-zixo-primary/10 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#25D366" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+            </div>
+            <span className="text-[11px] text-zixo-text-secondary">Share Link</span>
+          </motion.button>
+
+          {/* Search by Phone */}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              // Focus the search input and add phone prefix
+              setSearch('+');
+              const input = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
+              if (input) input.focus();
+            }}
+            className="flex-1 flex flex-col items-center gap-2 p-3 rounded-xl bg-zixo-surface border border-white/5 hover:border-zixo-primary/20 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full bg-zixo-secondary/10 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#128C7E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            </div>
+            <span className="text-[11px] text-zixo-text-secondary">By Phone</span>
+          </motion.button>
+
+          {/* Nearby */}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              alert('Nearby discovery coming soon! Share your Zixo link with people around you.');
+            }}
+            className="flex-1 flex flex-col items-center gap-2 p-3 rounded-xl bg-zixo-surface border border-white/5 hover:border-zixo-primary/20 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full bg-zixo-accent/10 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#34B7F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+              </svg>
+            </div>
+            <span className="text-[11px] text-zixo-text-secondary">Nearby</span>
+          </motion.button>
+
+          {/* QR Code */}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              alert('QR Code feature coming soon! Share your Zixo link instead.');
+            }}
+            className="flex-1 flex flex-col items-center gap-2 p-3 rounded-xl bg-zixo-surface border border-white/5 hover:border-zixo-primary/20 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <rect x="14" y="14" width="3" height="3" />
+                <line x1="21" y1="14" x2="21" y2="14.01" />
+                <line x1="21" y1="21" x2="21" y2="21.01" />
+                <line x1="17" y1="18" x2="17" y2="18.01" />
+              </svg>
+            </div>
+            <span className="text-[11px] text-zixo-text-secondary">QR Code</span>
+          </motion.button>
+        </div>
+      </div>
+
+      {/* Share Dialog */}
+      <AnimatePresence>
+        {showShareDialog && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="mx-4 mb-3 p-4 rounded-xl bg-zixo-surface border border-zixo-primary/20"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-zixo-text">Share Zixo Link</h4>
+              <button onClick={() => setShowShareDialog(false)} className="text-zixo-text-secondary hover:text-zixo-text">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={shareLink}
+                readOnly
+                className="flex-1 px-3 py-2 rounded-lg bg-zixo-surface-light text-zixo-text text-xs"
+              />
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  navigator.clipboard.writeText(shareLink).then(() => {
+                    alert('Link copied to clipboard!');
+                  }).catch(() => {});
+                }}
+                className="px-3 py-2 rounded-lg gradient-primary text-white text-xs font-medium"
+              >
+                Copy
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Search */}
       <div className="px-4 py-3">
         <div className="relative">

@@ -116,6 +116,7 @@ async function getAccessToken(): Promise<string | null> {
           'https://www.googleapis.com/auth/firebase.messaging',
           'https://www.googleapis.com/auth/firebase',
           'https://www.googleapis.com/auth/cloud-platform',
+          'https://www.googleapis.com/auth/identitytoolkit',
         ].join(' '),
         aud: 'https://oauth2.googleapis.com/token',
       },

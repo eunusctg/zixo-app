@@ -15,6 +15,7 @@ import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToB
 import { AudioCallScreen, VideoCallScreen, PermissionModal } from '@/components/zixo/CallScreens';
 import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
+import ProfileEditScreen from '@/components/zixo/ProfileEditScreen';
 import AdminPanel from '@/components/zixo/AdminPanel';
 import { BottomNav, FAB, SearchBar } from '@/components/zixo/Navigation';
 import { OnlineStatus, EncryptionBadge } from '@/components/zixo/Common';
@@ -266,6 +267,93 @@ export default function ZixoApp() {
     }
   }, [handleSendMessage]);
 
+  // Handle voice recording with MediaRecorder API
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const handleVoiceRecord = useCallback(async () => {
+    if (isRecording) {
+      // Stop recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+      setIsRecording(false);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      let startTime = Date.now();
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Stop all audio tracks
+        stream.getTracks().forEach(track => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const duration = Math.floor((Date.now() - startTime) / 1000);
+
+        if (audioBlob.size > 0 && duration > 0) {
+          // Upload voice note to storage
+          try {
+            const { uploadChatMedia } = await import('@/services/storage');
+            const file = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
+            const mediaUrl = await uploadChatMedia(activeChatId || '', currentUser?.uid || '', file, 'voice');
+            handleSendMessage('🎤 Voice note', 'voice', { mediaUrl, duration });
+          } catch (err) {
+            console.error('[Zixo] Voice upload failed:', err);
+            // Fallback: send as text
+            handleSendMessage('🎤 Voice note', 'voice', { duration });
+          }
+        }
+
+        setRecordingDuration(0);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      startTime = Date.now();
+      setRecordingDuration(0);
+
+      // Update duration timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+
+      // Auto-stop after 5 minutes
+      setTimeout(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop();
+          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+          setIsRecording(false);
+        }
+      }, 300000);
+
+    } catch (err: any) {
+      console.error('[Zixo] Voice recording failed:', err);
+      if (err?.name === 'NotAllowedError') {
+        alert('Microphone permission denied. Please allow microphone access in your browser settings.');
+      } else {
+        alert('Failed to start voice recording. Please try again.');
+      }
+    }
+  }, [isRecording, activeChatId, currentUser, handleSendMessage]);
+
   // Handle message search within active chat
   const handleMessageSearch = useCallback(async (query: string) => {
     if (!activeChatId) return;
@@ -406,6 +494,19 @@ export default function ZixoApp() {
 
       case 'contacts':
         return renderContactsScreen();
+
+      case 'profile-edit':
+        if (!currentUser) return null;
+        return (
+          <ProfileEditScreen
+            user={currentUser}
+            onBack={() => setScreen('settings')}
+            onSave={async (updates) => {
+              // Profile is already updated in Firestore and Zustand by the component
+              console.log('[Zixo] Profile saved:', updates);
+            }}
+          />
+        );
 
       case 'admin-panel':
         return renderAdminPanelScreen();
@@ -677,7 +778,9 @@ export default function ZixoApp() {
             else if (type === 'file') handleSendMessage('📄 Document shared', 'file');
             else if (type === 'location') handleSendMessage('📍 Location shared', 'location');
           }}
-          onVoiceRecord={() => handleSendMessage('🎤 Voice note', 'voice')}
+          onVoiceRecord={handleVoiceRecord}
+          isRecording={isRecording}
+          recordingDuration={recordingDuration}
           onFileUpload={handleFileUpload}
           chatId={activeChatId || ''}
         />
@@ -785,7 +888,7 @@ export default function ZixoApp() {
           <h2 className="text-lg font-semibold font-heading text-zixo-text">Settings</h2>
         </div>
         <div className="flex-1 overflow-y-auto pb-20">
-          <SettingsScreen user={currentUser} onEditProfile={() => {}} onLogout={handleLogout} onBack={() => {}} onAdminPanel={() => setScreen('admin-panel')} />
+          <SettingsScreen user={currentUser} onEditProfile={() => setScreen('profile-edit')} onLogout={handleLogout} onBack={() => {}} onAdminPanel={() => setScreen('admin-panel')} />
         </div>
       </div>
     );

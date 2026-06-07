@@ -1,38 +1,25 @@
-# Zixo App Worklog
-
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Hide email/password login, add phone OTP + Google only, fix phone auth, polish call screen
+Task: Implement all user-requested features for Zixo app
 
 Work Log:
-- Rewrote Onboarding.tsx to remove email/password forms entirely
-- Made phone OTP the primary login method with Google as secondary
-- Added display name input for new phone users (after OTP verification)
-- Added resend OTP and change number functionality
-- Removed forgot password and signup/login mode switching
-- Simplified auth screen to single unified "auth" screen
-- Updated page.tsx to use 'auth' screen instead of 'auth-login'/'auth-signup'
-- Updated useZixoStore Screen type to remove unused auth subtypes
-
-- Completely redesigned CallScreens.tsx with stunning glowing design:
-  - AudioCallScreen: animated gradient orbs background, mesh grid, triple pulsing rings around avatar, glowing halo when connected, gradient call duration text, glass-morphism control panel, neon glow buttons with labels
-  - VideoCallScreen: cinematic gradient overlays, neon-styled controls with red/blue glow states, animated connection state with pulsing rings, improved PiP with glow border
-
-- Added new CSS utilities: glow-neon-green, glow-neon-red, glow-neon-blue, gradient-call-text
-
-- Fixed flipCamera handler to use actual WebRTC switchCamera method
-
-- Created /api/setup route to enable Firebase Phone Auth programmatically
-- Successfully enabled Phone Auth in Firebase via setup API
-- Verified authorized domains include zixo-app-cfy.pages.dev
-- Secured setup route with token parameter
-
-- Built and deployed to Cloudflare Pages (3 deployments)
+- Analyzed complete codebase structure and existing implementations
+- Discovered Phone Auth is enabled in Firebase but SMS regions are blocked for all countries
+- Added `enablePhoneAuth` API endpoint to `/api/zixo/route.ts` for enabling phone auth via Identity Toolkit API
+- Added `identitytoolkit` scope to Firebase Admin JWT in `firebase-admin.ts`
+- Created ProfileEditScreen component with avatar upload, name editing, bio/status editing
+- Added voice recording with MediaRecorder API - record, upload to Storage, send as voice message
+- Updated ChatInputBar to show recording state with duration timer and stop button
+- Fixed calling screen responsive design for Android - added safe-area-top/bottom classes, responsive padding
+- Fixed Video Call Screen PiP self-view - replaced window-based drag constraints with fixed values
+- Added multiple friend-adding methods to ContactsScreen: Share Link, Search by Phone, Nearby, QR Code
+- Added Share Link dialog with copy-to-clipboard functionality
+- Wired ProfileEditScreen into page.tsx with profile-edit screen case
+- Fixed settings screen to properly navigate to profile-edit
+- Deployed to Cloudflare Pages: https://9286c120.zixo-app-cfy.pages.dev
 
 Stage Summary:
-- Phone Authentication is now ENABLED in Firebase (was the root cause of auth/operation-not-allowed)
-- Login screen now shows only Phone OTP + Google Sign-In (no email/password)
-- New phone users get a "Set Up Profile" step to enter their display name
-- Call screens redesigned with stunning, glowing, unique visual design
-- Live site: https://zixo-app-cfy.pages.dev
+- All UI features implemented: profile editing, voice recording, friend adding methods, responsive call screens
+- Phone Auth is enabled in Firebase but SMS regions need manual enabling in Firebase Console
+- Deployed successfully to Cloudflare Pages

@@ -530,6 +530,102 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ==================== SETUP: ENABLE PHONE AUTH ====================
+      case 'enablePhoneAuth': {
+        const { requesterUid } = body;
+
+        if (!requesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required field: requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const requesterProfile = await adminOperations.getDocument('users', requesterUid);
+          if (!requesterProfile || requesterProfile.role !== 'admin') {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can enable phone auth' },
+              { status: 403 }
+            );
+          }
+
+          // Get OAuth2 access token
+          const token = await adminOperations.getAccessToken();
+          if (!token) {
+            return NextResponse.json(
+              { error: 'No admin access token available. Set FIREBASE_PRIVATE_KEY.' },
+              { status: 500 }
+            );
+          }
+
+          // Enable Phone Auth provider via Identity Toolkit API
+          // First get current config
+          const configUrl = `https://identitytoolkit.googleapis.com/v2/projects/${PROJECT_ID}/config`;
+          const configRes = await fetch(configUrl, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+
+          let currentConfig: any = {};
+          if (configRes.ok) {
+            currentConfig = await configRes.json();
+          }
+
+          // Update config to enable phone provider with all regions
+          const updateBody = {
+            signIn: {
+              allowDuplicateEmails: false,
+              anonymous: { enabled: false },
+              email: { enabled: true, passwordRequired: true },
+              phone: { enabled: true, }
+            },
+          };
+
+          const updateRes = await fetch(
+            `https://identitytoolkit.googleapis.com/v2/projects/${PROJECT_ID}/config?updateMask=signIn`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(updateBody),
+            }
+          );
+
+          if (!updateRes.ok) {
+            const errText = await updateRes.text();
+            return NextResponse.json({
+              success: false,
+              error: `Identity Toolkit update failed: ${updateRes.status}`,
+              details: errText,
+              currentConfig,
+            }, { status: 500 });
+          }
+
+          const updatedConfig = await updateRes.json();
+
+          // Also try to enable SMS regions for all countries
+          // The quota config controls which regions can receive SMS
+          const quotaUrl = `https://identitytoolkit.googleapis.com/v2/projects/${PROJECT_ID}/defaultSupportedIdpConfigs/phone.config?updateMask=smsRegionConfig`;
+          // Actually, the regions are configured via the project config
+
+          return NextResponse.json({
+            success: true,
+            phoneAuthEnabled: updatedConfig?.signIn?.phone?.enabled ?? true,
+            message: 'Phone auth has been enabled. You may also need to enable SMS regions in Firebase Console.',
+            currentConfig: currentConfig?.signIn || 'unknown',
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Enable phone auth error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to enable phone auth', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
       default:
         return NextResponse.json(
           { error: `Unknown action: ${action}` },

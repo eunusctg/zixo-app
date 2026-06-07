@@ -304,9 +304,11 @@ interface ChatInputBarProps {
   onVoiceRecord: () => void;
   onFileUpload: (file: File, type: 'image' | 'file') => void;
   chatId: string;
+  isRecording?: boolean;
+  recordingDuration?: number;
 }
 
-export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload, chatId }: ChatInputBarProps) {
+export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload, chatId, isRecording = false, recordingDuration = 0 }: ChatInputBarProps) {
   const [text, setText] = useState('');
   const [showAttachments, setShowAttachments] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -492,42 +494,68 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload
           />
         </div>
 
-        {/* Voice / Send Button */}
-        <AnimatePresence mode="wait">
-          {text.trim() ? (
+        {/* Voice / Send Button / Recording indicator */}
+        {isRecording ? (
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            exit={{ scale: 0 }}
+            className="flex items-center gap-2"
+          >
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-zixo-error/20 border border-zixo-error/30">
+              <div className="w-2 h-2 rounded-full bg-zixo-error animate-pulse" />
+              <span className="text-xs text-zixo-error font-mono tabular-nums">
+                {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
             <motion.button
-              key="send"
-              initial={{ scale: 0, rotate: -180 }}
-              animate={{ scale: 1, rotate: 0 }}
-              exit={{ scale: 0, rotate: 180 }}
-              whileTap={{ scale: 0.85 }}
-              onClick={handleSend}
-              className="shrink-0 w-10 h-10 rounded-full bg-[#25D366] flex items-center justify-center"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-                <line x1="22" y1="2" x2="11" y2="13" stroke="white" strokeWidth="2" />
-                <polygon points="22 2 15 22 11 13 2 9 22 2" fill="white" />
-              </svg>
-            </motion.button>
-          ) : (
-            <motion.button
-              key="mic"
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
               whileTap={{ scale: 0.85 }}
               onClick={onVoiceRecord}
-              className="shrink-0 w-10 h-10 rounded-full bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+              className="shrink-0 w-10 h-10 rounded-full bg-zixo-error flex items-center justify-center"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
               </svg>
             </motion.button>
-          )}
-        </AnimatePresence>
+          </motion.div>
+        ) : (
+          <AnimatePresence mode="wait">
+            {text.trim() ? (
+              <motion.button
+                key="send"
+                initial={{ scale: 0, rotate: -180 }}
+                animate={{ scale: 1, rotate: 0 }}
+                exit={{ scale: 0, rotate: 180 }}
+                whileTap={{ scale: 0.85 }}
+                onClick={handleSend}
+                className="shrink-0 w-10 h-10 rounded-full bg-[#25D366] flex items-center justify-center"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                  <line x1="22" y1="2" x2="11" y2="13" stroke="white" strokeWidth="2" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" fill="white" />
+                </svg>
+              </motion.button>
+            ) : (
+              <motion.button
+                key="mic"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0 }}
+                whileTap={{ scale: 0.85 }}
+                onClick={onVoiceRecord}
+                className="shrink-0 w-10 h-10 rounded-full bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+              </motion.button>
+            )}
+          </AnimatePresence>
+        )}
       </div>
     </div>
   );
