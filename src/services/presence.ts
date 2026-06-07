@@ -5,7 +5,7 @@
  * ephemeral data like presence.
  */
 
-import { ref, set, onDisconnect, onValue, off, update, remove, serverTimestamp as rtdbServerTimestamp } from 'firebase/database';
+import { ref, set, onDisconnect, onValue, off, update, remove, get, onChildAdded, serverTimestamp as rtdbServerTimestamp } from 'firebase/database';
 import { rtdb } from './firebase';
 
 // ==================== PRESENCE (ONLINE STATUS) ====================
@@ -238,4 +238,169 @@ export function addICECandidate(
   // Use push to add to the array
   const candidateRef = ref(rtdb, `calls/${callId}/${field}/${Date.now()}`);
   set(candidateRef, candidate);
+}
+
+// ==================== GROUP CALL SIGNALING (RTDB) ====================
+
+export interface RTDBGroupCallSignal {
+  callerId: string;
+  callerName: string;
+  type: 'group-audio' | 'group-video';
+  status: 'ringing' | 'active' | 'ended';
+  participants: Record<string, { uid: string; name: string; joinedAt: number }>;
+  createdAt: number;
+}
+
+/**
+ * Create a group call signal in RTDB
+ */
+export function createGroupCallSignal(signal: Omit<RTDBGroupCallSignal, 'createdAt'>): string {
+  const callId = `gcall_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const callRef = ref(rtdb, `groupCalls/${callId}`);
+
+  set(callRef, {
+    ...signal,
+    createdAt: rtdbServerTimestamp(),
+  });
+
+  return callId;
+}
+
+/**
+ * Subscribe to incoming group calls for a user
+ * Listens for group calls where the user's uid is in participants and status is 'ringing'
+ */
+export function subscribeToGroupCalls(
+  uid: string,
+  callback: (calls: Array<{ id: string; data: RTDBGroupCallSignal }>) => void
+): () => void {
+  const callsRef = ref(rtdb, 'groupCalls');
+
+  const unsubscribe = onValue(callsRef, (snap) => {
+    if (snap.exists()) {
+      const data = snap.val();
+      const calls: Array<{ id: string; data: RTDBGroupCallSignal }> = [];
+
+      Object.entries(data).forEach(([id, callData]: [string, any]) => {
+        // Check if uid is in participants and call is ringing
+        if (
+          callData.participants &&
+          callData.participants[uid] &&
+          callData.status === 'ringing' &&
+          callData.callerId !== uid
+        ) {
+          calls.push({ id, data: callData as RTDBGroupCallSignal });
+        }
+      });
+
+      callback(calls);
+    } else {
+      callback([]);
+    }
+  });
+
+  return () => {
+    off(callsRef);
+    unsubscribe();
+  };
+}
+
+/**
+ * Join a group call signal (add participant)
+ */
+export function joinGroupCallSignal(
+  callId: string,
+  uid: string,
+  name: string
+): void {
+  const participantRef = ref(rtdb, `groupCalls/${callId}/participants/${uid}`);
+  set(participantRef, { uid, name, joinedAt: Date.now() });
+
+  // Update status to active
+  const statusRef = ref(rtdb, `groupCalls/${callId}/status`);
+  set(statusRef, 'active');
+}
+
+/**
+ * Leave a group call signal (remove participant)
+ * If no participants remain, ends the call
+ */
+export async function leaveGroupCallSignal(
+  callId: string,
+  uid: string
+): Promise<void> {
+  const participantRef = ref(rtdb, `groupCalls/${callId}/participants/${uid}`);
+  await remove(participantRef);
+
+  // Check remaining participants
+  const participantsSnap = await get(ref(rtdb, `groupCalls/${callId}/participants`));
+  if (!participantsSnap.exists() || Object.keys(participantsSnap.val()).length === 0) {
+    // No one left, end the call
+    await remove(ref(rtdb, `groupCalls/${callId}`));
+  }
+}
+
+/**
+ * End a group call signal
+ */
+export function endGroupCallSignal(callId: string): void {
+  const callRef = ref(rtdb, `groupCalls/${callId}`);
+  update(callRef, { status: 'ended' });
+  // Remove after a short delay to let participants see the 'ended' status
+  setTimeout(() => {
+    remove(callRef);
+  }, 3000);
+}
+
+/**
+ * Subscribe to group call signaling (offers, answers, candidates)
+ * Used internally by ZixoGroupWebRTC
+ */
+export function subscribeToGroupCallSignaling(
+  callId: string,
+  callback: (event: { type: string; fromUid: string; data: any }) => void
+): () => void {
+  const unsubs: Array<() => void> = [];
+
+  // Listen for offers
+  const offersRef = ref(rtdb, `groupCalls/${callId}/offers`);
+  const unsubOffers = onChildAdded(offersRef, (snap) => {
+    if (snap.exists()) {
+      const targetUid = snap.key;
+      const offers = snap.val();
+      Object.entries(offers).forEach(([fromUid, offerData]: [string, any]) => {
+        callback({ type: 'offer', fromUid, data: offerData });
+      });
+    }
+  });
+  unsubs.push(unsubOffers);
+
+  // Listen for answers
+  const answersRef = ref(rtdb, `groupCalls/${callId}/answers`);
+  const unsubAnswers = onChildAdded(answersRef, (snap) => {
+    if (snap.exists()) {
+      const targetUid = snap.key;
+      const answers = snap.val();
+      Object.entries(answers).forEach(([fromUid, answerData]: [string, any]) => {
+        callback({ type: 'answer', fromUid, data: answerData });
+      });
+    }
+  });
+  unsubs.push(unsubAnswers);
+
+  return () => {
+    unsubs.forEach((fn) => fn());
+  };
+}
+
+/**
+ * Get group call data
+ */
+export async function getGroupCallData(callId: string): Promise<RTDBGroupCallSignal | null> {
+  const callRef = ref(rtdb, `groupCalls/${callId}`);
+  const snap = await get(callRef);
+  if (snap.exists()) {
+    return snap.val() as RTDBGroupCallSignal;
+  }
+  return null;
 }

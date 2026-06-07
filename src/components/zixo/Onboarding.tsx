@@ -246,6 +246,8 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
   const [displayName, setDisplayName] = useState('');
   const [showNameInput, setShowNameInput] = useState(false);
   const [pendingPhoneUser, setPendingPhoneUser] = useState<any>(null);
+  const [showZixoNumber, setShowZixoNumber] = useState(false);
+  const [userZixoNumber, setUserZixoNumber] = useState('');
 
   const getFirebaseErrorMessage = (code: string): string => {
     switch (code) {
@@ -278,7 +280,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     try {
       const { loginWithGoogle } = await import('@/services/auth');
       const result = await loginWithGoogle();
-      onAuth({ email: result.profile.email, displayName: result.profile.displayName });
+      // Show Zixo Number if available
+      if (result.profile.zixoNumber) {
+        setUserZixoNumber(result.profile.zixoNumber);
+        setShowZixoNumber(true);
+      } else {
+        onAuth({ email: result.profile.email, displayName: result.profile.displayName });
+      }
     } catch (err: any) {
       const errorCode = err?.code || '';
       if (errorCode !== 'auth/popup-closed-by-user') {
@@ -334,7 +342,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
         setPendingPhoneUser(result);
         setShowNameInput(true);
       } else {
-        onAuth({ email: result.profile.email, displayName: result.profile.displayName });
+        // Existing user - check if they have a zixoNumber to show
+        if (result.profile.zixoNumber) {
+          setUserZixoNumber(result.profile.zixoNumber);
+          setShowZixoNumber(true);
+        } else {
+          onAuth({ email: result.profile.email, displayName: result.profile.displayName });
+        }
       }
     } catch (err: any) {
       console.error('[Zixo Auth] Verify OTP error:', err);
@@ -363,7 +377,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
         // Update the profile locally
         pendingPhoneUser.profile.displayName = displayName.trim();
         pendingPhoneUser.profile.username = username;
-        onAuth({ email: pendingPhoneUser.profile.email, displayName: displayName.trim() });
+        // Show Zixo Number welcome step instead of going straight to onAuth
+        if (pendingPhoneUser.profile.zixoNumber) {
+          setUserZixoNumber(pendingPhoneUser.profile.zixoNumber);
+          setShowZixoNumber(true);
+        } else {
+          onAuth({ email: pendingPhoneUser.profile.email, displayName: displayName.trim() });
+        }
       }
     } catch (err: any) {
       console.error('[Zixo Auth] Profile update error:', err);
@@ -380,6 +400,113 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     const { resetPhoneAuth } = await import('@/services/auth');
     resetPhoneAuth();
   };
+
+  // Format Zixo Number for display
+  const formatZixoNumber = (num: string) => {
+    if (!num || num.length !== 8) return num;
+    return `${num.slice(0, 4)} ${num.slice(4)}`;
+  };
+
+  // Zixo Number Welcome Step
+  if (showZixoNumber && userZixoNumber) {
+    return (
+      <div className="fixed inset-0 z-50 bg-zixo-bg mesh-bg">
+        <div className="h-full flex flex-col max-w-lg mx-auto">
+          <div className="flex-1 flex flex-col items-center justify-center px-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+              className="text-center"
+            >
+              {/* Animated Zixo Logo */}
+              <motion.div
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                className="mb-6"
+              >
+                <div className="w-20 h-20 rounded-3xl gradient-primary flex items-center justify-center mx-auto shadow-2xl glow-primary">
+                  <span className="text-4xl font-extrabold text-white font-heading">Z</span>
+                </div>
+              </motion.div>
+
+              <motion.h2
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="text-2xl font-bold font-heading text-zixo-text mb-2"
+              >
+                Welcome to Zixo!
+              </motion.h2>
+
+              <motion.p
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="text-sm text-zixo-text-secondary mb-6"
+              >
+                Your Zixo Number
+              </motion.p>
+
+              {/* Zixo Number Display */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.4, type: 'spring', stiffness: 200, damping: 15 }}
+                className="bg-zixo-surface rounded-2xl p-6 mb-4 border border-zixo-primary/20 relative"
+              >
+                <span className="text-4xl font-extrabold font-mono tracking-[0.15em] text-zixo-primary">
+                  {formatZixoNumber(userZixoNumber)}
+                </span>
+
+                {/* Copy Button */}
+                <motion.button
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(userZixoNumber).then(() => {
+                      // Brief visual feedback
+                      const btn = document.getElementById('copy-zixo-btn');
+                      if (btn) btn.textContent = 'Copied!';
+                      setTimeout(() => { if (btn) btn.textContent = 'Copy'; }, 1500);
+                    }).catch(() => {});
+                  }}
+                  className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-zixo-surface-light text-xs font-medium text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+                >
+                  <span id="copy-zixo-btn">Copy</span>
+                </motion.button>
+              </motion.div>
+
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 }}
+                className="text-xs text-zixo-text-secondary leading-relaxed max-w-[280px] mx-auto"
+              >
+                Share this number with friends so they can find and call you on Zixo
+              </motion.p>
+            </motion.div>
+          </div>
+
+          {/* Continue Button */}
+          <div className="p-6 pb-10">
+            <motion.button
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => {
+                setShowZixoNumber(false);
+                onAuth({ email: '', displayName: '' });
+              }}
+              className="w-full py-3.5 rounded-xl gradient-primary text-white font-semibold text-sm glow-primary"
+            >
+              Continue
+            </motion.button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-zixo-bg mesh-bg">

@@ -166,15 +166,20 @@ interface ContactsScreenProps {
   onSearchUser?: (username: string) => void;
   allUsers?: ZixoUserProfile[];
   onSearchUsers?: (query: string) => Promise<ZixoUserProfile[]>;
+  onSearchByZixoNumber?: (zixoNumber: string) => Promise<ZixoUserProfile | null>;
 }
 
-export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUser, allUsers = [], onSearchUsers }: ContactsScreenProps) {
+export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUser, allUsers = [], onSearchUsers, onSearchByZixoNumber }: ContactsScreenProps) {
   const [search, setSearch] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<ZixoUserProfile[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [shareLink, setShareLink] = useState('');
+  const [zixoNumberSearch, setZixoNumberSearch] = useState('');
+  const [zixoNumberSearching, setZixoNumberSearching] = useState(false);
+  const [zixoNumberResult, setZixoNumberResult] = useState<ZixoUserProfile | null>(null);
+  const [zixoNumberError, setZixoNumberError] = useState('');
 
   // Use allUsers as the default list, filter locally if search is short
   const displayUsers = searchResults.length > 0
@@ -326,6 +331,24 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
             <span className="text-[11px] text-zixo-text-secondary">By Phone</span>
           </motion.button>
 
+          {/* Search by Zixo Number */}
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => {
+              const input = document.querySelector('input[placeholder*="Zixo Number"]') as HTMLInputElement;
+              if (input) input.focus();
+            }}
+            className="flex-1 flex flex-col items-center gap-2 p-3 rounded-xl bg-zixo-surface border border-white/5 hover:border-zixo-primary/20 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full bg-zixo-primary/10 flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#25D366" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M7 15h0M2 9.5h20" />
+              </svg>
+            </div>
+            <span className="text-[11px] text-zixo-text-secondary">Zixo No.</span>
+          </motion.button>
+
           {/* Nearby */}
           <motion.button
             whileTap={{ scale: 0.95 }}
@@ -404,6 +427,118 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Search by Zixo Number */}
+      {onSearchByZixoNumber && (
+        <div className="px-4 py-3">
+          <h3 className="text-xs font-semibold text-zixo-text-secondary uppercase tracking-wider mb-3">Search by Zixo Number</h3>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-zixo-text-secondary"
+                width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              >
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M7 15h0M2 9.5h20" />
+              </svg>
+              <input
+                type="text"
+                value={zixoNumberSearch}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, '').slice(0, 8);
+                  setZixoNumberSearch(val);
+                  setZixoNumberResult(null);
+                  setZixoNumberError('');
+                }}
+                placeholder="Enter 8-digit Zixo Number"
+                maxLength={8}
+                className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-zixo-surface-light text-zixo-text text-sm placeholder-zixo-text-secondary border border-transparent focus:border-zixo-primary/30 focus:outline-none transition-colors font-mono tracking-wider"
+              />
+            </div>
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={async () => {
+                const num = zixoNumberSearch.replace(/\s/g, '');
+                if (num.length !== 8) {
+                  setZixoNumberError('Please enter an 8-digit number');
+                  return;
+                }
+                setZixoNumberSearching(true);
+                setZixoNumberError('');
+                setZixoNumberResult(null);
+                try {
+                  const result = await onSearchByZixoNumber(num);
+                  if (result) {
+                    setZixoNumberResult(result);
+                  } else {
+                    setZixoNumberError('No user found with this Zixo Number');
+                  }
+                } catch (err) {
+                  setZixoNumberError('Search failed. Please try again.');
+                } finally {
+                  setZixoNumberSearching(false);
+                }
+              }}
+              disabled={zixoNumberSearching || zixoNumberSearch.length !== 8}
+              className={cn(
+                'px-4 py-2.5 rounded-xl font-medium text-sm transition-all min-h-[44px]',
+                zixoNumberSearching || zixoNumberSearch.length !== 8
+                  ? 'bg-zixo-surface-light text-zixo-text-secondary cursor-not-allowed'
+                  : 'gradient-primary text-white glow-primary'
+              )}
+            >
+              {zixoNumberSearching ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                />
+              ) : 'Find'}
+            </motion.button>
+          </div>
+          {zixoNumberError && (
+            <p className="text-xs text-zixo-error mt-2">{zixoNumberError}</p>
+          )}
+          {zixoNumberResult && (
+            <motion.div
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-3"
+            >
+              <div
+                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-zixo-surface border border-zixo-primary/10 cursor-pointer hover:bg-zixo-surface/70 transition-colors"
+                onClick={() => onStartChat(zixoNumberResult.uid)}
+              >
+                <Avatar name={zixoNumberResult.displayName} uid={zixoNumberResult.uid} size="lg" online={zixoNumberResult.online} />
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-medium text-zixo-text truncate">{zixoNumberResult.displayName}</h4>
+                  <p className="text-xs text-zixo-text-secondary truncate">{zixoNumberResult.username}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <motion.button
+                    whileTap={{ scale: 0.85 }}
+                    onClick={() => onStartChat(zixoNumberResult.uid)}
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-primary hover:bg-zixo-surface-light transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                    </svg>
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.85 }}
+                    onClick={() => onStartCall(zixoNumberResult.uid, 'audio')}
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-secondary hover:bg-zixo-surface-light transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+                    </svg>
+                  </motion.button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </div>
+      )}
 
       {/* Search */}
       <div className="px-4 py-3">

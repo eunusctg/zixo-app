@@ -3,7 +3,8 @@ import type { ZixoUserProfile } from '@/services/auth';
 import type { FirestoreChat, FirestoreMessage, FirestoreCall } from '@/services/firestore';
 import type { UploadProgress } from '@/services/storage';
 import { getWebRTC, resetWebRTC } from '@/services/webrtc';
-import { endCallSignal, type RTDBCallSignal } from '@/services/presence';
+import { getGroupWebRTC, resetGroupWebRTC } from '@/services/webrtc-group';
+import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, type RTDBGroupCallSignal } from '@/services/presence';
 
 // Permission types for pre-call permission flow
 export type PermissionStatus = 'granted' | 'denied' | 'prompt' | 'unavailable';
@@ -55,7 +56,7 @@ export interface CallRecord {
   receiverId: string;
   receiverName: string;
   receiverAvatar: string;
-  type: 'audio' | 'video';
+  type: 'audio' | 'video' | 'group-audio' | 'group-video';
   direction: 'incoming' | 'outgoing' | 'missed';
   duration: number;
   timestamp: number;
@@ -70,6 +71,9 @@ export type Screen =
   | 'audio-call'
   | 'video-call'
   | 'incoming-call'
+  | 'group-audio-call'
+  | 'group-video-call'
+  | 'incoming-group-call'
   | 'contacts'
   | 'settings'
   | 'profile-edit'
@@ -133,6 +137,29 @@ interface ZixoState {
     callData: RTDBCallSignal;
   } | null;
 
+  // Group call state
+  groupCall: {
+    callId: string | null;
+    status: 'idle' | 'ringing' | 'connecting' | 'active' | 'ended';
+    type: 'group-audio' | 'group-video';
+    participants: Array<{ uid: string; displayName: string; avatar: string; stream: MediaStream | null; isMuted: boolean; isVideoOn: boolean }>;
+    localStream: MediaStream | null;
+    isMuted: boolean;
+    isSpeakerOn: boolean;
+    isVideoOn: boolean;
+    isIncoming: boolean;
+    startedAt: number | null;
+  } | null;
+
+  incomingGroupCall: {
+    callId: string;
+    callerName: string;
+    callerId: string;
+    callType: 'group-audio' | 'group-video';
+    participantNames: string[];
+    callData: RTDBGroupCallSignal;
+  } | null;
+
   // UI
   searchQuery: string;
   isSearching: boolean;
@@ -185,6 +212,24 @@ interface ZixoState {
   setCallRemoteStream: (stream: MediaStream) => void;
   setCallLocalStream: (stream: MediaStream) => void;
   setIncomingCall: (incoming: { callId: string; callerProfile: ZixoUserProfile; callType: 'audio' | 'video'; callData: RTDBCallSignal } | null) => void;
+  startGroupCall: (type: 'group-audio' | 'group-video', participants: ZixoUserProfile[]) => void;
+  answerGroupCall: (callId: string) => void;
+  rejectGroupCall: () => void;
+  leaveGroupCall: () => void;
+  addGroupCallParticipant: (uid: string, displayName: string, stream: MediaStream) => void;
+  removeGroupCallParticipant: (uid: string) => void;
+  setGroupCallLocalStream: (stream: MediaStream) => void;
+  toggleGroupCallMute: () => void;
+  toggleGroupCallVideo: () => void;
+  toggleGroupCallSpeaker: () => void;
+  setIncomingGroupCall: (incoming: {
+    callId: string;
+    callerName: string;
+    callerId: string;
+    callType: 'group-audio' | 'group-video';
+    participantNames: string[];
+    callData: RTDBGroupCallSignal;
+  } | null) => void;
   setSearchQuery: (query: string) => void;
   toggleSearching: () => void;
   toggleFABMenu: () => void;
@@ -227,6 +272,10 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   callHistory: [],
   activeCall: null,
   incomingCall: null,
+
+  // Group calls
+  groupCall: null,
+  incomingGroupCall: null,
 
   // UI
   searchQuery: '',
@@ -606,6 +655,413 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
   setIncomingCall: (incoming) =>
     set({ incomingCall: incoming }),
+
+  // ==================== GROUP CALL ACTIONS ====================
+
+  startGroupCall: (type, participants) => {
+    const currentUser = get().currentUser;
+    if (!currentUser) return;
+
+    // Build permission requests list
+    const neededPermissions: PermissionRequest[] = [];
+    if (type === 'group-video') {
+      neededPermissions.push({ type: 'camera', status: 'requesting', message: 'Camera access is needed for group video calls' });
+    }
+    neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for group calls' });
+
+    // Show permission modal, then proceed with call on grant
+    set({
+      showPermissionModal: true,
+      permissionRequests: neededPermissions,
+      permissionCallback: (granted: boolean) => {
+        if (!granted) return;
+
+        const state = useZixoStore.getState();
+        const currentUser = state.currentUser;
+        if (!currentUser) return;
+
+        // Reset any previous group WebRTC instance
+        resetGroupWebRTC();
+        const groupWebrtc = getGroupWebRTC();
+
+        // Set up callbacks
+        groupWebrtc.onRemoteStream = (uid, stream) => {
+          const s = useZixoStore.getState();
+          if (s.groupCall) {
+            const existing = s.groupCall.participants.find(p => p.uid === uid);
+            if (existing) {
+              useZixoStore.setState({
+                groupCall: {
+                  ...s.groupCall,
+                  participants: s.groupCall.participants.map(p =>
+                    p.uid === uid ? { ...p, stream } : p
+                  ),
+                },
+              });
+            }
+          }
+        };
+
+        groupWebrtc.onRemoteStreamRemoved = (uid) => {
+          useZixoStore.getState().removeGroupCallParticipant(uid);
+        };
+
+        groupWebrtc.onParticipantJoined = (uid, name) => {
+          const s = useZixoStore.getState();
+          if (s.groupCall) {
+            const existing = s.groupCall.participants.find(p => p.uid === uid);
+            if (!existing) {
+              useZixoStore.setState({
+                groupCall: {
+                  ...s.groupCall,
+                  participants: [...s.groupCall.participants, {
+                    uid,
+                    displayName: name,
+                    avatar: '',
+                    stream: null,
+                    isMuted: false,
+                    isVideoOn: s.groupCall.type === 'group-video',
+                  }],
+                },
+              });
+            }
+          }
+        };
+
+        groupWebrtc.onParticipantLeft = (uid) => {
+          useZixoStore.getState().removeGroupCallParticipant(uid);
+        };
+
+        groupWebrtc.onConnectionStateChange = (uid, connState) => {
+          if (connState === 'connected') {
+            const s = useZixoStore.getState();
+            if (s.groupCall && s.groupCall.status !== 'active') {
+              useZixoStore.setState({
+                groupCall: { ...s.groupCall, status: 'active', startedAt: Date.now() },
+              });
+            }
+          }
+        };
+
+        // Set initial UI state
+        const participantUids = participants.map(p => p.uid);
+        useZixoStore.setState({
+          groupCall: {
+            callId: null,
+            status: 'ringing',
+            type,
+            participants: participants.map(p => ({
+              uid: p.uid,
+              displayName: p.displayName,
+              avatar: p.avatar || '',
+              stream: null,
+              isMuted: false,
+              isVideoOn: type === 'group-video',
+            })),
+            localStream: null,
+            isMuted: false,
+            isSpeakerOn: type === 'group-audio',
+            isVideoOn: type === 'group-video',
+            isIncoming: false,
+            startedAt: null,
+          },
+          currentScreen: type === 'group-audio' ? 'group-audio-call' : 'group-video-call',
+        });
+
+        // Initiate group WebRTC call asynchronously
+        groupWebrtc.startGroupCall(currentUser.uid, currentUser.displayName, participantUids, type)
+          .then((callId) => {
+            const localStream = groupWebrtc.getLocalStream();
+            useZixoStore.setState((s: any) => ({
+              groupCall: s.groupCall
+                ? { ...s.groupCall, callId, localStream, status: 'connecting' }
+                : null,
+            }));
+          })
+          .catch((err: any) => {
+            console.error('[Zixo] Failed to start group call:', err);
+            try { groupWebrtc.leaveGroupCall(); } catch {}
+            useZixoStore.setState({ groupCall: null, currentScreen: 'home' });
+            if (err?.name === 'NotAllowedError') {
+              alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
+            } else {
+              alert('Failed to start group call. Please try again.');
+            }
+          });
+      },
+    });
+  },
+
+  answerGroupCall: (callId) => {
+    const incoming = get().incomingGroupCall;
+    if (!incoming) return;
+
+    const currentUser = get().currentUser;
+    if (!currentUser) return;
+
+    // Build permission requests list
+    const neededPermissions: PermissionRequest[] = [];
+    if (incoming.callType === 'group-video') {
+      neededPermissions.push({ type: 'camera', status: 'requesting', message: 'Camera access is needed for group video calls' });
+    }
+    neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for group calls' });
+
+    set({
+      showPermissionModal: true,
+      permissionRequests: neededPermissions,
+      permissionCallback: (granted: boolean) => {
+        if (!granted) {
+          useZixoStore.setState({ incomingGroupCall: null });
+          return;
+        }
+
+        const currentIncoming = useZixoStore.getState().incomingGroupCall;
+        if (!currentIncoming) return;
+
+        // Reset any previous group WebRTC instance
+        resetGroupWebRTC();
+        const groupWebrtc = getGroupWebRTC();
+
+        // Set up callbacks
+        groupWebrtc.onRemoteStream = (uid, stream) => {
+          const s = useZixoStore.getState();
+          if (s.groupCall) {
+            useZixoStore.setState({
+              groupCall: {
+                ...s.groupCall,
+                participants: s.groupCall.participants.map(p =>
+                  p.uid === uid ? { ...p, stream } : p
+                ),
+              },
+            });
+          }
+        };
+
+        groupWebrtc.onRemoteStreamRemoved = (uid) => {
+          useZixoStore.getState().removeGroupCallParticipant(uid);
+        };
+
+        groupWebrtc.onParticipantJoined = (uid, name) => {
+          const s = useZixoStore.getState();
+          if (s.groupCall) {
+            const existing = s.groupCall.participants.find(p => p.uid === uid);
+            if (!existing) {
+              useZixoStore.setState({
+                groupCall: {
+                  ...s.groupCall,
+                  participants: [...s.groupCall.participants, {
+                    uid,
+                    displayName: name,
+                    avatar: '',
+                    stream: null,
+                    isMuted: false,
+                    isVideoOn: s.groupCall.type === 'group-video',
+                  }],
+                },
+              });
+            }
+          }
+        };
+
+        groupWebrtc.onParticipantLeft = (uid) => {
+          useZixoStore.getState().removeGroupCallParticipant(uid);
+        };
+
+        groupWebrtc.onConnectionStateChange = (uid, connState) => {
+          if (connState === 'connected') {
+            const s = useZixoStore.getState();
+            if (s.groupCall && s.groupCall.status !== 'active') {
+              useZixoStore.setState({
+                groupCall: { ...s.groupCall, status: 'active', startedAt: Date.now() },
+              });
+            }
+          }
+        };
+
+        // Build participant list from callData
+        const callData = currentIncoming.callData;
+        const participantList = Object.values(callData.participants || {})
+          .filter(p => p.joinedAt > 0 && p.uid !== currentUser.uid)
+          .map(p => ({
+            uid: p.uid,
+            displayName: p.name || p.uid,
+            avatar: '',
+            stream: null,
+            isMuted: false,
+            isVideoOn: currentIncoming.callType === 'group-video',
+          }));
+
+        // Set initial UI state
+        useZixoStore.setState({
+          groupCall: {
+            callId: currentIncoming.callId,
+            status: 'connecting',
+            type: currentIncoming.callType,
+            participants: participantList,
+            localStream: null,
+            isMuted: false,
+            isSpeakerOn: currentIncoming.callType === 'group-audio',
+            isVideoOn: currentIncoming.callType === 'group-video',
+            isIncoming: true,
+            startedAt: null,
+          },
+          incomingGroupCall: null,
+          currentScreen: currentIncoming.callType === 'group-audio' ? 'group-audio-call' : 'group-video-call',
+        });
+
+        // Join the group call
+        groupWebrtc.joinGroupCall(currentIncoming.callId, currentUser.uid, currentUser.displayName)
+          .then(() => {
+            const localStream = groupWebrtc.getLocalStream();
+            useZixoStore.setState((s: any) => ({
+              groupCall: s.groupCall
+                ? { ...s.groupCall, localStream, status: 'connecting', startedAt: Date.now() }
+                : null,
+            }));
+          })
+          .catch((err: any) => {
+            console.error('[Zixo] Failed to join group call:', err);
+            try { groupWebrtc.leaveGroupCall(); } catch {}
+            useZixoStore.setState({ groupCall: null, currentScreen: 'home' });
+            if (err?.name === 'NotAllowedError') {
+              alert('Camera/Microphone permission denied.');
+            } else {
+              alert('Failed to join group call. Please try again.');
+            }
+          });
+      },
+    });
+  },
+
+  rejectGroupCall: () => {
+    const incoming = get().incomingGroupCall;
+    if (incoming) {
+      // Signal that we rejected
+      leaveGroupCallSignal(incoming.callId, incoming.callerId).catch(() => {});
+    }
+    set({ incomingGroupCall: null, currentScreen: 'home' });
+  },
+
+  leaveGroupCall: () => {
+    const { groupCall, currentUser } = get();
+
+    // End group WebRTC connection
+    try {
+      getGroupWebRTC().leaveGroupCall();
+    } catch (e) {
+      // WebRTC might not be initialized
+    }
+
+    if (groupCall) {
+      // Save call record
+      const actualDuration = groupCall.startedAt
+        ? Math.floor((Date.now() - groupCall.startedAt) / 1000)
+        : 0;
+
+      // Import and save group call record
+      import('@/services/firestore').then(({ saveGroupCallRecord }) => {
+        saveGroupCallRecord({
+          callerId: groupCall.isIncoming ? (groupCall.participants[0]?.uid || '') : (currentUser?.uid || ''),
+          callerName: groupCall.isIncoming ? (groupCall.participants[0]?.displayName || '') : (currentUser?.displayName || ''),
+          type: groupCall.type,
+          participantUids: groupCall.participants.map(p => p.uid),
+          duration: actualDuration,
+        }).catch(console.error);
+      });
+
+      // Add to local call history
+      const newCall: CallRecord = {
+        id: groupCall.callId || `gcall-${Date.now()}`,
+        callerId: groupCall.isIncoming ? (groupCall.participants[0]?.uid || '') : (currentUser?.uid || ''),
+        callerName: groupCall.isIncoming ? (groupCall.participants[0]?.displayName || '') : (currentUser?.displayName || ''),
+        callerAvatar: '',
+        receiverId: currentUser?.uid || '',
+        receiverName: '',
+        receiverAvatar: '',
+        type: groupCall.type === 'group-audio' ? 'audio' : 'video',
+        direction: groupCall.isIncoming ? 'incoming' : 'outgoing',
+        duration: actualDuration,
+        timestamp: Date.now(),
+      };
+
+      set((state) => ({
+        callHistory: [newCall, ...state.callHistory],
+        groupCall: null,
+        incomingGroupCall: null,
+        currentScreen: 'home',
+      }));
+    } else {
+      set({ groupCall: null, incomingGroupCall: null, currentScreen: 'home' });
+    }
+  },
+
+  addGroupCallParticipant: (uid, displayName, stream) =>
+    set((state) => {
+      if (!state.groupCall) return {};
+      const existing = state.groupCall.participants.find(p => p.uid === uid);
+      if (existing) {
+        return {
+          groupCall: {
+            ...state.groupCall,
+            participants: state.groupCall.participants.map(p =>
+              p.uid === uid ? { ...p, stream } : p
+            ),
+          },
+        };
+      }
+      return {
+        groupCall: {
+          ...state.groupCall,
+          participants: [...state.groupCall.participants, { uid, displayName, avatar: '', stream, isMuted: false, isVideoOn: state.groupCall.type === 'group-video' }],
+        },
+      };
+    }),
+
+  removeGroupCallParticipant: (uid) =>
+    set((state) => {
+      if (!state.groupCall) return {};
+      return {
+        groupCall: {
+          ...state.groupCall,
+          participants: state.groupCall.participants.filter(p => p.uid !== uid),
+        },
+      };
+    }),
+
+  setGroupCallLocalStream: (stream) =>
+    set((state) => ({
+      groupCall: state.groupCall
+        ? { ...state.groupCall, localStream: stream }
+        : null,
+    })),
+
+  toggleGroupCallMute: () => {
+    const { groupCall } = get();
+    if (groupCall) {
+      const newMuted = !groupCall.isMuted;
+      try { getGroupWebRTC().toggleMute(newMuted); } catch {}
+      set({ groupCall: { ...groupCall, isMuted: newMuted } });
+    }
+  },
+
+  toggleGroupCallVideo: () => {
+    const { groupCall } = get();
+    if (groupCall) {
+      const newVideoOn = !groupCall.isVideoOn;
+      try { getGroupWebRTC().toggleVideo(newVideoOn); } catch {}
+      set({ groupCall: { ...groupCall, isVideoOn: newVideoOn } });
+    }
+  },
+
+  toggleGroupCallSpeaker: () =>
+    set((state) => ({
+      groupCall: state.groupCall
+        ? { ...state.groupCall, isSpeakerOn: !state.groupCall.isSpeakerOn }
+        : null,
+    })),
+
+  setIncomingGroupCall: (incoming) =>
+    set({ incomingGroupCall: incoming }),
 
   setSearchQuery: (query) => set({ searchQuery: query }),
   toggleSearching: () => set((state) => ({ isSearching: !state.isSearching, searchQuery: '' })),

@@ -6,13 +6,14 @@ import { useZixoStore } from '@/stores/useZixoStore';
 import { useFirebaseBridge } from '@/hooks/useFirebaseBridge';
 import { logoutUser } from '@/services/auth';
 import { sendMessage as firestoreSendMessage, markChatRead as firestoreMarkChatRead, searchMessages as firestoreSearchMessages, createOrGetChat } from '@/services/firestore';
-import { searchUserByUsername, searchUsers, getAllUsers } from '@/services/auth';
+import { searchUserByUsername, searchUsers, getAllUsers, searchUserByZixoNumber } from '@/services/auth';
 import { cn, formatDateGroup } from '@/lib/zixo-utils';
 import SplashScreen, { OnboardingScreen, AuthScreen } from '@/components/zixo/Onboarding';
 import Avatar from '@/components/zixo/Avatar';
 import { ChatList } from '@/components/zixo/ChatList';
 import { MessageBubble, DateSeparator, ChatInputBar, MessageSearchBar, ScrollToBottomFAB } from '@/components/zixo/ChatScreen';
 import { AudioCallScreen, VideoCallScreen, PermissionModal } from '@/components/zixo/CallScreens';
+import { GroupAudioCallScreen, GroupVideoCallScreen, IncomingGroupCallScreen } from '@/components/zixo/GroupCallScreens';
 import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
 import ProfileEditScreen from '@/components/zixo/ProfileEditScreen';
@@ -57,6 +58,15 @@ export default function ZixoApp() {
     toggleMute,
     toggleSpeaker,
     toggleVideo,
+    groupCall,
+    incomingGroupCall,
+    startGroupCall,
+    answerGroupCall,
+    rejectGroupCall,
+    leaveGroupCall,
+    toggleGroupCallMute,
+    toggleGroupCallVideo,
+    toggleGroupCallSpeaker,
     setSearchQuery,
     toggleSearching,
     toggleFABMenu,
@@ -197,7 +207,7 @@ export default function ZixoApp() {
   }, [setActiveChat, markChatRead, currentUser]);
 
   // Handle sending a message with media support (tries Firestore, falls back to local)
-  const handleSendMessage = useCallback((text: string, type: 'text' | 'image' | 'voice' | 'file' | 'location' = 'text', extras?: { mediaUrl?: string; fileName?: string; fileSize?: number }) => {
+  const handleSendMessage = useCallback((text: string, type: 'text' | 'image' | 'voice' | 'file' | 'location' = 'text', extras?: { mediaUrl?: string; fileName?: string; fileSize?: number; duration?: number }) => {
     if (!activeChatId || !currentUser) return;
 
     // Add optimistic local message
@@ -254,6 +264,7 @@ export default function ZixoApp() {
       lastSeen: Date.now(),
       createdAt: Date.now(),
       role: 'user',
+      zixoNumber: '',
     };
     startCall(call.type, user);
   }, [currentUser, startCall]);
@@ -313,8 +324,8 @@ export default function ZixoApp() {
           try {
             const { uploadChatMedia } = await import('@/services/storage');
             const file = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
-            const mediaUrl = await uploadChatMedia(activeChatId || '', currentUser?.uid || '', file, 'voice');
-            handleSendMessage('🎤 Voice note', 'voice', { mediaUrl, duration });
+            const uploadResult = await uploadChatMedia(activeChatId || '', currentUser?.uid || '', file, 'voice');
+            handleSendMessage('🎤 Voice note', 'voice', { mediaUrl: uploadResult.downloadUrl, duration });
           } catch (err) {
             console.error('[Zixo] Voice upload failed:', err);
             // Fallback: send as text
@@ -406,6 +417,46 @@ export default function ZixoApp() {
     }
   }, [incomingCall, answerCall]);
 
+  // Group call participant picker state
+  const [showGroupCallPicker, setShowGroupCallPicker] = useState(false);
+  const [groupCallType, setGroupCallType] = useState<'group-audio' | 'group-video'>('group-audio');
+  const [selectedParticipants, setSelectedParticipants] = useState<Set<string>>(new Set());
+
+  const handleStartGroupCall = useCallback((type: 'group-audio' | 'group-video') => {
+    setGroupCallType(type);
+    setSelectedParticipants(new Set());
+    setShowGroupCallPicker(true);
+    toggleFABMenu();
+  }, [toggleFABMenu]);
+
+  const handleConfirmGroupCall = useCallback(() => {
+    if (!currentUser || selectedParticipants.size === 0) return;
+
+    const participants = chats
+      .flatMap((c) => c.participantProfiles)
+      .filter((p) => selectedParticipants.has(p.uid) && p.uid !== currentUser.uid);
+
+    // Deduplicate by uid
+    const uniqueParticipants = Array.from(
+      new Map(participants.map((p) => [p.uid, p])).values()
+    );
+
+    if (uniqueParticipants.length > 0) {
+      startGroupCall(groupCallType, uniqueParticipants);
+    }
+    setShowGroupCallPicker(false);
+    setSelectedParticipants(new Set());
+  }, [currentUser, selectedParticipants, chats, groupCallType, startGroupCall]);
+
+  const toggleParticipantSelection = useCallback((uid: string) => {
+    setSelectedParticipants((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else if (next.size < 5) next.add(uid); // Max 5 other participants
+      return next;
+    });
+  }, []);
+
   // Render screens
   const renderScreen = () => {
     switch (currentScreen) {
@@ -479,13 +530,60 @@ export default function ZixoApp() {
             onToggleVideo={toggleVideo}
             onFlipCamera={() => {
               try {
-                const { getWebRTC } = require('@/services/webrtc');
-                getWebRTC().switchCamera();
+                import('@/services/webrtc').then(({ getWebRTC }) => getWebRTC().switchCamera());
               } catch {}
             }}
             onEndCall={endCall}
             localStream={activeCall.localStream}
             remoteStream={activeCall.remoteStream}
+          />
+        );
+
+      case 'incoming-group-call':
+        if (!incomingGroupCall) return null;
+        return (
+          <IncomingGroupCallScreen
+            callerName={incomingGroupCall.callerName}
+            callType={incomingGroupCall.callType}
+            participantNames={incomingGroupCall.participantNames}
+            onAnswer={() => answerGroupCall(incomingGroupCall.callId)}
+            onDecline={rejectGroupCall}
+          />
+        );
+
+      case 'group-audio-call':
+        if (!groupCall) return null;
+        return (
+          <GroupAudioCallScreen
+            participants={groupCall.participants}
+            status={groupCall.status}
+            isMuted={groupCall.isMuted}
+            isSpeakerOn={groupCall.isSpeakerOn}
+            startedAt={groupCall.startedAt}
+            onToggleMute={toggleGroupCallMute}
+            onToggleSpeaker={toggleGroupCallSpeaker}
+            onLeaveCall={leaveGroupCall}
+          />
+        );
+
+      case 'group-video-call':
+        if (!groupCall) return null;
+        return (
+          <GroupVideoCallScreen
+            participants={groupCall.participants}
+            localStream={groupCall.localStream}
+            status={groupCall.status}
+            isMuted={groupCall.isMuted}
+            isVideoOn={groupCall.isVideoOn}
+            startedAt={groupCall.startedAt}
+            onToggleMute={toggleGroupCallMute}
+            onToggleVideo={toggleGroupCallVideo}
+            onFlipCamera={() => {
+              try {
+                import('@/services/webrtc-group').then(({ getGroupWebRTC }) => getGroupWebRTC().switchCamera());
+              } catch {}
+            }}
+            onLeaveCall={leaveGroupCall}
           />
         );
 
@@ -620,7 +718,7 @@ export default function ZixoApp() {
             isOpen={showFABMenu}
             onToggle={toggleFABMenu}
             onNewChat={() => setScreen('contacts')}
-            onNewGroup={() => {}}
+            onNewGroup={() => handleStartGroupCall('group-audio')}
             onQuickCall={() => {
               if (chats.length > 0) {
                 const firstChat = chats[0];
@@ -855,6 +953,14 @@ export default function ZixoApp() {
                 return [];
               }
             }}
+            onSearchByZixoNumber={async (zixoNumber: string) => {
+              try {
+                return await searchUserByZixoNumber(zixoNumber);
+              } catch (err) {
+                console.error('[Zixo] Zixo number search failed:', err);
+                return null;
+              }
+            }}
           />
         </div>
       </div>
@@ -919,6 +1025,130 @@ export default function ZixoApp() {
         onSkip={handlePermissionSkip}
         onCancel={handlePermissionCancel}
       />
+
+      {/* Group Call Participant Picker Modal */}
+      <AnimatePresence>
+        {showGroupCallPicker && currentUser && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-end justify-center"
+            onClick={() => setShowGroupCallPicker(false)}
+          >
+            <div className="absolute inset-0 bg-black/50" />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative w-full max-w-lg bg-[#1F2C34] rounded-t-3xl max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="shrink-0 px-5 pt-5 pb-3 border-b border-white/5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-white">
+                    {groupCallType === 'group-video' ? '📹 Group Video Call' : '📞 Group Audio Call'}
+                  </h3>
+                  <button
+                    onClick={() => setShowGroupCallPicker(false)}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+                <p className="text-xs text-white/40 mt-1">
+                  Select up to 5 participants ({selectedParticipants.size}/5 selected)
+                </p>
+
+                {/* Call type toggle */}
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => setGroupCallType('group-audio')}
+                    className={cn(
+                      'flex-1 py-2 rounded-xl text-sm font-medium transition-all',
+                      groupCallType === 'group-audio'
+                        ? 'bg-zixo-primary text-white'
+                        : 'bg-white/5 text-white/50 hover:bg-white/10'
+                    )}
+                  >
+                    📞 Audio
+                  </button>
+                  <button
+                    onClick={() => setGroupCallType('group-video')}
+                    className={cn(
+                      'flex-1 py-2 rounded-xl text-sm font-medium transition-all',
+                      groupCallType === 'group-video'
+                        ? 'bg-zixo-secondary text-white'
+                        : 'bg-white/5 text-white/50 hover:bg-white/10'
+                    )}
+                  >
+                    📹 Video
+                  </button>
+                </div>
+              </div>
+
+              {/* Participant list */}
+              <div className="flex-1 overflow-y-auto px-3 py-2 max-h-96">
+                {chats
+                  .flatMap((c) => c.participantProfiles)
+                  .filter((p, i, arr) =>
+                    p.uid !== currentUser.uid &&
+                    arr.findIndex((x) => x.uid === p.uid) === i
+                  )
+                  .map((user) => (
+                    <button
+                      key={user.uid}
+                      onClick={() => toggleParticipantSelection(user.uid)}
+                      className={cn(
+                        'w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all',
+                        selectedParticipants.has(user.uid)
+                          ? 'bg-zixo-primary/10 border border-zixo-primary/30'
+                          : 'hover:bg-white/5'
+                      )}
+                    >
+                      <Avatar name={user.displayName} uid={user.uid} size="sm" online={user.online} />
+                      <span className="flex-1 text-left text-sm text-white truncate">{user.displayName}</span>
+                      {selectedParticipants.has(user.uid) && (
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#25D366" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                  ))}
+                {chats.flatMap((c) => c.participantProfiles).filter((p) => p.uid !== currentUser.uid).length === 0 && (
+                  <div className="text-center py-8">
+                    <p className="text-sm text-white/40">No contacts available</p>
+                    <p className="text-xs text-white/25 mt-1">Start a chat first to see contacts</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Start button */}
+              <div className="shrink-0 px-5 py-4 border-t border-white/5">
+                <button
+                  onClick={handleConfirmGroupCall}
+                  disabled={selectedParticipants.size === 0}
+                  className={cn(
+                    'w-full py-3 rounded-xl text-sm font-semibold transition-all',
+                    selectedParticipants.size > 0
+                      ? groupCallType === 'group-video'
+                        ? 'bg-zixo-secondary text-white hover:opacity-90'
+                        : 'bg-zixo-primary text-white hover:opacity-90'
+                      : 'bg-white/5 text-white/30 cursor-not-allowed'
+                  )}
+                >
+                  Start Group Call{selectedParticipants.size > 0 ? ` with ${selectedParticipants.size}` : ''}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

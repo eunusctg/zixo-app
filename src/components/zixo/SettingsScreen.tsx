@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
 import type { ZixoUserProfile } from '@/services/auth';
+import { formatZixoNumber } from '@/services/auth';
 
 // Moved outside of component to avoid "Cannot create components during render" error
 function SettingSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -91,6 +92,12 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
             </div>
             <p className="text-sm text-zixo-text-secondary truncate">{user.username}</p>
             <p className="text-xs text-zixo-text-secondary truncate mt-0.5">{user.bio}</p>
+            {user.zixoNumber && (
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="text-[10px] font-semibold text-zixo-primary/70 uppercase tracking-wider">Zixo</span>
+                <span className="text-xs font-bold font-mono tracking-wider text-zixo-primary">{formatZixoNumber(user.zixoNumber)}</span>
+              </div>
+            )}
           </div>
           <motion.button
             whileTap={{ scale: 0.9 }}

@@ -123,6 +123,7 @@ export interface ZixoUserProfile {
   publicKey?: string;
   role?: 'admin' | 'user';
   phoneNumber?: string;
+  zixoNumber?: string;
 }
 
 /**
@@ -130,6 +131,88 @@ export interface ZixoUserProfile {
  */
 export function isAdmin(user: ZixoUserProfile | null): boolean {
   return user?.role === 'admin';
+}
+
+/**
+ * Generate a unique 8-digit Zixo Number
+ * Checks the zixoNumbers Firestore collection to ensure uniqueness
+ * Retries up to 10 times if collision occurs
+ */
+export async function generateUniqueZixoNumber(): Promise<string> {
+  const { getDoc: getDocFn } = await import('firebase/firestore');
+  const MAX_ATTEMPTS = 10;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    // Generate random 8-digit number (10000000 - 99999999)
+    const num = Math.floor(Math.random() * 90000000) + 10000000;
+    const zixoNumber = String(num);
+
+    // Check if it already exists
+    const docRef = doc(db, 'zixoNumbers', zixoNumber);
+    const docSnap = await getDocFn(docRef);
+
+    if (!docSnap.exists()) {
+      return zixoNumber;
+    }
+  }
+
+  // Extremely unlikely fallback - just return a timestamp-based number
+  const fallback = String(Date.now()).slice(-8);
+  return fallback;
+}
+
+/**
+ * Ensure a user profile has a zixoNumber assigned.
+ * If missing, generates one and saves it to both the user profile and the zixoNumbers mapping.
+ */
+async function ensureZixoNumber(uid: string, existingProfile?: Record<string, any>): Promise<string> {
+  // Check if the profile already has a zixoNumber
+  if (existingProfile?.zixoNumber) {
+    return existingProfile.zixoNumber;
+  }
+
+  // Generate and assign a new zixoNumber
+  const zixoNumber = await generateUniqueZixoNumber();
+
+  // Save to user profile
+  await setDoc(doc(db, 'users', uid), { zixoNumber }, { merge: true });
+
+  // Create mapping in zixoNumbers collection
+  await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid });
+
+  return zixoNumber;
+}
+
+/**
+ * Search for a user by their Zixo Number
+ * Looks up the zixoNumbers collection, then fetches the user profile
+ */
+export async function searchUserByZixoNumber(zixoNumber: string): Promise<ZixoUserProfile | null> {
+  const { getDoc: getDocFn } = await import('firebase/firestore');
+
+  // Look up the mapping
+  const mappingRef = doc(db, 'zixoNumbers', zixoNumber);
+  const mappingSnap = await getDocFn(mappingRef);
+
+  if (!mappingSnap.exists()) {
+    return null;
+  }
+
+  const { uid } = mappingSnap.data();
+  if (!uid) return null;
+
+  // Fetch the user profile
+  return getUserProfile(uid);
+}
+
+/**
+ * Format a Zixo Number for display: "1234 5678"
+ */
+export function formatZixoNumber(zixoNumber?: string): string {
+  if (!zixoNumber) return '';
+  const clean = zixoNumber.replace(/\s/g, '');
+  if (clean.length !== 8) return zixoNumber;
+  return `${clean.slice(0, 4)} ${clean.slice(4)}`;
 }
 
 /**
@@ -151,6 +234,7 @@ export async function registerWithEmail(
 
   // Create Firestore user profile
   const username = `@${displayName.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
+  const zixoNumber = await generateUniqueZixoNumber();
   const profile: ZixoUserProfile = {
     uid: user.uid,
     displayName,
@@ -161,6 +245,7 @@ export async function registerWithEmail(
     online: true,
     lastSeen: Date.now(),
     createdAt: Date.now(),
+    zixoNumber,
   };
 
   await setDoc(doc(db, 'users', user.uid), {
@@ -171,6 +256,9 @@ export async function registerWithEmail(
 
   // Also create username mapping for search
   await setDoc(doc(db, 'usernames', username), { uid: user.uid });
+
+  // Create zixoNumber mapping for fast lookup
+  await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid: user.uid });
 
   return { user, profile };
 }
@@ -183,10 +271,20 @@ export async function loginWithEmail(
   password: string
 ): Promise<{ user: User; profile: ZixoUserProfile }> {
   const credential = await signInWithEmailAndPassword(auth, email, password);
-  const profile = await getUserProfile(credential.user.uid);
+  let profile = await getUserProfile(credential.user.uid);
+
+  if (!profile) {
+    throw new Error('User profile not found. Please contact support.');
+  }
 
   // Update online status
   await updateOnlineStatus(credential.user.uid, true);
+
+  // Lazily assign zixoNumber if missing (for existing users)
+  if (!profile.zixoNumber) {
+    const newZixoNumber = await ensureZixoNumber(credential.user.uid);
+    profile = { ...profile, zixoNumber: newZixoNumber };
+  }
 
   return { user: credential.user, profile };
 }
@@ -204,6 +302,7 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
   if (!profile) {
     // First-time Google sign-in: create profile
     const username = `@${(user.displayName || user.email?.split('@')[0] || 'user').toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
+    const zixoNumber = await generateUniqueZixoNumber();
     profile = {
       uid: user.uid,
       displayName: user.displayName || user.email?.split('@')[0] || 'User',
@@ -214,6 +313,7 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
       online: true,
       lastSeen: Date.now(),
       createdAt: Date.now(),
+      zixoNumber,
     };
 
     await setDoc(doc(db, 'users', user.uid), {
@@ -222,8 +322,15 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
       lastSeen: serverTimestamp(),
     });
     await setDoc(doc(db, 'usernames', username), { uid: user.uid });
+    // Create zixoNumber mapping for fast lookup
+    await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid: user.uid });
   } else {
     await updateOnlineStatus(user.uid, true);
+    // Lazily assign zixoNumber if missing (for existing users)
+    if (!profile.zixoNumber) {
+      const newZixoNumber = await ensureZixoNumber(user.uid);
+      profile = { ...profile, zixoNumber: newZixoNumber };
+    }
   }
 
   return { user, profile };
@@ -255,7 +362,7 @@ export async function getUserProfile(uid: string): Promise<ZixoUserProfile | nul
 
   if (docSnap.exists()) {
     const data = docSnap.data();
-    return {
+    const profile: ZixoUserProfile = {
       uid: data.uid,
       displayName: data.displayName || '',
       email: data.email || '',
@@ -268,7 +375,16 @@ export async function getUserProfile(uid: string): Promise<ZixoUserProfile | nul
       publicKey: data.publicKey,
       role: data.role || 'user',
       phoneNumber: data.phoneNumber || '',
+      zixoNumber: data.zixoNumber || '',
     };
+
+    // Lazily assign zixoNumber if missing (for existing users)
+    if (!profile.zixoNumber) {
+      const newZixoNumber = await ensureZixoNumber(data.uid, data);
+      profile.zixoNumber = newZixoNumber;
+    }
+
+    return profile;
   }
   return null;
 }
@@ -328,6 +444,7 @@ export async function searchUserByUsername(username: string): Promise<ZixoUserPr
       lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
       createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
       role: data.role || 'user',
+      zixoNumber: data.zixoNumber || '',
     };
   }
   return null;
@@ -342,6 +459,19 @@ export async function searchUsers(searchText: string, maxResults: number = 20): 
   const searchLower = searchText.toLowerCase().replace(/^@/, '');
   const searchUpper = searchLower + '\uf8ff';
   const results: Map<string, ZixoUserProfile> = new Map();
+
+  // If the search looks like a Zixo number (8 digits), search by that too
+  const isZixoNumber = /^\d{8}$/.test(searchText.replace(/\s/g, ''));
+  if (isZixoNumber) {
+    try {
+      const zixoResult = await searchUserByZixoNumber(searchText.replace(/\s/g, ''));
+      if (zixoResult && !results.has(zixoResult.uid)) {
+        results.set(zixoResult.uid, zixoResult);
+      }
+    } catch (err) {
+      console.warn('[Zixo] Zixo number search failed:', err);
+    }
+  }
 
   try {
     // Search by username prefix
@@ -366,6 +496,7 @@ export async function searchUsers(searchText: string, maxResults: number = 20): 
           lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
           createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
           role: data.role || 'user',
+          zixoNumber: data.zixoNumber || '',
         });
       }
     });
@@ -396,6 +527,7 @@ export async function searchUsers(searchText: string, maxResults: number = 20): 
           lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
           createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
           role: data.role || 'user',
+          zixoNumber: data.zixoNumber || '',
         });
       }
     });
@@ -424,6 +556,7 @@ export async function searchUsers(searchText: string, maxResults: number = 20): 
             lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
             createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
             role: data.role || 'user',
+            zixoNumber: data.zixoNumber || '',
           });
         }
       });
@@ -460,6 +593,7 @@ export async function getAllUsers(currentUid: string, maxResults: number = 50): 
           lastSeen: data.lastSeen?.toMillis?.() || data.lastSeen || Date.now(),
           createdAt: data.createdAt?.toMillis?.() || data.createdAt || Date.now(),
           role: data.role || 'user',
+          zixoNumber: data.zixoNumber || '',
         });
       }
     });
@@ -564,6 +698,7 @@ export async function verifyOTP(code: string): Promise<{ user: User; profile: Zi
   if (!profile) {
     const phoneNumber = user.phoneNumber || '';
     const phoneUsername = phoneNumber ? `@${phoneNumber.replace(/[^0-9]/g, '').slice(-7)}` : `@user${Math.floor(Math.random() * 10000)}`;
+    const zixoNumber = await generateUniqueZixoNumber();
     profile = {
       uid: user.uid,
       displayName: user.displayName || phoneNumber || 'User',
@@ -576,6 +711,7 @@ export async function verifyOTP(code: string): Promise<{ user: User; profile: Zi
       createdAt: Date.now(),
       role: 'user',
       phoneNumber: phoneNumber,
+      zixoNumber,
     };
     // Create Firestore profile
     await setDoc(doc(db, 'users', user.uid), {
@@ -585,9 +721,16 @@ export async function verifyOTP(code: string): Promise<{ user: User; profile: Zi
     });
     // Create username mapping for search
     await setDoc(doc(db, 'usernames', phoneUsername), { uid: user.uid });
+    // Create zixoNumber mapping for fast lookup
+    await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid: user.uid });
   } else {
     // Update online status for existing user
     await updateOnlineStatus(user.uid, true);
+    // Lazily assign zixoNumber if missing (for existing users)
+    if (!profile.zixoNumber) {
+      const newZixoNumber = await ensureZixoNumber(user.uid);
+      profile = { ...profile, zixoNumber: newZixoNumber };
+    }
   }
   return { user, profile };
 }

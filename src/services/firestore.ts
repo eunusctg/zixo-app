@@ -67,10 +67,11 @@ export interface FirestoreCall {
   receiverId: string;
   receiverName: string;
   receiverAvatar: string;
-  type: 'audio' | 'video';
+  type: 'audio' | 'video' | 'group-audio' | 'group-video';
   direction: 'incoming' | 'outgoing' | 'missed';
   duration: number;
   timestamp: Timestamp;
+  participantUids?: string[];
 }
 
 // ==================== CHAT OPERATIONS ====================
@@ -631,4 +632,79 @@ export async function getCallHistory(uid: string): Promise<FirestoreCall[]> {
  */
 export async function deleteCallRecord(callId: string): Promise<void> {
   await deleteDoc(doc(db, 'calls', callId));
+}
+
+// ==================== GROUP CALL LOGS ====================
+
+/**
+ * Save a group call record
+ */
+export async function saveGroupCallRecord(call: {
+  callerId: string;
+  callerName: string;
+  type: 'group-audio' | 'group-video';
+  participantUids: string[];
+  duration: number;
+}): Promise<string> {
+  const callRef = await addDoc(collection(db, 'calls'), {
+    callerId: call.callerId,
+    callerName: call.callerName,
+    callerAvatar: '',
+    receiverId: 'group',
+    receiverName: 'Group Call',
+    receiverAvatar: '',
+    type: call.type,
+    direction: 'outgoing' as const,
+    duration: call.duration,
+    participantUids: call.participantUids,
+    timestamp: serverTimestamp(),
+  });
+  return callRef.id;
+}
+
+/**
+ * Get group call history for a user
+ */
+export async function getGroupCallHistory(uid: string): Promise<FirestoreCall[]> {
+  const q1 = query(
+    collection(db, 'calls'),
+    where('callerId', '==', uid),
+    where('type', 'in', ['group-audio', 'group-video']),
+    orderBy('timestamp', 'desc'),
+    limit(50)
+  );
+  const q2 = query(
+    collection(db, 'calls'),
+    where('participantUids', 'array-contains', uid),
+    orderBy('timestamp', 'desc'),
+    limit(50)
+  );
+
+  const [snap1, snap2] = await Promise.allSettled([getDocs(q1), getDocs(q2)]);
+
+  const calls: FirestoreCall[] = [];
+
+  if (snap1.status === 'fulfilled') {
+    snap1.value.forEach((docSnap) => {
+      calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
+    });
+  }
+  if (snap2.status === 'fulfilled') {
+    snap2.value.forEach((docSnap) => {
+      const data = docSnap.data();
+      // Avoid duplicates
+      if (!calls.find(c => c.id === docSnap.id)) {
+        calls.push({ id: docSnap.id, ...data } as FirestoreCall);
+      }
+    });
+  }
+
+  // Sort by timestamp descending
+  calls.sort((a, b) => {
+    const ta = a.timestamp?.toMillis?.() || 0;
+    const tb = b.timestamp?.toMillis?.() || 0;
+    return tb - ta;
+  });
+
+  return calls;
 }

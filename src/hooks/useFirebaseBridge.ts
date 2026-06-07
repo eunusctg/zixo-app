@@ -5,7 +5,7 @@ import { useZixoStore } from '@/stores/useZixoStore';
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
 import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory } from '@/services/firestore';
 import { initFCM } from '@/services/messaging';
-import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToMultiplePresence, type RTDBCallSignal } from '@/services/presence';
+import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToMultiplePresence, subscribeToGroupCalls, type RTDBCallSignal } from '@/services/presence';
 
 // ==================== RETRY LOGIC ====================
 
@@ -88,6 +88,7 @@ export function useFirebaseBridge() {
     setUserProfiles,
     setCallHistory,
     setIncomingCall,
+    setIncomingGroupCall,
     addUnsub,
   } = useZixoStore();
 
@@ -126,6 +127,7 @@ export function useFirebaseBridge() {
               lastSeen: Date.now(),
               createdAt: Date.now(),
               role: 'user',
+              // zixoNumber intentionally omitted here - will be assigned properly when Firestore profile is created
             };
             login(tempProfile);
           }
@@ -143,6 +145,7 @@ export function useFirebaseBridge() {
             lastSeen: Date.now(),
             createdAt: Date.now(),
             role: 'user',
+            // zixoNumber intentionally omitted here - will be assigned properly when Firestore profile is created
           };
           console.log('[Zixo Bridge] Using temp profile due to error');
           login(tempProfile);
@@ -216,7 +219,7 @@ export function useFirebaseBridge() {
                 id: fc.id,
                 participants: fc.participants,
                 participantProfiles: fc.participants.map(
-                  (uid) => profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now(), role: 'user' as const }
+                  (uid) => profiles[uid] || { uid, displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: Date.now(), createdAt: Date.now(), role: 'user' as const, zixoNumber: '' }
                 ),
                 lastMessage: fc.lastMessage
                   ? {
@@ -424,7 +427,8 @@ export function useFirebaseBridge() {
 
           if (!callerProfile) {
             try {
-              callerProfile = await getUserProfile(call.data.callerId);
+              const fetched = await getUserProfile(call.data.callerId);
+              if (fetched) callerProfile = fetched;
             } catch (err) {
               console.warn('[Zixo] Failed to fetch caller profile:', err);
               callerProfile = {
@@ -438,6 +442,7 @@ export function useFirebaseBridge() {
                 lastSeen: Date.now(),
                 createdAt: Date.now(),
                 role: 'user',
+                zixoNumber: '',
               };
             }
           }
@@ -463,7 +468,49 @@ export function useFirebaseBridge() {
     };
   }, [isAuthenticated, currentUser, setIncomingCall]);
 
-  // 9. Update online status on visibility change (Firestore)
+  // 9. Listen for incoming group calls (RTDB) - show incoming group call screen
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+
+    let unsub: (() => void) | null = null;
+
+    try {
+      unsub = subscribeToGroupCalls(currentUser.uid, async (calls) => {
+        if (calls.length > 0) {
+          const call = calls[0];
+          console.log('[Zixo] Incoming group call:', call);
+
+          // Only show if not already in a group call or incoming group call
+          const store = useZixoStore.getState();
+          if (store.groupCall || store.incomingGroupCall) return;
+
+          // Build participant names from the call data
+          const participantNames = Object.values(call.data.participants || {})
+            .filter((p: any) => p.uid !== call.data.callerId && p.uid !== currentUser.uid)
+            .map((p: any) => p.name || p.uid)
+            .filter((name: string) => name.length > 0);
+
+          setIncomingGroupCall({
+            callId: call.id,
+            callerName: call.data.callerName || 'Unknown',
+            callerId: call.data.callerId,
+            callType: call.data.type,
+            participantNames,
+            callData: call.data,
+          });
+          useZixoStore.getState().setScreen('incoming-group-call');
+        }
+      });
+    } catch (error) {
+      console.warn('[Zixo] RTDB incoming group call subscription failed:', error);
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [isAuthenticated, currentUser, setIncomingGroupCall]);
+
+  // 10. Update online status on visibility change (Firestore)
   useEffect(() => {
     if (!currentUser) return;
 

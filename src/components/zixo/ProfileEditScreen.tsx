@@ -4,7 +4,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
-import { updateUserProfile } from '@/services/auth';
+import { updateUserProfile, formatZixoNumber } from '@/services/auth';
 import { uploadAvatar } from '@/services/storage';
 import { useZixoStore } from '@/stores/useZixoStore';
 import type { ZixoUserProfile } from '@/services/auth';
@@ -235,6 +235,38 @@ export default function ProfileEditScreen({ user, onBack, onSave }: ProfileEditS
             <p className="text-xs text-zixo-text-secondary mt-3">
               Tap to change profile photo
             </p>
+
+            {/* Zixo Number Display */}
+            {user.zixoNumber && (
+              <motion.div
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="mt-4 w-full max-w-[280px]"
+              >
+                <div className="bg-zixo-surface rounded-xl p-4 border border-zixo-primary/10 relative">
+                  <div className="text-center">
+                    <p className="text-[10px] font-semibold text-zixo-text-secondary uppercase tracking-wider mb-1">Your Zixo Number</p>
+                    <p className="text-2xl font-extrabold font-mono tracking-[0.12em] text-zixo-primary">
+                      {formatZixoNumber(user.zixoNumber)}
+                    </p>
+                  </div>
+                  <motion.button
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(user.zixoNumber!).then(() => {
+                        const btn = document.getElementById('profile-copy-zixo');
+                        if (btn) btn.textContent = 'Copied!';
+                        setTimeout(() => { if (btn) btn.textContent = 'Copy'; }, 1500);
+                      }).catch(() => {});
+                    }}
+                    className="absolute top-2 right-2 px-2.5 py-1 rounded-lg bg-zixo-surface-light text-[11px] font-medium text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+                  >
+                    <span id="profile-copy-zixo">Copy</span>
+                  </motion.button>
+                </div>
+              </motion.div>
+            )}
 
             {/* Hidden file input */}
             <input
