@@ -317,6 +317,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     try {
       const { loginWithGoogle } = await import('@/services/auth');
       const result = await loginWithGoogle();
+      // Immediately update the Zustand store to prevent race conditions
+      // with the Firebase bridge's onAuthStateChanged
+      const { useZixoStore } = await import('@/stores/useZixoStore');
+      const store = useZixoStore.getState();
+      if (!store.isAuthenticated || !store.currentUser) {
+        store.login(result.profile);
+      }
       // Show Zixo Number if available
       if (result.profile.zixoNumber) {
         setUserZixoNumber(result.profile.zixoNumber);
@@ -370,6 +377,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     try {
       const { verifyOTP } = await import('@/services/auth');
       const result = await verifyOTP(otpCode);
+
+      // Immediately update the Zustand store to prevent race conditions
+      const { useZixoStore } = await import('@/stores/useZixoStore');
+      const store = useZixoStore.getState();
+      if (!store.isAuthenticated || !store.currentUser) {
+        store.login(result.profile);
+      }
 
       // Check if this is a new user (no display name set)
       const isNewUser = !result.profile.displayName || result.profile.displayName === result.profile.email || result.profile.displayName.startsWith('@user');
@@ -532,23 +546,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
               transition={{ delay: 0.7 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => {
-                // Don't call onAuth - the Firebase bridge has already logged us in
-                // via onAuthStateChanged. Just navigate directly to home screen.
+                // Navigate directly to home screen.
+                // The store should already be authenticated from handleGoogleSignIn
+                // calling store.login(). If not, the Firebase bridge will catch up.
                 import('@/stores/useZixoStore').then(({ useZixoStore }) => {
                   const store = useZixoStore.getState();
-                  if (store.isAuthenticated && store.currentUser) {
-                    store.setScreen('home');
-                  } else {
-                    // Safety: if bridge hasn't fired yet, check periodically
-                    const checkInterval = setInterval(() => {
-                      const s = useZixoStore.getState();
-                      if (s.isAuthenticated && s.currentUser) {
-                        s.setScreen('home');
-                        clearInterval(checkInterval);
-                      }
-                    }, 100);
-                    setTimeout(() => clearInterval(checkInterval), 5000);
-                  }
+                  // Always navigate to home - the bridge will keep us authenticated
+                  store.setScreen('home');
                 });
               }}
               className="w-full py-3.5 rounded-xl gradient-primary text-white font-semibold text-sm glow-primary"

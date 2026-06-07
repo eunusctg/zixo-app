@@ -89,6 +89,8 @@ export function useFirebaseBridge() {
 
   // Reactive selector for activeCall.callId
   const activeCallId = useZixoStore((s) => s.activeCall?.callId);
+  // Reactive selector for incomingCall.callId — used to detect caller hang-up
+  const incomingCallId = useZixoStore((s) => s.incomingCall?.callId);
 
   const initialized = useRef(false);
   const chatUnsubs = useRef<Record<string, () => void>>({});
@@ -123,7 +125,7 @@ export function useFirebaseBridge() {
 
   // 1. Listen to Firebase auth state changes
   // Use useRef for the callback to avoid stale closures and dependency issues
-  const authCallbackRef = useRef<(firebaseUser: any) => void>();
+  const authCallbackRef = useRef<(firebaseUser: any) => void>(undefined as any);
 
   // Debounce timer for null auth state — prevents false logouts during token refresh
   const nullAuthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -141,7 +143,7 @@ export function useFirebaseBridge() {
         console.log('[Zixo Bridge] Auth state is null, debouncing before potential logout...');
         // Clear any existing timer
         if (nullAuthTimerRef.current) clearTimeout(nullAuthTimerRef.current);
-        // Wait 10 seconds — if Firebase restores auth within this window, no logout
+        // Wait 30 seconds — if Firebase restores auth within this window, no logout
         // We use a generous timeout because token refresh can be slow on mobile
         nullAuthTimerRef.current = setTimeout(async () => {
           const currentStore = useZixoStore.getState();
@@ -156,13 +158,13 @@ export function useFirebaseBridge() {
               try {
                 console.log('[Zixo Bridge] Attempting user reload before logout...');
                 // We can't call reload on null user, so just verify again
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 if (auth.currentUser) {
                   console.log('[Zixo Bridge] User recovered after additional wait, staying logged in');
                   return;
                 }
               } catch {}
-              console.log('[Zixo Bridge] Firebase still null after 10s debounce, logging out');
+              console.log('[Zixo Bridge] Firebase still null after 30s debounce, logging out');
               currentStore.logout();
             } else {
               console.log('[Zixo Bridge] Firebase auth restored during debounce, staying logged in');
@@ -171,7 +173,7 @@ export function useFirebaseBridge() {
             // If we can't check, don't logout — prefer staying in over false logout
             console.log('[Zixo Bridge] Cannot verify auth state, staying logged in (safe default)');
           }
-        }, 10000);
+        }, 30000);
       }
       return;
     }
@@ -218,6 +220,16 @@ export function useFirebaseBridge() {
           login(profile);
           initFCM(firebaseUser.uid).catch(console.error);
 
+          // Sync profile to RTDB for fallback access (ensures RTDB /users/{uid} exists)
+          try {
+            const { rtdb } = await import('@/services/firebase');
+            const { ref, set } = await import('firebase/database');
+            const { publicKey, ...rtdbProfile } = profile;
+            await set(ref(rtdb, `users/${firebaseUser.uid}`), rtdbProfile);
+          } catch (rtdbErr) {
+            console.warn('[Zixo Bridge] Failed to sync profile to RTDB:', rtdbErr);
+          }
+
           // Ensure admin role for specific accounts
           if (firebaseUser.email === 'eunus527@gmail.com' && profile.role !== 'admin') {
             try {
@@ -227,6 +239,12 @@ export function useFirebaseBridge() {
               await setDocFn(docFn(db, 'users', firebaseUser.uid), { role: 'admin' }, { merge: true });
               profile.role = 'admin';
               login({ ...profile, role: 'admin' });
+              // Also sync admin role to RTDB
+              try {
+                const { rtdb } = await import('@/services/firebase');
+                const { ref, update } = await import('firebase/database');
+                await update(ref(rtdb, `users/${firebaseUser.uid}`), { role: 'admin' });
+              } catch {}
               console.log('[Zixo Bridge] Admin role set for', firebaseUser.email);
             } catch (adminErr) {
               console.warn('[Zixo Bridge] Failed to set admin role:', adminErr);
@@ -570,10 +588,11 @@ export function useFirebaseBridge() {
   // 7. Load call history from Firestore on auth
   useEffect(() => {
     if (!isAuthenticated || !currentUser || callHistoryLoaded.current) return;
-    callHistoryLoaded.current = true;
 
     getCallHistory(currentUser.uid)
       .then((calls) => {
+        // Only mark as loaded on success so it can retry on failure
+        callHistoryLoaded.current = true;
         if (calls.length > 0) {
           const uiCalls = calls.map((c) => ({
             id: c.id,
@@ -592,7 +611,8 @@ export function useFirebaseBridge() {
         }
       })
       .catch((error) => {
-        console.warn('[Zixo] Failed to load call history:', error);
+        console.warn('[Zixo] Failed to load call history, will retry:', error);
+        // Don't set callHistoryLoaded so the effect can retry on next render
       });
   }, [isAuthenticated, currentUser, setCallHistory]);
 
@@ -668,6 +688,17 @@ export function useFirebaseBridge() {
               { type: 'incoming-call', callId: call.id, callType: call.data.type }
             ).catch(() => {});
           }
+        } else {
+          // No ringing calls — if we have an incomingCall in state, the caller
+          // must have hung up before we answered. Clear it so the UI goes back.
+          const store = useZixoStore.getState();
+          if (store.incomingCall && !store.activeCall) {
+            console.log('[Zixo] Incoming call was cancelled by caller, clearing incomingCall');
+            setIncomingCall(null);
+            if (store.currentScreen === 'incoming-call') {
+              useZixoStore.getState().setScreen('home');
+            }
+          }
         }
       });
     } catch (error) {
@@ -679,7 +710,36 @@ export function useFirebaseBridge() {
     };
   }, [isAuthenticated, currentUser, setIncomingCall]);
 
-  // 8b. Watch active call status
+  // 8b. Watch incoming call status — detect when caller hangs up before we answer
+  useEffect(() => {
+    if (!incomingCallId || !isAuthenticated) return;
+
+    let unsub: (() => void) | null = null;
+
+    try {
+      unsub = subscribeToCallStatus(incomingCallId, (callData) => {
+        if (!callData) {
+          // Caller ended the call before we answered
+          console.log('[Zixo] Incoming call ended by caller (status subscription)');
+          const store = useZixoStore.getState();
+          if (store.incomingCall && !store.activeCall) {
+            setIncomingCall(null);
+            if (store.currentScreen === 'incoming-call') {
+              useZixoStore.getState().setScreen('home');
+            }
+          }
+        }
+      });
+    } catch (error) {
+      console.warn('[Zixo] RTDB incoming call status subscription failed:', error);
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [incomingCallId, isAuthenticated, setIncomingCall]);
+
+  // 8c. Watch active call status
   useEffect(() => {
     if (!activeCallId || !isAuthenticated) return;
 
@@ -833,6 +893,15 @@ export function useFirebaseBridge() {
           const store = useZixoStore.getState();
           const current = store.currentUser;
           if (current && current.uid === profile.uid) {
+            // Skip Firestore updates if a local profile edit was made recently
+            // (within 5 seconds) to prevent overwriting fresh local changes
+            // with stale Firestore data that hasn't propagated yet.
+            const timeSinceLocalUpdate = Date.now() - store._profileUpdatedAt;
+            if (timeSinceLocalUpdate < 5000) {
+              console.log('[Zixo] Skipping Firestore profile update — local update is too recent');
+              return;
+            }
+
             // Merge strategy: Firestore profile takes priority for most fields
             // (it's the source of truth for displayName, bio, avatar, online, etc.)
             // but preserve local-only fields that Firestore might not have.

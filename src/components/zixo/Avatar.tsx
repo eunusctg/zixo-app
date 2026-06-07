@@ -40,7 +40,11 @@ export default function Avatar({ name, uid, size = 'md', online, avatarUrl, clas
     setImgError(false);
   }
 
-  const showImage = avatarUrl && !imgError;
+  // Treat empty string, whitespace-only, or 'undefined'/'null' strings as no avatar
+  const cleanAvatarUrl = avatarUrl && avatarUrl.trim() && avatarUrl !== 'undefined' && avatarUrl !== 'null'
+    ? avatarUrl.trim()
+    : null;
+  const showImage = cleanAvatarUrl && !imgError;
 
   return (
     <div className={cn('relative inline-flex shrink-0', className)}>
@@ -51,9 +55,9 @@ export default function Avatar({ name, uid, size = 'md', online, avatarUrl, clas
           sizeMap[size]
         )}
       >
-        {showImage ? (
+        {showImage && cleanAvatarUrl ? (
           <img
-            src={avatarUrl}
+            src={cleanAvatarUrl}
             alt={name}
             className="w-full h-full object-cover"
             onError={() => setImgError(true)}

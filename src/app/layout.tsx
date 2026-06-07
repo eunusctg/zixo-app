@@ -74,20 +74,9 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icon-180.png" />
         <link rel="apple-touch-icon" sizes="152x152" href="/icon-152.png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png" />
-        {/* Service Worker Registration */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(err) {
-                    console.warn('SW registration failed:', err);
-                  });
-                });
-              }
-            `,
-          }}
-        />
+        <meta name="theme-color" content="#25D366" />
+        <meta name="format-detection" content="telephone=no" />
+        {/* Service Worker is registered by PWAInstallPrompt component */}
       </head>
       <body className="font-body antialiased bg-zixo-bg text-zixo-text min-h-screen">
         {children}

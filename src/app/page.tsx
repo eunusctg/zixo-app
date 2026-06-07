@@ -286,11 +286,11 @@ export default function ZixoApp() {
   }, [currentUser, startCall]);
 
   // Handle file upload from ChatInputBar
-  const handleFileUpload = useCallback((file: File, type: 'image' | 'file') => {
+  const handleFileUpload = useCallback((file: File, type: 'image' | 'file', downloadUrl?: string) => {
     if (type === 'image') {
-      handleSendMessage('📷 Photo', 'image');
+      handleSendMessage('📷 Photo', 'image', downloadUrl ? { mediaUrl: downloadUrl } : undefined);
     } else {
-      handleSendMessage(`📄 ${file.name}`, 'file', { fileName: file.name, fileSize: file.size });
+      handleSendMessage(`📄 ${file.name}`, 'file', { fileName: file.name, fileSize: file.size, ...(downloadUrl ? { mediaUrl: downloadUrl } : {}) });
     }
   }, [handleSendMessage]);
 
@@ -705,12 +705,11 @@ export default function ZixoApp() {
           <div className="flex items-center justify-between px-4 py-3 safe-area-top">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl gradient-primary flex items-center justify-center">
-                <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M8 6L22 6C23.1046 6 24 6.89543 24 8L24 12L20 12L20 8L12 8L12 12L8 12L8 6Z" fill="white" fillOpacity="0.9"/>
-                  <path d="M8 20L8 26L22 26C23.1046 26 24 25.1046 24 24L24 20L20 20L20 24L12 24L12 20L8 20Z" fill="white" fillOpacity="0.9"/>
-                  <path d="M6 14L14 14L14 18L6 18L6 14Z" fill="white" fillOpacity="0.7"/>
-                  <path d="M18 14L26 14L26 18L18 18L18 14Z" fill="white" fillOpacity="0.7"/>
-                  <circle cx="24" cy="8" r="3" fill="white" fillOpacity="0.5"/>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M5 4H15L7 12H15L5 20H15" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                  <circle cx="18" cy="6" r="2" fill="white" fillOpacity="0.8"/>
+                  <path d="M19 10C20.1 10 21 10.9 21 12" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.5"/>
+                  <path d="M19 14C20.7 14 22 15.3 22 17" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.35"/>
                 </svg>
               </div>
               <h1 className="text-xl font-bold font-heading gradient-primary bg-clip-text text-transparent">Zixo</h1>

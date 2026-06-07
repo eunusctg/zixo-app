@@ -15,7 +15,7 @@ export const runtime = 'edge';
 import { adminOperations } from '@/services/firebase-admin';
 
 const PROJECT_ID = 'zixo-call';
-const RTDB_SECRET = process.env.FIREBASE_DATABASE_SECRET || '';
+const RTDB_SECRET = process.env.FIREBASE_DATABASE_SECRET || process.env.NEXT_PUBLIC_FIREBASE_DATABASE_SECRET || '';
 
 // ==================== HELPERS ====================
 
@@ -1399,6 +1399,86 @@ export async function POST(request: NextRequest) {
           console.error('[Zixo API] Set admin by email error:', err.message);
           return NextResponse.json(
             { error: 'Failed to set admin', details: err.message },
+            { status: 500 }
+          );
+        }
+      }
+
+      // ==================== ADMIN: SYNC USERS TO RTDB ====================
+      case 'syncUsersToRTDB': {
+        const { requesterUid: syncRequesterUid } = body;
+
+        if (!syncRequesterUid) {
+          return NextResponse.json(
+            { error: 'Missing required field: requesterUid' },
+            { status: 400 }
+          );
+        }
+
+        try {
+          // Verify requester is admin
+          const isAdmin = await verifyAdmin(syncRequesterUid);
+          if (!isAdmin) {
+            return NextResponse.json(
+              { error: 'Unauthorized: Only admins can sync users to RTDB' },
+              { status: 403 }
+            );
+          }
+
+          // Get all users from Firestore
+          let users: any[] = [];
+          try {
+            const listResult = await adminOperations.firestoreRequest(
+              'GET',
+              `/documents/users?pageSize=300`
+            );
+            if (listResult?.documents) {
+              users = listResult.documents.map((doc: any) => ({
+                id: doc.name.split('/').pop(),
+                ...adminOperations.firestoreDocumentToJs(doc),
+              }));
+            }
+          } catch (listErr: any) {
+            console.warn('[Zixo API] Firestore list for RTDB sync failed:', listErr.message);
+            return NextResponse.json(
+              { error: 'Failed to list users from Firestore', details: listErr.message },
+              { status: 500 }
+            );
+          }
+
+          // Write each user to RTDB /users/{uid}
+          let syncedCount = 0;
+          for (const user of users) {
+            const uid = user.id || user.uid;
+            if (!uid) continue;
+            const { publicKey, ...rtdbProfile } = user;
+            // Convert Firestore timestamps to numbers for RTDB
+            const cleanProfile: Record<string, any> = {};
+            for (const [key, value] of Object.entries(rtdbProfile)) {
+              if (value && typeof value === 'object' && typeof (value as any).toMillis === 'function') {
+                cleanProfile[key] = (value as any).toMillis();
+              } else {
+                cleanProfile[key] = value;
+              }
+            }
+            try {
+              await rtdbSet(`/users/${uid}`, 'PUT', cleanProfile);
+              syncedCount++;
+            } catch (rtdbErr: any) {
+              console.warn(`[Zixo API] Failed to sync user ${uid} to RTDB:`, rtdbErr.message);
+            }
+          }
+
+          return NextResponse.json({
+            success: true,
+            totalUsers: users.length,
+            syncedCount,
+            message: `Synced ${syncedCount}/${users.length} users to RTDB`,
+          });
+        } catch (err: any) {
+          console.error('[Zixo API] Sync users to RTDB error:', err.message);
+          return NextResponse.json(
+            { error: 'Failed to sync users to RTDB', details: err.message },
             { status: 500 }
           );
         }

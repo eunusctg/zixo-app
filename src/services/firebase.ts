@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getDatabase } from 'firebase/database';
 import { getMessaging, isSupported } from 'firebase/messaging';
@@ -30,6 +30,12 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 
 // Authentication
 export const auth = getAuth(app);
+
+// Set persistence immediately to ensure auth state persists across browser sessions.
+// This must be called before any sign-in operations. Fire-and-forget is fine because
+// Firebase queues the promise internally — the auth state is already restored from
+// indexedDB before onAuthStateChanged fires, regardless of when this promise resolves.
+setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // Cloud Firestore (primary database for chats, messages, users)
 export const db = getFirestore(app);

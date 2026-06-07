@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
 import type { ZixoUserProfile } from '@/services/auth';
@@ -79,9 +79,10 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
   const [onlineStatus, setOnlineStatus] = useState(true);
   const [readReceipts, setReadReceipts] = useState(true);
   const [screenLock, setScreenLock] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
 
   return (
-    <div className="pb-20">
+    <div className="pb-24">
       {/* Profile Card */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
@@ -121,15 +122,80 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
         {/* QR Code */}
         {user.zixoNumber && (
           <div className="mt-3 pt-3 border-t border-white/5">
-            <div className="flex items-center justify-center">
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setShowQRModal(true)}
+              className="flex items-center justify-center w-full"
+            >
               <div className="p-2 bg-white rounded-lg">
                 <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={100} level="M" />
               </div>
-            </div>
-            <p className="text-[10px] text-zixo-text-secondary text-center mt-1.5">Scan to add on Zixo</p>
+            </motion.button>
+            <p className="text-[10px] text-zixo-text-secondary text-center mt-1.5">Tap QR code to share</p>
           </div>
         )}
       </motion.div>
+
+      {/* QR Code Enlarged Modal */}
+      <AnimatePresence>
+        {showQRModal && user.zixoNumber && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            onClick={() => setShowQRModal(false)}
+          >
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+              className="relative bg-zixo-surface rounded-2xl p-6 flex flex-col items-center max-w-xs w-full shadow-2xl border border-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setShowQRModal(false)}
+                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+
+              <Avatar name={user.displayName} uid={user.uid} avatarUrl={user.avatar} size="xl" online={user.online} />
+              <h3 className="text-lg font-semibold text-zixo-text mt-3">{user.displayName}</h3>
+              <p className="text-sm text-zixo-text-secondary">{user.username}</p>
+
+              <div className="p-4 bg-white rounded-xl mt-4">
+                <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={200} level="H" />
+              </div>
+
+              <div className="flex items-center gap-1.5 mt-3">
+                <span className="text-[10px] font-semibold text-zixo-primary/70 uppercase tracking-wider">Zixo</span>
+                <span className="text-sm font-bold font-mono tracking-wider text-zixo-primary">{formatZixoNumber(user.zixoNumber)}</span>
+              </div>
+              <p className="text-[11px] text-zixo-text-secondary mt-1">Scan to add on Zixo</p>
+
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => {
+                  navigator.clipboard.writeText(user.zixoNumber!).then(() => {
+                    const btn = document.getElementById('settings-copy-zixo-modal');
+                    if (btn) btn.textContent = 'Copied!';
+                    setTimeout(() => { if (btn) btn.textContent = 'Copy Number'; }, 1500);
+                  }).catch(() => {});
+                }}
+                className="mt-3 px-5 py-2 rounded-xl bg-zixo-surface-light text-xs font-medium text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+              >
+                <span id="settings-copy-zixo-modal">Copy Number</span>
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Appearance */}
       <SettingSection title="Appearance">

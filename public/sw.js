@@ -225,7 +225,7 @@ messaging.onBackgroundMessage((payload) => {
 
   // Customize notification based on type
   let notificationTitle = title || 'Zixo';
-  let notificationOptions: NotificationOptions = {
+  let notificationOptions = {
     body: body || '',
     icon: '/icon-192.png',
     badge: '/icon-72.png',

@@ -743,7 +743,7 @@ export function VideoCallScreen({
       <motion.div
         drag
         dragConstraints={{ top: 50, left: 10, right: 250, bottom: 400 }}
-        className="absolute top-10 right-3 w-24 h-32 sm:top-12 sm:right-4 sm:w-28 sm:h-40 rounded-2xl overflow-hidden z-10 cursor-grab active:cursor-grabbing"
+        className="absolute top-10 right-3 w-24 h-32 sm:top-12 sm:right-4 sm:w-28 sm:h-40 rounded-2xl overflow-hidden z-10 cursor-grab active:cursor-grabbing max-[400px]:w-20 max-[400px]:h-28"
         style={{
           border: '2px solid rgba(37, 211, 102, 0.4)',
           boxShadow: '0 0 25px rgba(37, 211, 102, 0.2), 0 8px 32px rgba(0,0,0,0.5)',

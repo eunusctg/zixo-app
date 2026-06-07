@@ -596,10 +596,12 @@ export async function saveCallRecord(call: Omit<FirestoreCall, 'id' | 'timestamp
 
 /**
  * Get call history for a user
+ * Uses multiple fallback strategies to handle missing composite indexes
  */
 export async function getCallHistory(uid: string): Promise<FirestoreCall[]> {
   const calls: FirestoreCall[] = [];
 
+  // Method 1: Indexed query with orderBy (requires composite index)
   try {
     const q1 = query(
       collection(db, 'calls'),
@@ -622,24 +624,73 @@ export async function getCallHistory(uid: string): Promise<FirestoreCall[]> {
         calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
       }
     });
+
+    // If we got results from the indexed query, return them
+    if (calls.length > 0) {
+      calls.sort((a, b) => {
+        const ta = a.timestamp?.toMillis?.() || 0;
+        const tb = b.timestamp?.toMillis?.() || 0;
+        return tb - ta;
+      });
+      return calls;
+    }
   } catch (err) {
     console.warn('[Zixo] Call history query with orderBy failed, trying fallback:', err);
-    // Fallback: query without orderBy (no composite index needed)
-    try {
-      const q1 = query(collection(db, 'calls'), where('callerId', '==', uid), limit(50));
-      const q2 = query(collection(db, 'calls'), where('receiverId', '==', uid), limit(50));
-      const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-      snap1.forEach((docSnap) => {
+  }
+
+  // Method 2: Query without orderBy (no composite index needed)
+  try {
+    const q1 = query(collection(db, 'calls'), where('callerId', '==', uid), limit(50));
+    const q2 = query(collection(db, 'calls'), where('receiverId', '==', uid), limit(50));
+    const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+    snap1.forEach((docSnap) => {
+      calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
+    });
+    snap2.forEach((docSnap) => {
+      if (!calls.find(c => c.id === docSnap.id)) {
         calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
+      }
+    });
+
+    if (calls.length > 0) {
+      calls.sort((a, b) => {
+        const ta = a.timestamp?.toMillis?.() || 0;
+        const tb = b.timestamp?.toMillis?.() || 0;
+        return tb - ta;
       });
-      snap2.forEach((docSnap) => {
-        if (!calls.find(c => c.id === docSnap.id)) {
-          calls.push({ id: docSnap.id, ...docSnap.data() } as FirestoreCall);
-        }
-      });
-    } catch (fallbackErr) {
-      console.warn('[Zixo] Call history fallback query also failed:', fallbackErr);
+      return calls;
     }
+  } catch (fallbackErr) {
+    console.warn('[Zixo] Call history fallback query also failed:', fallbackErr);
+  }
+
+  // Method 3: Read from RTDB as last resort (calls may have been synced there)
+  try {
+    const { rtdb } = await import('./firebase');
+    const { ref, get } = await import('firebase/database');
+    const snapshot = await get(ref(rtdb, `calls/${uid}`));
+    if (snapshot.exists()) {
+      const data = snapshot.val();
+      if (typeof data === 'object' && data !== null) {
+        Object.entries(data as Record<string, any>).forEach(([key, val]: [string, any]) => {
+          calls.push({
+            id: key,
+            callerId: val.callerId || '',
+            callerName: val.callerName || '',
+            callerAvatar: val.callerAvatar || '',
+            receiverId: val.receiverId || '',
+            receiverName: val.receiverName || '',
+            receiverAvatar: val.receiverAvatar || '',
+            type: val.type || 'audio',
+            direction: val.direction || 'outgoing',
+            duration: val.duration || 0,
+            timestamp: val.timestamp || { toMillis: () => Date.now() } as any,
+          });
+        });
+      }
+    }
+  } catch (rtdbErr) {
+    console.warn('[Zixo] Call history RTDB fallback also failed:', rtdbErr);
   }
 
   // Sort by timestamp descending

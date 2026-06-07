@@ -232,7 +232,7 @@ async function firestoreRequest(
 
 // ==================== RTDB REST API ====================
 
-const DATABASE_SECRET = process.env.FIREBASE_DATABASE_SECRET || '';
+const DATABASE_SECRET = process.env.FIREBASE_DATABASE_SECRET || process.env.NEXT_PUBLIC_FIREBASE_DATABASE_SECRET || '';
 
 /**
  * Make an authenticated RTDB REST API request using the database secret

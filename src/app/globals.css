@@ -347,6 +347,47 @@ select {
   padding-top: env(safe-area-inset-top, 0px);
 }
 
+/* ==================== MOBILE RESPONSIVENESS ==================== */
+
+/* Prevent bottom nav from overlapping content */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Ensure inputs don't zoom on iOS (font-size >= 16px) */
+@supports (-webkit-touch-callout: none) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="number"],
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* Fix 100vh issue on mobile browsers */
+.h-screen-mobile {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Prevent overscroll bounce on iOS */
+.overscroll-none {
+  overscroll-behavior: none;
+}
+
+/* Touch-friendly minimum target sizes */
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
 /* ==================== 3D CSS EFFECTS ==================== */
 
 /* Page transition container with 3D perspective */

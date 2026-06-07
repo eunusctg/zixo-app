@@ -1389,6 +1389,90 @@ export default function AdminPanel({ currentUser, onBack }: AdminPanelProps) {
         <div className="bg-zixo-surface rounded-xl p-4">
           <h3 className="text-sm font-semibold text-zixo-text mb-3 flex items-center gap-2">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg>
+            Data Management
+          </h3>
+          <div className="space-y-3">
+            {/* Sync Users to RTDB */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-zixo-text">Sync Users to RTDB</p>
+                <p className="text-[10px] text-zixo-text-secondary">Copy all Firestore user profiles to Realtime DB for fallback access</p>
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={async () => {
+                  setSettingsLoading(true);
+                  try {
+                    const data = await apiCall('syncUsersToRTDB');
+                    if (data.success) {
+                      showToast(`Synced ${data.syncedCount}/${data.totalUsers} users to RTDB`);
+                    }
+                  } catch (err: any) {
+                    showToast(err.message, 'error');
+                  } finally {
+                    setSettingsLoading(false);
+                  }
+                }}
+                disabled={settingsLoading}
+                className="px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-400 text-xs font-medium hover:bg-blue-500/30 transition-colors disabled:opacity-50"
+              >
+                {settingsLoading ? 'Syncing...' : 'Sync Now'}
+              </motion.button>
+            </div>
+
+            {/* Assign Zixo Numbers */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-zixo-text">Assign Zixo Numbers</p>
+                <p className="text-[10px] text-zixo-text-secondary">Generate 8-digit numbers for users without one</p>
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={handleAssignZixoNumbers}
+                disabled={settingsLoading}
+                className="px-3 py-1.5 rounded-lg bg-green-500/20 text-green-400 text-xs font-medium hover:bg-green-500/30 transition-colors disabled:opacity-50"
+              >
+                Assign
+              </motion.button>
+            </div>
+
+            {/* Cleanup Stale Calls */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-zixo-text">Cleanup Stale Calls</p>
+                <p className="text-[10px] text-zixo-text-secondary">Remove call signals older than 5 minutes</p>
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={handleCleanupStaleCalls}
+                disabled={settingsLoading}
+                className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+              >
+                Cleanup
+              </motion.button>
+            </div>
+
+            {/* Export CSV */}
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-zixo-text">Export User Data</p>
+                <p className="text-[10px] text-zixo-text-secondary">Download all user data as CSV file</p>
+              </div>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={handleExportCSV}
+                className="px-3 py-1.5 rounded-lg bg-zixo-primary/20 text-zixo-primary text-xs font-medium hover:bg-zixo-primary/30 transition-colors"
+              >
+                Export
+              </motion.button>
+            </div>
+          </div>
+        </div>
+
+        {/* Maintenance Mode Toggle */}
+        <div className="bg-zixo-surface rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-zixo-text mb-3 flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
             Maintenance Mode
           </h3>
           <div className="flex items-center justify-between">

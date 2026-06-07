@@ -18,7 +18,38 @@ import {
   type ConfirmationResult,
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { ref, set as rtdbSet, update as rtdbUpdate } from 'firebase/database';
+import { auth, db, rtdb } from './firebase';
+
+// ==================== RTDB PROFILE SYNC ====================
+
+/**
+ * Sync user profile data to RTDB /users/{uid} for fallback access.
+ * This ensures the RTDB fallback in the API route works even when
+ * FIREBASE_PRIVATE_KEY is not set (Firestore REST API unavailable).
+ * Excludes large fields like publicKey.
+ */
+async function syncUserProfileToRTDB(uid: string, profile: Record<string, any>, merge: boolean = false): Promise<void> {
+  try {
+    const { publicKey, ...rtdbProfile } = profile;
+    // Convert any Firestore timestamps to numbers for RTDB compatibility
+    const cleanProfile: Record<string, any> = {};
+    for (const [key, value] of Object.entries(rtdbProfile)) {
+      if (value && typeof value === 'object' && typeof value.toMillis === 'function') {
+        cleanProfile[key] = value.toMillis();
+      } else {
+        cleanProfile[key] = value;
+      }
+    }
+    if (merge) {
+      await rtdbUpdate(ref(rtdb, `users/${uid}`), cleanProfile);
+    } else {
+      await rtdbSet(ref(rtdb, `users/${uid}`), cleanProfile);
+    }
+  } catch (err) {
+    console.warn('[Zixo Auth] Failed to sync profile to RTDB:', err);
+  }
+}
 
 const googleProvider = new GoogleAuthProvider();
 
@@ -79,6 +110,8 @@ export async function setSessionPersistence(remember: boolean): Promise<void> {
 }
 
 // Initialize with local persistence (remember user across sessions)
+// Note: Also set in firebase.ts to ensure it's called before auth state listener starts.
+// Keeping this here as a safety net in case firebase.ts import is delayed.
 setPersistence(auth, browserLocalPersistence).catch(console.error);
 
 // ==================== EMAIL VERIFICATION ====================
@@ -199,6 +232,9 @@ export async function ensureZixoNumber(uid: string, existingProfile?: Record<str
   // Create mapping in zixoNumbers collection
   await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid });
 
+  // Sync zixoNumber to RTDB
+  await syncUserProfileToRTDB(uid, { zixoNumber }, true);
+
   return zixoNumber;
 }
 
@@ -306,6 +342,9 @@ export async function registerWithEmail(
   // Create zixoNumber mapping for fast lookup
   await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid: user.uid });
 
+  // Sync profile to RTDB for fallback access
+  await syncUserProfileToRTDB(user.uid, profile);
+
   return { user, profile };
 }
 
@@ -370,6 +409,8 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
     await setDoc(doc(db, 'usernames', username), { uid: user.uid });
     // Create zixoNumber mapping for fast lookup
     await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid: user.uid });
+    // Sync profile to RTDB for fallback access
+    await syncUserProfileToRTDB(user.uid, profile);
   } else {
     await updateOnlineStatus(user.uid, true);
     // Lazily assign zixoNumber if missing (for existing users)
@@ -444,6 +485,9 @@ export async function updateOnlineStatus(uid: string, online: boolean): Promise<
     online,
     lastSeen: serverTimestamp(),
   }, { merge: true });
+
+  // Sync online status to RTDB
+  await syncUserProfileToRTDB(uid, { online, lastSeen: Date.now() }, true);
 }
 
 /**
@@ -470,6 +514,9 @@ export async function updateUserProfile(
   if (updates.username) {
     await setDoc(doc(db, 'usernames', updates.username), { uid });
   }
+
+  // Sync profile updates to RTDB
+  await syncUserProfileToRTDB(uid, sanitizedUpdates, true);
 }
 
 /**
@@ -814,6 +861,8 @@ export async function verifyOTP(code: string): Promise<{ user: User; profile: Zi
     await setDoc(doc(db, 'usernames', phoneUsername), { uid: user.uid });
     // Create zixoNumber mapping for fast lookup
     await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid: user.uid });
+    // Sync profile to RTDB for fallback access
+    await syncUserProfileToRTDB(user.uid, profile);
   } else {
     // Update online status for existing user
     await updateOnlineStatus(user.uid, true);

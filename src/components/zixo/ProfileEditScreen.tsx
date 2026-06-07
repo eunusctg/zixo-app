@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
@@ -8,6 +9,12 @@ import { updateUserProfile, formatZixoNumber } from '@/services/auth';
 import { uploadAvatar } from '@/services/storage';
 import { useZixoStore } from '@/stores/useZixoStore';
 import type { ZixoUserProfile } from '@/services/auth';
+
+// Dynamic import to avoid SSR issues
+const QRCodeSVG = dynamic(
+  () => import('qrcode.react').then((mod) => ({ default: mod.QRCodeSVG })),
+  { ssr: false, loading: () => <div className="w-[80px] h-[80px] bg-white/10 rounded-lg" /> }
+);
 
 // ==================== TYPES ====================
 
@@ -78,6 +85,7 @@ export default function ProfileEditScreen({ user, onBack, onSave }: ProfileEditS
   const [showSuccess, setShowSuccess] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showQRModal, setShowQRModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -156,6 +164,7 @@ export default function ProfileEditScreen({ user, onBack, onSave }: ProfileEditS
       if (store.currentUser) {
         useZixoStore.setState({
           currentUser: { ...store.currentUser, ...updates },
+          _profileUpdatedAt: Date.now(),
         });
       }
 
@@ -243,37 +252,108 @@ export default function ProfileEditScreen({ user, onBack, onSave }: ProfileEditS
               Tap to change profile photo
             </p>
 
-            {/* Zixo Number Display */}
+            {/* Zixo Number Display with QR Code */}
             {user.zixoNumber && (
               <motion.div
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="mt-4 w-full max-w-[280px]"
+                className="mt-4 w-full max-w-[320px]"
               >
                 <div className="bg-zixo-surface rounded-xl p-4 border border-zixo-primary/10 relative">
-                  <div className="text-center">
-                    <p className="text-[10px] font-semibold text-zixo-text-secondary uppercase tracking-wider mb-1">Your Zixo Number</p>
-                    <p className="text-2xl font-extrabold font-mono tracking-[0.12em] text-zixo-primary">
-                      {formatZixoNumber(user.zixoNumber)}
-                    </p>
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 text-center">
+                      <p className="text-[10px] font-semibold text-zixo-text-secondary uppercase tracking-wider mb-1">Your Zixo Number</p>
+                      <p className="text-2xl font-extrabold font-mono tracking-[0.12em] text-zixo-primary">
+                        {formatZixoNumber(user.zixoNumber)}
+                      </p>
+                      <motion.button
+                        whileTap={{ scale: 0.9 }}
+                        onClick={() => {
+                          navigator.clipboard.writeText(user.zixoNumber!).then(() => {
+                            const btn = document.getElementById('profile-copy-zixo');
+                            if (btn) btn.textContent = 'Copied!';
+                            setTimeout(() => { if (btn) btn.textContent = 'Copy'; }, 1500);
+                          }).catch(() => {});
+                        }}
+                        className="mt-2 px-2.5 py-1 rounded-lg bg-zixo-surface-light text-[11px] font-medium text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+                      >
+                        <span id="profile-copy-zixo">Copy</span>
+                      </motion.button>
+                    </div>
+                    <motion.button
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setShowQRModal(true)}
+                      className="shrink-0 p-2 bg-white rounded-lg cursor-pointer"
+                      title="Tap to enlarge QR code"
+                    >
+                      <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={72} level="M" />
+                    </motion.button>
                   </div>
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => {
-                      navigator.clipboard.writeText(user.zixoNumber!).then(() => {
-                        const btn = document.getElementById('profile-copy-zixo');
-                        if (btn) btn.textContent = 'Copied!';
-                        setTimeout(() => { if (btn) btn.textContent = 'Copy'; }, 1500);
-                      }).catch(() => {});
-                    }}
-                    className="absolute top-2 right-2 px-2.5 py-1 rounded-lg bg-zixo-surface-light text-[11px] font-medium text-zixo-text-secondary hover:text-zixo-primary transition-colors"
-                  >
-                    <span id="profile-copy-zixo">Copy</span>
-                  </motion.button>
+                  <p className="text-[10px] text-zixo-text-secondary/60 text-center mt-2">Tap QR to share</p>
                 </div>
               </motion.div>
             )}
+
+            {/* QR Code Enlarged Modal */}
+            <AnimatePresence>
+              {showQRModal && user.zixoNumber && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+                  onClick={() => setShowQRModal(false)}
+                >
+                  <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+                  <motion.div
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.8, opacity: 0 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                    className="relative bg-zixo-surface rounded-2xl p-6 flex flex-col items-center max-w-xs w-full shadow-2xl border border-white/10"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => setShowQRModal(false)}
+                      className="absolute top-3 right-3 w-8 h-8 rounded-full bg-zixo-surface-light flex items-center justify-center text-zixo-text-secondary hover:text-zixo-text transition-colors"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+
+                    <h3 className="text-lg font-semibold text-zixo-text">{user.displayName}</h3>
+                    <p className="text-sm text-zixo-text-secondary">{user.username}</p>
+
+                    <div className="p-4 bg-white rounded-xl mt-4">
+                      <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={200} level="H" />
+                    </div>
+
+                    <div className="flex items-center gap-1.5 mt-3">
+                      <span className="text-[10px] font-semibold text-zixo-primary/70 uppercase tracking-wider">Zixo</span>
+                      <span className="text-sm font-bold font-mono tracking-wider text-zixo-primary">{formatZixoNumber(user.zixoNumber)}</span>
+                    </div>
+                    <p className="text-[11px] text-zixo-text-secondary mt-1">Scan to add on Zixo</p>
+
+                    <motion.button
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => {
+                        navigator.clipboard.writeText(user.zixoNumber!).then(() => {
+                          const btn = document.getElementById('profile-copy-zixo-modal');
+                          if (btn) btn.textContent = 'Copied!';
+                          setTimeout(() => { if (btn) btn.textContent = 'Copy Number'; }, 1500);
+                        }).catch(() => {});
+                      }}
+                      className="mt-3 px-5 py-2 rounded-xl bg-zixo-surface-light text-xs font-medium text-zixo-text-secondary hover:text-zixo-primary transition-colors"
+                    >
+                      <span id="profile-copy-zixo-modal">Copy Number</span>
+                    </motion.button>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Hidden file input */}
             <input

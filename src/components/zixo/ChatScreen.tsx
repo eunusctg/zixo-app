@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn, formatMessageTime, formatDateGroup, getInitials, getAvatarColor } from '@/lib/zixo-utils';
 import { useZixoStore, type Message } from '@/stores/useZixoStore';
@@ -26,6 +26,73 @@ export function MessageBubble({
   isConsecutive,
 }: MessageBubbleProps) {
   const [showActions, setShowActions] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [voiceProgress, setVoiceProgress] = useState(0);
+  const [voiceDuration, setVoiceDuration] = useState(message.duration || 0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  const toggleVoicePlay = () => {
+    if (!message.mediaUrl) return;
+
+    if (isPlaying && audioRef.current) {
+      // Pause
+      audioRef.current.pause();
+      setIsPlaying(false);
+      if (playIntervalRef.current) {
+        clearInterval(playIntervalRef.current);
+        playIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // Play
+    if (!audioRef.current) {
+      audioRef.current = new Audio(message.mediaUrl);
+      audioRef.current.onended = () => {
+        setIsPlaying(false);
+        setVoiceProgress(0);
+        if (playIntervalRef.current) {
+          clearInterval(playIntervalRef.current);
+          playIntervalRef.current = null;
+        }
+      };
+      audioRef.current.onerror = () => {
+        setIsPlaying(false);
+        console.warn('[Zixo] Failed to play voice note');
+      };
+      audioRef.current.onloadedmetadata = () => {
+        if (audioRef.current && isFinite(audioRef.current.duration)) {
+          setVoiceDuration(Math.floor(audioRef.current.duration));
+        }
+      };
+    }
+
+    audioRef.current.play().catch(() => {
+      setIsPlaying(false);
+    });
+    setIsPlaying(true);
+
+    // Update progress
+    if (playIntervalRef.current) clearInterval(playIntervalRef.current);
+    playIntervalRef.current = setInterval(() => {
+      if (audioRef.current && isFinite(audioRef.current.duration) && audioRef.current.duration > 0) {
+        const progress = (audioRef.current.currentTime / audioRef.current.duration) * 100;
+        setVoiceProgress(progress);
+      }
+    }, 200);
+  };
 
   const statusIcon = () => {
     if (!isOwn) return null;
@@ -104,22 +171,39 @@ export function MessageBubble({
 
             {message.type === 'voice' && (
               <div className="flex items-center gap-2 min-w-[140px]">
-                <button className="w-7 h-7 rounded-full gradient-primary flex items-center justify-center shrink-0">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleVoicePlay(); }}
+                  className="w-7 h-7 rounded-full gradient-primary flex items-center justify-center shrink-0"
+                >
+                  {isPlaying ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+                      <rect x="6" y="4" width="4" height="16" rx="1" />
+                      <rect x="14" y="4" width="4" height="16" rx="1" />
+                    </svg>
+                  ) : (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="white">
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                  )}
                 </button>
                 <div className="flex items-center gap-[2px] flex-1 h-5">
-                  {[4, 8, 12, 6, 14, 10, 5, 13, 7, 11, 15, 8, 4, 9, 12, 6, 10, 14, 7, 3, 11, 8, 13, 5].map((h, i) => (
-                    <div
-                      key={i}
-                      className="w-[2px] rounded-full bg-current opacity-60"
-                      style={{ height: `${h}px` }}
-                    />
-                  ))}
+                  {[4, 8, 12, 6, 14, 10, 5, 13, 7, 11, 15, 8, 4, 9, 12, 6, 10, 14, 7, 3, 11, 8, 13, 5].map((h, i) => {
+                    const barProgress = (i / 24) * 100;
+                    const isActive = barProgress <= voiceProgress;
+                    return (
+                      <div
+                        key={i}
+                        className={cn(
+                          "w-[2px] rounded-full transition-all duration-150",
+                          isActive ? "bg-white opacity-90" : "bg-current opacity-60"
+                        )}
+                        style={{ height: `${h}px` }}
+                      />
+                    );
+                  })}
                 </div>
                 <span className="text-[10px] opacity-70">
-                  {message.duration ? `${Math.floor(message.duration / 60)}:${(message.duration % 60).toString().padStart(2, '0')}` : '0:03'}
+                  {voiceDuration ? `${Math.floor(voiceDuration / 60)}:${(voiceDuration % 60).toString().padStart(2, '0')}` : '0:00'}
                 </span>
               </div>
             )}
@@ -302,7 +386,7 @@ interface ChatInputBarProps {
   onSend: (text: string) => void;
   onAttachment: (type: string) => void;
   onVoiceRecord: () => void;
-  onFileUpload: (file: File, type: 'image' | 'file') => void;
+  onFileUpload: (file: File, type: 'image' | 'file', downloadUrl?: string) => void;
   chatId: string;
   isRecording?: boolean;
   recordingDuration?: number;
@@ -411,9 +495,11 @@ export function ChatInputBar({ onSend, onAttachment, onVoiceRecord, onFileUpload
         }
       });
 
-      onFileUpload(file, mediaType);
+      onFileUpload(file, mediaType, result.downloadUrl);
     } catch (error) {
       console.error('[Zixo] File upload failed:', error);
+      // Still notify parent so the user sees something happened
+      onFileUpload(file, mediaType);
     }
   };
 

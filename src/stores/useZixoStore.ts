@@ -4,7 +4,7 @@ import type { FirestoreChat, FirestoreMessage, FirestoreCall } from '@/services/
 import type { UploadProgress } from '@/services/storage';
 import { getWebRTC, resetWebRTC } from '@/services/webrtc';
 import { getGroupWebRTC, resetGroupWebRTC } from '@/services/webrtc-group';
-import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, type RTDBGroupCallSignal } from '@/services/presence';
+import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, endGroupCallSignal, type RTDBGroupCallSignal } from '@/services/presence';
 
 // ==================== PERMISSION HELPERS ====================
 
@@ -326,6 +326,7 @@ interface ZixoState {
   isAuthenticated: boolean;
   isFirebaseReady: boolean;
   currentUser: ZixoUserProfile | null;
+  _profileUpdatedAt: number; // timestamp of last local profile edit (used to prevent stale Firestore overwrites)
 
   // Chats
   chats: Chat[];
@@ -480,6 +481,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   isAuthenticated: false,
   isFirebaseReady: false,
   currentUser: null,
+  _profileUpdatedAt: 0,
 
   // Chats
   chats: [],
@@ -827,7 +829,10 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   },
 
   endCall: () => {
-    const { activeCall, currentUser } = get();
+    const { activeCall, currentUser, incomingCall } = get();
+
+    // Guard: if there's no active call and no incoming call, nothing to do
+    if (!activeCall && !incomingCall) return;
 
     // Always send endCallSignal FIRST to ensure RTDB data is cleaned up, even if WebRTC throws
     if (activeCall?.callId) {
@@ -1253,6 +1258,29 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   leaveGroupCall: () => {
     const { groupCall, currentUser } = get();
 
+    // Guard: if there's no group call, nothing to do
+    if (!groupCall) {
+      set({ groupCall: null, incomingGroupCall: null, currentScreen: 'home' });
+      return;
+    }
+
+    // Signal departure to other participants via RTDB
+    if (groupCall.callId && currentUser) {
+      try {
+        if (!groupCall.isIncoming) {
+          // Creator is leaving — end the entire call for everyone
+          console.log('[Zixo] Group call creator leaving, ending call for all');
+          endGroupCallSignal(groupCall.callId);
+        } else {
+          // Participant is leaving — just remove ourselves
+          console.log('[Zixo] Group call participant leaving');
+          leaveGroupCallSignal(groupCall.callId, currentUser.uid).catch(() => {});
+        }
+      } catch (e) {
+        console.warn('[Zixo] Group call leave signal failed:', e);
+      }
+    }
+
     // End group WebRTC connection
     try {
       getGroupWebRTC().leaveGroupCall();
@@ -1425,6 +1453,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         currentUser: updatedUser,
         userProfiles: { ...state.userProfiles, [updatedUser.uid]: updatedUser },
         chats: updatedChats,
+        _profileUpdatedAt: Date.now(),
       };
     }),
 
