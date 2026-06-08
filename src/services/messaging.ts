@@ -427,6 +427,145 @@ export async function initFCM(uid: string): Promise<() => void> {
   return unsubscribe;
 }
 
+// ==================== CALL SOUNDS ====================
+
+let incomingRingAudioContext: AudioContext | null = null;
+let incomingRingOscillators: OscillatorNode[] = [];
+let incomingRingInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Play incoming call ring sound (dual-tone ringing pattern)
+ */
+export function playIncomingRingSound(): void {
+  stopIncomingRingSound();
+
+  try {
+    incomingRingAudioContext = new AudioContext();
+
+    const playRing = () => {
+      if (!incomingRingAudioContext) return;
+
+      const osc1 = incomingRingAudioContext.createOscillator();
+      const osc2 = incomingRingAudioContext.createOscillator();
+      const gain = incomingRingAudioContext.createGain();
+
+      osc1.frequency.value = 440; // A4
+      osc2.frequency.value = 480; // Bb4
+      gain.gain.value = 0.15;
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(incomingRingAudioContext.destination);
+
+      osc1.start();
+      osc2.start();
+
+      // Ring for 1 second, then silence for 2 seconds
+      gain.gain.setValueAtTime(0.15, incomingRingAudioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, incomingRingAudioContext.currentTime + 1.0);
+
+      osc1.stop(incomingRingAudioContext.currentTime + 1.0);
+      osc2.stop(incomingRingAudioContext.currentTime + 1.0);
+
+      incomingRingOscillators.push(osc1, osc2);
+    };
+
+    playRing();
+    incomingRingInterval = setInterval(playRing, 3000); // Ring every 3 seconds
+  } catch (err) {
+    console.warn('[Zixo] Failed to play incoming ring sound:', err);
+  }
+}
+
+/**
+ * Stop incoming call ring sound
+ */
+export function stopIncomingRingSound(): void {
+  if (incomingRingInterval) {
+    clearInterval(incomingRingInterval);
+    incomingRingInterval = null;
+  }
+
+  incomingRingOscillators.forEach((osc) => {
+    try { osc.stop(); } catch {}
+  });
+  incomingRingOscillators = [];
+
+  if (incomingRingAudioContext) {
+    try { incomingRingAudioContext.close(); } catch {}
+    incomingRingAudioContext = null;
+  }
+}
+
+let outgoingRingAudioContext: AudioContext | null = null;
+let outgoingRingOscillators: OscillatorNode[] = [];
+let outgoingRingInterval: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Play outgoing call ringback sound (standard ringback tone)
+ */
+export function playOutgoingRingSound(): void {
+  stopOutgoingRingSound();
+
+  try {
+    outgoingRingAudioContext = new AudioContext();
+
+    const playRing = () => {
+      if (!outgoingRingAudioContext) return;
+
+      const osc1 = outgoingRingAudioContext.createOscillator();
+      const osc2 = outgoingRingAudioContext.createOscillator();
+      const gain = outgoingRingAudioContext.createGain();
+
+      // Standard ringback tone: 440Hz + 480Hz
+      osc1.frequency.value = 440;
+      osc2.frequency.value = 480;
+      gain.gain.value = 0.1;
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(outgoingRingAudioContext.destination);
+
+      osc1.start();
+      osc2.start();
+
+      // Ring for 1 second, silence for 3 seconds
+      gain.gain.setValueAtTime(0.1, outgoingRingAudioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, outgoingRingAudioContext.currentTime + 1.0);
+
+      osc1.stop(outgoingRingAudioContext.currentTime + 1.0);
+      osc2.stop(outgoingRingAudioContext.currentTime + 1.0);
+
+      outgoingRingOscillators.push(osc1, osc2);
+    };
+
+    playRing();
+    outgoingRingInterval = setInterval(playRing, 4000); // Ring every 4 seconds
+  } catch (err) {
+    console.warn('[Zixo] Failed to play outgoing ring sound:', err);
+  }
+}
+
+/**
+ * Stop outgoing call ringback sound
+ */
+export function stopOutgoingRingSound(): void {
+  if (outgoingRingInterval) {
+    clearInterval(outgoingRingInterval);
+    outgoingRingInterval = null;
+  }
+
+  outgoingRingOscillators.forEach((osc) => {
+    try { osc.stop(); } catch {}
+  });
+  outgoingRingOscillators = [];
+
+  if (outgoingRingAudioContext) {
+    try { outgoingRingAudioContext.close(); } catch {}
+    outgoingRingAudioContext = null;
+  }
+}
+
 /**
  * Send a push notification to a specific user via the server API
  * This is "forceful" - it sends even if the user is online

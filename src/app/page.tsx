@@ -470,10 +470,12 @@ export default function ZixoApp() {
 
   // Handle answering incoming call
   const handleAnswerCall = useCallback(() => {
-    if (incomingCall) {
-      answerCall(incomingCall.callId, incomingCall.callerProfile, incomingCall.callType);
+    // Get fresh state from store (not stale closure)
+    const currentIncoming = useZixoStore.getState().incomingCall;
+    if (currentIncoming) {
+      answerCall(currentIncoming.callId, currentIncoming.callerProfile, currentIncoming.callType);
     }
-  }, [incomingCall, answerCall]);
+  }, [answerCall]);
 
   // Group call participant picker state
   const [showGroupCallPicker, setShowGroupCallPicker] = useState(false);
