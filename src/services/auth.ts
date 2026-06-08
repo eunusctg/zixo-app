@@ -417,9 +417,18 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
   const user = credential.user;
 
   // Safely derive display name and username parts with null safety
-  const nameStr = user.displayName || (user.email ? user.email.split('@')[0] : null) || 'user';
+  // IMPORTANT: user.displayName, user.email can be null for some Google accounts
+  const nameStr = (user.displayName && user.displayName.length > 0)
+    ? user.displayName
+    : (user.email && user.email.length > 0)
+      ? user.email.split('@')[0]
+      : 'user';
   const safeUsername = `@${nameStr.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
-  const safeDisplayName = user.displayName || (user.email ? user.email.split('@')[0] : null) || 'User';
+  const safeDisplayName = (user.displayName && user.displayName.length > 0)
+    ? user.displayName
+    : (user.email && user.email.length > 0)
+      ? user.email.split('@')[0]
+      : 'User';
 
   // Check if user profile exists
   let profile = await getUserProfile(user.uid);

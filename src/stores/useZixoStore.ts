@@ -155,8 +155,10 @@ async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
 
   // --- Step 3: Permissions API unsupported (Firefox) — use localStorage cache ---
   // On Firefox, we can't programmatically check mic/camera status.
-  // We rely on the cache, but add a session-level flag so we re-ask
-  // at least once per browser session if the user hasn't explicitly granted.
+  // We rely on the cache + session flag. We do NOT do a getUserMedia probe
+  // here because that can interfere with the actual call's getUserMedia call
+  // (tracks may not be fully released before the call tries to acquire them again,
+  // causing "Requested device not found" or black screen issues).
   try {
     const permCache = localStorage.getItem('zixo_call_permissions');
     if (permCache) {
@@ -176,34 +178,19 @@ async function checkCallPermissions(type: 'audio' | 'video'): Promise<boolean> {
           return true; // Both denied previously, skip modal
         }
       } else {
-        // Haven't verified this session — try a lightweight getUserMedia probe
-        // to confirm the cache is still valid. If it fails, invalidate cache.
-        try {
-          const probeStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-          probeStream.getTracks().forEach(t => t.stop());
-          // Mic is still granted — update cache
-          localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: cached.camGranted || false }));
-          sessionStorage.setItem('zixo_permissions_verified', 'true');
+        // Haven't verified this session — trust the cache but mark as verified.
+        // The actual call will request getUserMedia which will either work or
+        // show the browser's permission prompt. This avoids the probe interfering.
+        sessionStorage.setItem('zixo_permissions_verified', 'true');
+        if (cached.micGranted) {
           if (type === 'audio') return true;
-          // For video, also probe camera if needed
-          if (type === 'video' && !cached.camGranted) {
-            try {
-              const camStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
-              camStream.getTracks().forEach(t => t.stop());
-              localStorage.setItem('zixo_call_permissions', JSON.stringify({ micGranted: true, camGranted: true }));
-              return true;
-            } catch {
-              // Camera not granted, but mic is — skip modal, video call will be audio-only
-              return true;
-            }
-          }
-          return true;
-        } catch {
-          // Mic access failed — cache is stale, clear it and show modal
-          localStorage.removeItem('zixo_call_permissions');
-          sessionStorage.removeItem('zixo_permissions_verified');
-          return false;
+          if (type === 'video') return true;
         }
+        if (cached.micGranted === false && cached.camGranted === false) {
+          return true; // Both denied previously, skip modal
+        }
+        // Cache says not granted — show the permission modal
+        return false;
       }
     }
   } catch {

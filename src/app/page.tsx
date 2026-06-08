@@ -87,14 +87,28 @@ export default function ZixoApp() {
     permissionCallback,
   } = useZixoStore();
 
-  // Fix black screen: navigate away from call screens if data is missing.
-  // This MUST be a useEffect (not setState during render) to avoid infinite re-render loops.
+  // Safety: navigate away from call screens if data is missing for too long.
+  // Call screens are now rendered outside AnimatePresence (no black screen from transforms),
+  // but we still need to clean up orphaned call screen states.
   useEffect(() => {
     if (currentScreen === 'incoming-call' && !incomingCall) {
-      useZixoStore.setState({ currentScreen: 'home' });
+      // Small delay to allow state to settle (avoid race conditions)
+      const timer = setTimeout(() => {
+        const s = useZixoStore.getState();
+        if (s.currentScreen === 'incoming-call' && !s.incomingCall) {
+          useZixoStore.setState({ currentScreen: 'home' });
+        }
+      }, 100);
+      return () => clearTimeout(timer);
     }
     if ((currentScreen === 'audio-call' || currentScreen === 'video-call') && !activeCall?.remoteUser) {
-      useZixoStore.setState({ currentScreen: 'home' });
+      const timer = setTimeout(() => {
+        const s = useZixoStore.getState();
+        if ((s.currentScreen === 'audio-call' || s.currentScreen === 'video-call') && !s.activeCall?.remoteUser) {
+          useZixoStore.setState({ currentScreen: 'home' });
+        }
+      }, 100);
+      return () => clearTimeout(timer);
     }
   }, [currentScreen, incomingCall, activeCall?.remoteUser]);
 
@@ -573,109 +587,16 @@ export default function ZixoApp() {
         );
 
       case 'incoming-call':
-        // If incomingCall is null but screen is still 'incoming-call', just return null.
-        // The useEffect below will navigate home safely (not during render).
-        if (!incomingCall) {
-          return null;
-        }
-        return (
-          <IncomingCallScreen
-            remoteUser={incomingCall.callerProfile}
-            callType={incomingCall.callType}
-            onAnswer={handleAnswerCall}
-            onDecline={rejectCall}
-          />
-        );
-
       case 'audio-call':
       case 'video-call':
-        // If activeCall is null but screen is still on a call screen, just return null.
-        // The useEffect below will navigate home safely (not during render).
-        if (!activeCall?.remoteUser) {
-          return null;
-        }
-        if (currentScreen === 'audio-call') {
-          return (
-            <AudioCallScreen
-              remoteUser={activeCall.remoteUser}
-              callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
-              duration={activeCall.duration}
-              isMuted={activeCall.isMuted}
-              isSpeakerOn={activeCall.isSpeakerOn}
-              onToggleMute={toggleMute}
-              onToggleSpeaker={toggleSpeaker}
-              onEndCall={endCall}
-              remoteStream={activeCall.remoteStream}
-            />
-          );
-        }
-        return (
-          <VideoCallScreen
-            remoteUser={activeCall.remoteUser}
-            callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
-            duration={activeCall.duration}
-            isMuted={activeCall.isMuted}
-            isVideoOn={activeCall.isVideoOn}
-            onToggleMute={toggleMute}
-            onToggleVideo={toggleVideo}
-            onFlipCamera={() => {
-              try {
-                import('@/services/webrtc').then(({ getWebRTC }) => getWebRTC().switchCamera());
-              } catch {}
-            }}
-            onEndCall={endCall}
-            localStream={activeCall.localStream}
-            remoteStream={activeCall.remoteStream}
-          />
-        );
-
       case 'incoming-group-call':
-        if (!incomingGroupCall) return null;
-        return (
-          <IncomingGroupCallScreen
-            callerName={incomingGroupCall.callerName}
-            callType={incomingGroupCall.callType}
-            participantNames={incomingGroupCall.participantNames}
-            onAnswer={() => answerGroupCall(incomingGroupCall.callId)}
-            onDecline={rejectGroupCall}
-          />
-        );
-
       case 'group-audio-call':
-        if (!groupCall) return null;
-        return (
-          <GroupAudioCallScreen
-            participants={groupCall.participants}
-            status={groupCall.status}
-            isMuted={groupCall.isMuted}
-            isSpeakerOn={groupCall.isSpeakerOn}
-            startedAt={groupCall.startedAt}
-            onToggleMute={toggleGroupCallMute}
-            onToggleSpeaker={toggleGroupCallSpeaker}
-            onLeaveCall={leaveGroupCall}
-          />
-        );
-
       case 'group-video-call':
-        if (!groupCall) return null;
-        return (
-          <GroupVideoCallScreen
-            participants={groupCall.participants}
-            localStream={groupCall.localStream}
-            status={groupCall.status}
-            isMuted={groupCall.isMuted}
-            isVideoOn={groupCall.isVideoOn}
-            startedAt={groupCall.startedAt}
-            onToggleMute={toggleGroupCallMute}
-            onToggleVideo={toggleGroupCallVideo}
-            onFlipCamera={() => {
-              try {
-                import('@/services/webrtc-group').then(({ getGroupWebRTC }) => getGroupWebRTC().switchCamera());
-              } catch {}
-            }}
-            onLeaveCall={leaveGroupCall}
-          />
-        );
+        // Call screens are rendered OUTSIDE the AnimatePresence container
+        // (see renderCallScreens() below) because they use position:fixed
+        // and CSS transforms on parent elements break fixed positioning.
+        // Return a placeholder here; the actual call screen is rendered separately.
+        return <div />;
 
       case 'chat':
         return renderChatScreen();
@@ -1335,6 +1256,106 @@ export default function ZixoApp() {
     );
   };
 
+  // ==================== CALL SCREENS ====================
+  // Call screens use position:fixed and MUST be rendered OUTSIDE the AnimatePresence
+  // container because CSS transforms on parent elements (from framer-motion animations)
+  // break fixed positioning — causing the call screen to be confined to the narrow
+  // max-w-lg container instead of covering the full viewport (black screen bug).
+  const renderCallScreens = () => (
+    <>
+      {/* Incoming 1:1 Call */}
+      {currentScreen === 'incoming-call' && incomingCall && (
+        <IncomingCallScreen
+          remoteUser={incomingCall.callerProfile}
+          callType={incomingCall.callType}
+          onAnswer={handleAnswerCall}
+          onDecline={rejectCall}
+        />
+      )}
+
+      {/* Active Audio Call */}
+      {currentScreen === 'audio-call' && activeCall?.remoteUser && (
+        <AudioCallScreen
+          remoteUser={activeCall.remoteUser}
+          callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
+          duration={activeCall.duration}
+          isMuted={activeCall.isMuted}
+          isSpeakerOn={activeCall.isSpeakerOn}
+          onToggleMute={toggleMute}
+          onToggleSpeaker={toggleSpeaker}
+          onEndCall={endCall}
+          remoteStream={activeCall.remoteStream}
+        />
+      )}
+
+      {/* Active Video Call */}
+      {currentScreen === 'video-call' && activeCall?.remoteUser && (
+        <VideoCallScreen
+          remoteUser={activeCall.remoteUser}
+          callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
+          duration={activeCall.duration}
+          isMuted={activeCall.isMuted}
+          isVideoOn={activeCall.isVideoOn}
+          onToggleMute={toggleMute}
+          onToggleVideo={toggleVideo}
+          onFlipCamera={() => {
+            try {
+              import('@/services/webrtc').then(({ getWebRTC }) => getWebRTC().switchCamera());
+            } catch {}
+          }}
+          onEndCall={endCall}
+          localStream={activeCall.localStream}
+          remoteStream={activeCall.remoteStream}
+        />
+      )}
+
+      {/* Incoming Group Call */}
+      {currentScreen === 'incoming-group-call' && incomingGroupCall && (
+        <IncomingGroupCallScreen
+          callerName={incomingGroupCall.callerName}
+          callType={incomingGroupCall.callType}
+          participantNames={incomingGroupCall.participantNames}
+          onAnswer={() => answerGroupCall(incomingGroupCall.callId)}
+          onDecline={rejectGroupCall}
+        />
+      )}
+
+      {/* Active Group Audio Call */}
+      {currentScreen === 'group-audio-call' && groupCall && (
+        <GroupAudioCallScreen
+          participants={groupCall.participants}
+          status={groupCall.status}
+          isMuted={groupCall.isMuted}
+          isSpeakerOn={groupCall.isSpeakerOn}
+          startedAt={groupCall.startedAt}
+          onToggleMute={toggleGroupCallMute}
+          onToggleSpeaker={toggleGroupCallSpeaker}
+          onLeaveCall={leaveGroupCall}
+        />
+      )}
+
+      {/* Active Group Video Call */}
+      {currentScreen === 'group-video-call' && groupCall && (
+        <GroupVideoCallScreen
+          participants={groupCall.participants}
+          localStream={groupCall.localStream}
+          status={groupCall.status}
+          isMuted={groupCall.isMuted}
+          isVideoOn={groupCall.isVideoOn}
+          startedAt={groupCall.startedAt}
+          onToggleMute={toggleGroupCallMute}
+          onToggleVideo={toggleGroupCallVideo}
+          onFlipCamera={() => {
+            try {
+              import('@/services/webrtc-group').then(({ getGroupWebRTC }) => getGroupWebRTC().switchCamera());
+            } catch {}
+          }}
+          onLeaveCall={leaveGroupCall}
+        />
+      )}
+    </>
+  );
+
   return (
     <ErrorBoundary>
     <div className="min-h-[100dvh] bg-zixo-bg text-zixo-text flex justify-center">
@@ -1347,6 +1368,11 @@ export default function ZixoApp() {
 
       {/* PWA Install Prompt & Offline Banner */}
       <PWAInstallPrompt />
+
+      {/* Call screens rendered OUTSIDE the AnimatePresence container.
+          They use position:fixed and cover the full viewport.
+          MUST be a direct child of the root div (no CSS transforms in ancestry). */}
+      {renderCallScreens()}
 
       <div className="w-full max-w-lg relative page-transition-container">
         <AnimatePresence mode="wait">
