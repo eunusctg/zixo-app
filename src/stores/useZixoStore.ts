@@ -751,6 +751,11 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     const incoming = get().incomingCall;
     if (!incoming) return;
 
+    // Save callData in the closure so it's always available even if
+    // incomingCall is cleared during the permission dialog
+    const savedCallData = incoming.callData;
+    const savedCallId = incoming.callId;
+
     // Build permission requests list (no 'location' - not needed for calls)
     const neededPermissions: PermissionRequest[] = [];
     if (callType === 'video') {
@@ -762,16 +767,19 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     const proceedWithAnswer = (granted: boolean) => {
       if (!granted) {
         // Reject the incoming call if permissions denied
-        const s = useZixoStore.getState();
-        if (s.incomingCall) {
-          endCallSignal(s.incomingCall.callId);
-        }
+        try { endCallSignal(savedCallId); } catch {}
         useZixoStore.setState({ incomingCall: null, activeCall: null });
         return;
       }
 
+      // Use saved callData if incomingCall was cleared during permission dialog
       const currentIncoming = useZixoStore.getState().incomingCall;
-      if (!currentIncoming) return;
+      const callData = currentIncoming?.callData || savedCallData;
+
+      if (!currentIncoming && !savedCallData) {
+        console.warn('[Zixo] Cannot answer call — no call data available');
+        return;
+      }
 
       // Reset any previous WebRTC instance
       resetWebRTC();
@@ -815,33 +823,39 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
         currentScreen: callType === 'audio' ? 'audio-call' : 'video-call',
       });
 
-      // Answer the call via WebRTC
-      webrtc.answerCall(callId, currentIncoming.callData)
-        .then(() => {
-          const localStream = webrtc.getLocalStream();
-          useZixoStore.setState((s: any) => ({
-            activeCall: s.activeCall
-              ? { ...s.activeCall, localStream, status: 'connecting', startedAt: Date.now() }
-              : null,
-          }));
-        })
-        .catch((err: any) => {
-          console.error('[Zixo] Failed to answer call:', err);
-          try { webrtc.endCall(); } catch {}
-          // If we had an incoming call, signal rejection to the caller
-          const currentIncoming = useZixoStore.getState().incomingCall;
-          if (currentIncoming) {
-            try { endCallSignal(currentIncoming.callId); } catch {}
-          }
-          useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
-          if (err?.name === 'NotAllowedError') {
-            try { localStorage.removeItem('zixo_call_permissions'); } catch {}
-            try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
-            alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
-          } else {
-            alert('Failed to answer call. Please try again.');
-          }
-        });
+      // Answer the call via WebRTC using saved callData as fallback
+      try {
+        webrtc.answerCall(callId, callData)
+          .then(() => {
+            const localStream = webrtc.getLocalStream();
+            useZixoStore.setState((s: any) => ({
+              activeCall: s.activeCall
+                ? { ...s.activeCall, localStream, status: 'connecting', startedAt: Date.now() }
+                : null,
+            }));
+          })
+          .catch((err: any) => {
+            console.error('[Zixo] Failed to answer call:', err);
+            try { webrtc.endCall(); } catch {}
+            // Signal rejection to the caller using saved callId
+            try { endCallSignal(savedCallId); } catch {}
+            useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
+            if (err?.name === 'NotAllowedError') {
+              try { localStorage.removeItem('zixo_call_permissions'); } catch {}
+              try { sessionStorage.removeItem('zixo_permissions_verified'); } catch {}
+              alert('Camera/Microphone permission denied. Please allow access in your browser settings.');
+            } else {
+              const errorMsg = err?.message || 'Unknown error';
+              alert(`Failed to answer call: ${errorMsg}. Please try again.`);
+            }
+          });
+      } catch (err: any) {
+        console.error('[Zixo] Exception while answering call:', err);
+        try { webrtc.endCall(); } catch {}
+        try { endCallSignal(savedCallId); } catch {}
+        useZixoStore.setState({ activeCall: null, incomingCall: null, currentScreen: 'home' });
+        alert('Failed to answer call. Please try again.');
+      }
     };
 
     // Check if permissions have already been decided - skip modal if so

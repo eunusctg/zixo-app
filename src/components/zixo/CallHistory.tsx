@@ -741,9 +741,21 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
               </button>
             </div>
 
-            {/* My QR Code */}
+            {/* My QR Code with swipe-to-scan gesture */}
             {currentUser?.zixoNumber && (
-              <div className="flex flex-col items-center mb-4">
+              <motion.div
+                drag="x"
+                dragConstraints={{ left: 0, right: 200 }}
+                dragElastic={0.2}
+                onDragEnd={(_e, info) => {
+                  if (info.offset.x > 100) {
+                    setShowQRScanner(true);
+                    setQrScanResult(null);
+                    setQrScanError('');
+                  }
+                }}
+                className="flex flex-col items-center mb-4 cursor-grab active:cursor-grabbing select-none"
+              >
                 <div className="p-4 bg-white rounded-xl mb-2">
                   <QRCodeSVG
                     value={`ZIXO:${currentUser.zixoNumber}`}
@@ -758,7 +770,18 @@ export function ContactsScreen({ contacts, onStartChat, onStartCall, onSearchUse
                 <p className="text-[10px] text-zixo-text-secondary/60 text-center mt-0.5">
                   Let others scan this QR code to find you
                 </p>
-              </div>
+                {/* Swipe hint */}
+                <motion.div
+                  animate={{ x: [0, 8, 0] }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                  className="flex items-center gap-1.5 mt-2 text-amber-400/70"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 18 9 12 15 6" />
+                  </svg>
+                  <span className="text-[10px] font-medium">Swipe right to scan →</span>
+                </motion.div>
+              </motion.div>
             )}
 
             {/* Scan QR Code Button */}

@@ -129,8 +129,8 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
               className="flex items-center justify-between w-full px-1 py-1 rounded-lg hover:bg-white/5 transition-colors"
             >
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-white p-1 flex items-center justify-center">
-                  <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={24} level="L" />
+                <div className="w-7 h-7 rounded-lg bg-white p-0.5 flex items-center justify-center">
+                  <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={20} level="L" />
                 </div>
                 <div>
                   <p className="text-xs font-medium text-zixo-text">My QR Code</p>

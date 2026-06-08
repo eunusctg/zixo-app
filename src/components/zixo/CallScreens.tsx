@@ -528,31 +528,43 @@ export function AudioCallScreen({
                       boxShadow: '0 0 20px rgba(234, 67, 53, 0.25)',
                     } : {}}
                   >
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isMuted ? '#EA4335' : '#E9EDEF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      {isMuted ? (
-                        <>
-                          <line x1="1" y1="1" x2="23" y2="23" />
-                          <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-                          <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .97-.2 1.9-.56 2.74" />
-                          <line x1="12" y1="19" x2="12" y2="23" />
-                          <line x1="8" y1="23" x2="16" y2="23" />
-                        </>
-                      ) : (
-                        <>
-                          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                          <line x1="12" y1="19" x2="12" y2="23" />
-                          <line x1="8" y1="23" x2="16" y2="23" />
-                        </>
-                      )}
-                    </svg>
+                    <motion.div
+                      key={isMuted ? 'muted' : 'unmuted'}
+                      initial={{ scale: 0.6, rotate: -15 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                    >
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isMuted ? '#EA4335' : '#E9EDEF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        {isMuted ? (
+                          <>
+                            <line x1="1" y1="1" x2="23" y2="23" />
+                            <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                            <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .97-.2 1.9-.56 2.74" />
+                            <line x1="12" y1="19" x2="12" y2="23" />
+                            <line x1="8" y1="23" x2="16" y2="23" />
+                          </>
+                        ) : (
+                          <>
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="23" />
+                            <line x1="8" y1="23" x2="16" y2="23" />
+                          </>
+                        )}
+                      </svg>
+                    </motion.div>
                   </motion.button>
-                  <span className={cn(
-                    'text-[9px] tracking-wider uppercase',
-                    isMuted ? 'text-zixo-error' : 'text-zixo-text-secondary'
-                  )}>
+                  <motion.span
+                    key={isMuted ? 'label-muted' : 'label-unmuted'}
+                    initial={{ y: -5, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    className={cn(
+                      'text-[9px] tracking-wider uppercase',
+                      isMuted ? 'text-zixo-error' : 'text-zixo-text-secondary'
+                    )}
+                  >
                     {isMuted ? 'Muted' : 'Mute'}
-                  </span>
+                  </motion.span>
                 </div>
 
                 {/* Speaker */}
@@ -572,24 +584,36 @@ export function AudioCallScreen({
                       boxShadow: '0 0 20px rgba(18, 140, 126, 0.25)',
                     } : {}}
                   >
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isSpeakerOn ? '#128C7E' : '#E9EDEF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                      {isSpeakerOn ? (
-                        <>
+                    <motion.div
+                      key={isSpeakerOn ? 'speaker-on' : 'speaker-off'}
+                      initial={{ scale: 0.6, rotate: 15 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                    >
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isSpeakerOn ? '#128C7E' : '#E9EDEF'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        {isSpeakerOn ? (
+                          <>
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                          </>
+                        ) : (
                           <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                          <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                        </>
-                      ) : (
-                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                      )}
-                    </svg>
+                        )}
+                      </svg>
+                    </motion.div>
                   </motion.button>
-                  <span className={cn(
-                    'text-[9px] tracking-wider uppercase',
-                    isSpeakerOn ? 'text-zixo-secondary' : 'text-zixo-text-secondary'
-                  )}>
+                  <motion.span
+                    key={isSpeakerOn ? 'label-speaker-on' : 'label-speaker-off'}
+                    initial={{ y: -5, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    className={cn(
+                      'text-[9px] tracking-wider uppercase',
+                      isSpeakerOn ? 'text-zixo-secondary' : 'text-zixo-text-secondary'
+                    )}
+                  >
                     Speaker
-                  </span>
+                  </motion.span>
                 </div>
 
                 {/* End Call */}
@@ -598,7 +622,7 @@ export function AudioCallScreen({
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.85 }}
                     onClick={onEndCall}
-                    className="w-18 h-18 rounded-full flex items-center justify-center relative"
+                    className="w-[68px] h-[68px] rounded-full flex items-center justify-center relative"
                     style={{
                       background: 'linear-gradient(135deg, #EA4335, #c62828)',
                     }}
@@ -614,11 +638,23 @@ export function AudioCallScreen({
                       }}
                       transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
                     />
-                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
-                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
-                    </svg>
+                    <motion.div
+                      animate={{ scale: [1, 1.05, 1] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                    >
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
+                      </svg>
+                    </motion.div>
                   </motion.button>
-                  <span className="text-[9px] text-zixo-error tracking-wider uppercase">End</span>
+                  <motion.span
+                    key="end-label-audio"
+                    initial={{ y: -5, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    className="text-[9px] text-zixo-error tracking-wider uppercase"
+                  >
+                    End
+                  </motion.span>
                 </div>
               </div>
             </div>
@@ -930,24 +966,31 @@ export function VideoCallScreen({
                   boxShadow: '0 0 20px rgba(234, 67, 53, 0.25)',
                 } : { border: '1px solid rgba(255,255,255,0.1)' }}
               >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isMuted ? '#EA4335' : 'white'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  {isMuted ? (
-                    <>
-                      <line x1="1" y1="1" x2="23" y2="23" />
-                      <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-                      <path d="M17 16.95A7 7 0 0 1 5 12v-2" />
-                      <line x1="12" y1="19" x2="12" y2="23" />
-                      <line x1="8" y1="23" x2="16" y2="23" />
-                    </>
-                  ) : (
-                    <>
-                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <line x1="12" y1="19" x2="12" y2="23" />
-                      <line x1="8" y1="23" x2="16" y2="23" />
-                    </>
-                  )}
-                </svg>
+                <motion.div
+                  key={isMuted ? 'muted' : 'unmuted'}
+                  initial={{ scale: 0.6, rotate: -15 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={isMuted ? '#EA4335' : 'white'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    {isMuted ? (
+                      <>
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                        <path d="M17 16.95A7 7 0 0 1 5 12v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
+                      </>
+                    ) : (
+                      <>
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
+                      </>
+                    )}
+                  </svg>
+                </motion.div>
               </motion.button>
 
               {/* Toggle Video */}
@@ -992,7 +1035,7 @@ export function VideoCallScreen({
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.85 }}
                 onClick={(e) => { e.stopPropagation(); onEndCall(); }}
-                className="w-18 h-18 rounded-full flex items-center justify-center relative"
+                className="w-[68px] h-[68px] rounded-full flex items-center justify-center relative"
                 style={{
                   background: 'linear-gradient(135deg, #EA4335, #c62828)',
                 }}
@@ -1008,9 +1051,14 @@ export function VideoCallScreen({
                   }}
                   transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
                 />
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
-                </svg>
+                <motion.div
+                  animate={{ scale: [1, 1.05, 1] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
+                  </svg>
+                </motion.div>
               </motion.button>
             </div>
           </motion.div>
