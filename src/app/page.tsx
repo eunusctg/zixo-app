@@ -87,30 +87,32 @@ export default function ZixoApp() {
     permissionCallback,
   } = useZixoStore();
 
-  // Safety: navigate away from call screens if data is missing for too long.
-  // Call screens are now rendered outside AnimatePresence (no black screen from transforms),
-  // but we still need to clean up orphaned call screen states.
+  // Safety: navigate away from call screens if data is missing for TOO long.
+  // The call screens now handle missing data gracefully (show "Unknown" user),
+  // so we only navigate away after a generous timeout (5 seconds) to avoid
+  // race conditions where the state hasn't settled yet.
+  // Previously this was 100ms which was too aggressive and caused the black screen
+  // by navigating away before the call screen had a chance to render.
   useEffect(() => {
     if (currentScreen === 'incoming-call' && !incomingCall) {
-      // Small delay to allow state to settle (avoid race conditions)
       const timer = setTimeout(() => {
         const s = useZixoStore.getState();
         if (s.currentScreen === 'incoming-call' && !s.incomingCall) {
           useZixoStore.setState({ currentScreen: 'home' });
         }
-      }, 100);
+      }, 5000);
       return () => clearTimeout(timer);
     }
-    if ((currentScreen === 'audio-call' || currentScreen === 'video-call') && !activeCall?.remoteUser) {
+    if ((currentScreen === 'audio-call' || currentScreen === 'video-call') && !activeCall) {
       const timer = setTimeout(() => {
         const s = useZixoStore.getState();
-        if ((s.currentScreen === 'audio-call' || s.currentScreen === 'video-call') && !s.activeCall?.remoteUser) {
+        if ((s.currentScreen === 'audio-call' || s.currentScreen === 'video-call') && !s.activeCall) {
           useZixoStore.setState({ currentScreen: 'home' });
         }
-      }, 100);
+      }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [currentScreen, incomingCall, activeCall?.remoteUser]);
+  }, [currentScreen, incomingCall, activeCall]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -1257,45 +1259,52 @@ export default function ZixoApp() {
   };
 
   // ==================== CALL SCREENS ====================
-  // Call screens use position:fixed and MUST be rendered OUTSIDE the AnimatePresence
-  // container because CSS transforms on parent elements (from framer-motion animations)
-  // break fixed positioning — causing the call screen to be confined to the narrow
-  // max-w-lg container instead of covering the full viewport (black screen bug).
+  // Call screens use position:fixed and MUST be rendered OUTSIDE any container
+  // that has CSS transforms, perspective, or will-change properties.
+  // These CSS properties create a new containing block that breaks position:fixed,
+  // causing the call screen to be confined to the narrow max-w-lg container
+  // instead of covering the full viewport (BLACK SCREEN BUG).
+  //
+  // KEY FIX: We only check currentScreen here — NOT activeCall?.remoteUser.
+  // Checking activeCall?.remoteUser caused a race condition where currentScreen
+  // was set to 'audio-call' but activeCall hadn't been populated yet, resulting
+  // in NO call screen rendering and the user seeing a black screen.
+  // The component itself handles missing data gracefully.
   const renderCallScreens = () => (
     <>
       {/* Incoming 1:1 Call */}
-      {currentScreen === 'incoming-call' && incomingCall && (
+      {currentScreen === 'incoming-call' && (
         <IncomingCallScreen
-          remoteUser={incomingCall.callerProfile}
-          callType={incomingCall.callType}
+          remoteUser={incomingCall?.callerProfile || { uid: '', displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: 0, createdAt: 0, role: 'user', zixoNumber: '' }}
+          callType={incomingCall?.callType || 'audio'}
           onAnswer={handleAnswerCall}
           onDecline={rejectCall}
         />
       )}
 
       {/* Active Audio Call */}
-      {currentScreen === 'audio-call' && activeCall?.remoteUser && (
+      {currentScreen === 'audio-call' && (
         <AudioCallScreen
-          remoteUser={activeCall.remoteUser}
-          callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
-          duration={activeCall.duration}
-          isMuted={activeCall.isMuted}
-          isSpeakerOn={activeCall.isSpeakerOn}
+          remoteUser={activeCall?.remoteUser || { uid: '', displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: 0, createdAt: 0, role: 'user', zixoNumber: '' }}
+          callStatus={activeCall?.status as 'ringing' | 'connecting' | 'connected' | 'ended' || 'ringing'}
+          duration={activeCall?.duration || 0}
+          isMuted={activeCall?.isMuted || false}
+          isSpeakerOn={activeCall?.isSpeakerOn || false}
           onToggleMute={toggleMute}
           onToggleSpeaker={toggleSpeaker}
           onEndCall={endCall}
-          remoteStream={activeCall.remoteStream}
+          remoteStream={activeCall?.remoteStream}
         />
       )}
 
       {/* Active Video Call */}
-      {currentScreen === 'video-call' && activeCall?.remoteUser && (
+      {currentScreen === 'video-call' && (
         <VideoCallScreen
-          remoteUser={activeCall.remoteUser}
-          callStatus={activeCall.status as 'ringing' | 'connecting' | 'connected' | 'ended'}
-          duration={activeCall.duration}
-          isMuted={activeCall.isMuted}
-          isVideoOn={activeCall.isVideoOn}
+          remoteUser={activeCall?.remoteUser || { uid: '', displayName: 'Unknown', email: '', username: '', bio: '', avatar: '', online: false, lastSeen: 0, createdAt: 0, role: 'user', zixoNumber: '' }}
+          callStatus={activeCall?.status as 'ringing' | 'connecting' | 'connected' | 'ended' || 'ringing'}
+          duration={activeCall?.duration || 0}
+          isMuted={activeCall?.isMuted || false}
+          isVideoOn={activeCall?.isVideoOn || false}
           onToggleMute={toggleMute}
           onToggleVideo={toggleVideo}
           onFlipCamera={() => {
@@ -1304,8 +1313,8 @@ export default function ZixoApp() {
             } catch {}
           }}
           onEndCall={endCall}
-          localStream={activeCall.localStream}
-          remoteStream={activeCall.remoteStream}
+          localStream={activeCall?.localStream}
+          remoteStream={activeCall?.remoteStream}
         />
       )}
 
@@ -1358,6 +1367,14 @@ export default function ZixoApp() {
 
   return (
     <ErrorBoundary>
+    {/* Call screens rendered as DIRECT children of ErrorBoundary —
+        NOT inside any flex/grid container with transforms, perspective, or will-change.
+        This is CRITICAL because position:fixed elements become positioned relative
+        to the nearest ancestor with a CSS transform/perspective/filter/will-change,
+        which would confine the call screen to the max-w-lg container instead of
+        covering the full viewport (BLACK SCREEN BUG). */}
+    {renderCallScreens()}
+
     <div className="min-h-[100dvh] bg-zixo-bg text-zixo-text flex justify-center">
       {/* Notification Banners */}
       <NotificationBanner
@@ -1369,20 +1386,14 @@ export default function ZixoApp() {
       {/* PWA Install Prompt & Offline Banner */}
       <PWAInstallPrompt />
 
-      {/* Call screens rendered OUTSIDE the AnimatePresence container.
-          They use position:fixed and cover the full viewport.
-          MUST be a direct child of the root div (no CSS transforms in ancestry). */}
-      {renderCallScreens()}
-
       <div className="w-full max-w-lg relative page-transition-container">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentScreen}
-            initial={{ opacity: 0, y: 8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.98 }}
-            transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
-            className="will-change-transform"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
           >
             <ErrorBoundary>
               {renderScreen()}

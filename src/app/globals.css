@@ -390,10 +390,14 @@ select {
 
 /* ==================== 3D CSS EFFECTS ==================== */
 
-/* Page transition container with 3D perspective */
+/* Page transition container — NO perspective/transform/will-change!
+   These CSS properties create a new containing block for position:fixed
+   descendants, which breaks the call screen overlay (BLACK SCREEN BUG).
+   The call screens use position:fixed to cover the viewport, and ANY
+   ancestor with transform/perspective/filter/will-change/contain:paint
+   will confine the fixed element to that ancestor's bounds instead. */
 .page-transition-container {
-  perspective: 1200px;
-  perspective-origin: 50% 50%;
+  /* intentionally empty — no perspective or transforms */
 }
 
 /* 3D Card tilt effect */
