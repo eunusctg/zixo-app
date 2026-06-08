@@ -100,10 +100,19 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
             </div>
             <p className="text-sm text-zixo-text-secondary truncate">{user.username}</p>
             <p className="text-xs text-zixo-text-secondary truncate mt-0.5">{user.bio}</p>
-            {user.zixoNumber && (
+            {user.zixoNumber ? (
               <div className="flex items-center gap-1.5 mt-1">
                 <span className="text-[10px] font-semibold text-zixo-primary/70 uppercase tracking-wider">Zixo</span>
                 <span className="text-xs font-bold font-mono tracking-wider text-zixo-primary">{formatZixoNumber(user.zixoNumber)}</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 mt-1">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  className="w-3 h-3 border border-zixo-primary/30 border-t-zixo-primary rounded-full"
+                />
+                <span className="text-[10px] text-zixo-text-secondary">Assigning Zixo Number...</span>
               </div>
             )}
           </div>

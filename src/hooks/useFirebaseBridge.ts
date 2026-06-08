@@ -332,6 +332,84 @@ export function useFirebaseBridge() {
     };
   }, []);
 
+  // 1b. Ensure Zixo Number is assigned and subscribe to own profile for real-time updates
+  // This is critical because the initial auth callback might fail silently or
+  // the user might already be logged in with a stale profile that lacks zixoNumber.
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+
+    // Retry Zixo Number assignment if missing
+    if (!currentUser.zixoNumber) {
+      const assignZixoNumber = async () => {
+        try {
+          const { ensureZixoNumber } = await import('@/services/auth');
+          const newZixoNumber = await ensureZixoNumber(currentUser.uid);
+          if (newZixoNumber) {
+            const store = useZixoStore.getState();
+            if (store.currentUser && !store.currentUser.zixoNumber) {
+              store.login({ ...store.currentUser, zixoNumber: newZixoNumber } as any);
+              console.log('[Zixo Bridge] Zixo number assigned on retry:', newZixoNumber);
+            }
+          }
+        } catch (err) {
+          console.warn('[Zixo Bridge] Zixo number retry failed:', err);
+          // Retry again after 5 seconds
+          setTimeout(() => {
+            const s = useZixoStore.getState();
+            if (s.currentUser && !s.currentUser.zixoNumber) {
+              assignZixoNumber();
+            }
+          }, 5000);
+        }
+      };
+      assignZixoNumber();
+    }
+
+    // Subscribe to own Firestore profile for real-time updates (zixoNumber, role, avatar, etc.)
+    let profileUnsub: (() => void) | null = null;
+    (async () => {
+      try {
+        const { doc: docFn, onSnapshot } = await import('firebase/firestore');
+        const { db } = await import('@/services/firebase');
+        profileUnsub = onSnapshot(docFn(db, 'users', currentUser.uid), (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            const store = useZixoStore.getState();
+            if (store.currentUser) {
+              const updates: Record<string, any> = {};
+              // Update zixoNumber if Firestore has it but store doesn't
+              if (data.zixoNumber && !store.currentUser.zixoNumber) {
+                updates.zixoNumber = data.zixoNumber;
+              }
+              // Update role if Firestore has it and it differs
+              if (data.role && data.role !== store.currentUser.role) {
+                updates.role = data.role;
+              }
+              // Update avatar if Firestore has it and it differs
+              if (data.avatar && data.avatar !== store.currentUser.avatar) {
+                updates.avatar = data.avatar;
+              }
+              // Update displayName if Firestore has it and it differs
+              if (data.displayName && data.displayName !== store.currentUser.displayName) {
+                updates.displayName = data.displayName;
+              }
+              if (Object.keys(updates).length > 0) {
+                store.login({ ...store.currentUser, ...updates } as any);
+                console.log('[Zixo Bridge] Profile updated from Firestore:', updates);
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('[Zixo Bridge] Failed to subscribe to own profile:', err);
+      }
+    })();
+
+    return () => {
+      if (profileUnsub) profileUnsub();
+    };
+  }, [isAuthenticated, currentUser?.uid, currentUser?.zixoNumber]);
+
   // 2. Set up RTDB presence when authenticated
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
