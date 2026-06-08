@@ -416,10 +416,10 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
   }
   const user = credential.user;
 
-  // Safely derive display name and username parts
-  const nameStr = user.displayName || user.email?.split('@')[0] || 'user';
+  // Safely derive display name and username parts with null safety
+  const nameStr = user.displayName || (user.email ? user.email.split('@')[0] : null) || 'user';
   const safeUsername = `@${nameStr.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
-  const safeDisplayName = user.displayName || user.email?.split('@')[0] || 'User';
+  const safeDisplayName = user.displayName || (user.email ? user.email.split('@')[0] : null) || 'User';
 
   // Check if user profile exists
   let profile = await getUserProfile(user.uid);

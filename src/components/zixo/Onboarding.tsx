@@ -463,8 +463,8 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
   };
 
   // Format Zixo Number for display
-  const formatZixoNumber = (num: string) => {
-    if (!num || num.length !== 8) return num;
+  const formatZixoNumber = (num: string | undefined | null): string => {
+    if (!num || typeof num !== 'string' || num.length !== 8) return num || '';
     return `${num.slice(0, 4)} ${num.slice(4)}`;
   };
 

@@ -87,6 +87,17 @@ export default function ZixoApp() {
     permissionCallback,
   } = useZixoStore();
 
+  // Fix black screen: navigate away from call screens if data is missing.
+  // This MUST be a useEffect (not setState during render) to avoid infinite re-render loops.
+  useEffect(() => {
+    if (currentScreen === 'incoming-call' && !incomingCall) {
+      useZixoStore.setState({ currentScreen: 'home' });
+    }
+    if ((currentScreen === 'audio-call' || currentScreen === 'video-call') && !activeCall?.remoteUser) {
+      useZixoStore.setState({ currentScreen: 'home' });
+    }
+  }, [currentScreen, incomingCall, activeCall?.remoteUser]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
@@ -562,11 +573,9 @@ export default function ZixoApp() {
         );
 
       case 'incoming-call':
-        // If incomingCall is null but screen is still 'incoming-call', navigate home
-        // IMMEDIATELY to prevent the black screen. Using direct setState (not setTimeout)
-        // avoids the one-frame black flash that setTimeout(fn, 0) causes.
+        // If incomingCall is null but screen is still 'incoming-call', just return null.
+        // The useEffect below will navigate home safely (not during render).
         if (!incomingCall) {
-          useZixoStore.setState({ currentScreen: 'home' });
           return null;
         }
         return (
@@ -580,11 +589,9 @@ export default function ZixoApp() {
 
       case 'audio-call':
       case 'video-call':
-        // If activeCall is null but screen is still on a call screen, navigate home
-        // IMMEDIATELY to prevent the black screen. Using direct setState (not setTimeout)
-        // avoids the one-frame black flash that setTimeout(fn, 0) causes.
+        // If activeCall is null but screen is still on a call screen, just return null.
+        // The useEffect below will navigate home safely (not during render).
         if (!activeCall?.remoteUser) {
-          useZixoStore.setState({ currentScreen: 'home' });
           return null;
         }
         if (currentScreen === 'audio-call') {

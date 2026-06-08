@@ -8,6 +8,8 @@ import { initFCM, sendPushNotification, onNotificationBanner, updateMessageBadge
 import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToCallStatus, subscribeToMultiplePresence, subscribeToGroupCalls, cleanupStaleCallSignals, endCallSignal, type RTDBCallSignal } from '@/services/presence';
 import { getWebRTC } from '@/services/webrtc';
 import type { BannerNotification } from '@/components/zixo/NotificationBanner';
+import { onIdTokenChanged } from 'firebase/auth';
+import { auth } from '@/services/firebase';
 
 // ==================== RETRY LOGIC ====================
 
@@ -265,11 +267,12 @@ export function useFirebaseBridge() {
           }
         } else {
           console.log('[Zixo Bridge] No Firestore profile, creating temp profile');
+          const safeName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : null) || 'User';
           const tempProfile: ZixoUserProfile = {
             uid: firebaseUser.uid,
-            displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+            displayName: safeName,
             email: firebaseUser.email || '',
-            username: `@${(firebaseUser.displayName || 'user').toLowerCase().replace(/\s+/g, '')}`,
+            username: `@${safeName.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`,
             bio: 'Living free, connecting freely',
             avatar: firebaseUser.photoURL || '',
             online: true,
@@ -282,12 +285,12 @@ export function useFirebaseBridge() {
         }
       } catch (error) {
         console.error('[Zixo Bridge] Error loading user profile:', error);
-        const nameStr = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'user';
+        const nameStr = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : null) || 'user';
         const tempProfile: ZixoUserProfile = {
           uid: firebaseUser.uid,
           displayName: nameStr,
           email: firebaseUser.email || '',
-          username: `@${nameStr.toLowerCase().replace(/\s+/g, '')}`,
+          username: `@${nameStr.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`,
           bio: 'Living free, connecting freely',
           avatar: firebaseUser.photoURL || '',
           online: true,
@@ -335,8 +338,22 @@ export function useFirebaseBridge() {
       authCallbackRef.current?.(firebaseUser);
     });
 
+    // Also listen for ID token changes (refresh) to keep the session alive.
+    // This prevents false logouts when the token is refreshed but onAuthStateChanged
+    // doesn't fire (which can happen on some platforms).
+    const tokenUnsub = onIdTokenChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        // Token refreshed — clear any pending logout timer
+        if (nullAuthTimerRef.current) {
+          clearTimeout(nullAuthTimerRef.current);
+          nullAuthTimerRef.current = null;
+        }
+      }
+    });
+
     return () => {
       unsub();
+      tokenUnsub();
       // Clean up any pending logout timer
       if (nullAuthTimerRef.current) {
         clearTimeout(nullAuthTimerRef.current);

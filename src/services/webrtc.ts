@@ -13,28 +13,31 @@ import { rtdb } from './firebase';
 import { createCallSignal, updateCallSignal, endCallSignal, addICECandidate, subscribeToIncomingCalls, type RTDBCallSignal } from './presence';
 
 // STUN + TURN servers for reliable NAT traversal
+// NOTE: The Open Relay Project (openrelay.metered.ca) has been discontinued.
+// Using Metered.ca's live free TURN servers as replacement.
+// For production, consider setting up your own TURN server for reliability.
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    // Google STUN servers (for basic NAT traversal)
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
-    // Free TURN servers from Open Relay Project for reliable NAT traversal
+    // Metered.ca free TURN servers (for restrictive NATs / symmetric NATs)
+    // These are required for calls to work when both users are behind strict firewalls
     {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
+      urls: 'turn:a.relay.metered.ca:80',
+      username: 'e8dd65b92f7b828e1e0686e3',
+      credential: 'fRm5VDvX0ol9yN2l',
     },
     {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
+      urls: 'turn:a.relay.metered.ca:443',
+      username: 'e8dd65b92f7b828e1e0686e3',
+      credential: 'fRm5VDvX0ol9yN2l',
     },
     {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
+      urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+      username: 'e8dd65b92f7b828e1e0686e3',
+      credential: 'fRm5VDvX0ol9yN2l',
     },
   ],
 };
@@ -74,6 +77,10 @@ export class ZixoWebRTC {
   private lastStatsBytesReceived: number = 0;
   private lastStatsTimestamp: number = 0;
   private processedICECandidates: Set<string> = new Set();
+  // Connection timeout — if the peer connection doesn't reach 'connected' within
+  // this duration, the call is considered failed and cleaned up automatically.
+  private connectionTimeout: ReturnType<typeof setTimeout> | null = null;
+  private static CONNECTION_TIMEOUT_MS = 45000; // 45 seconds
 
   // Callbacks
   public onRemoteStream: ((stream: MediaStream) => void) | null = null;
@@ -118,6 +125,11 @@ export class ZixoWebRTC {
         this.onConnectionStateChange(pc.connectionState);
       }
 
+      // Clear connection timeout on successful connection
+      if (pc.connectionState === 'connected') {
+        this.clearConnectionTimeout();
+      }
+
       // Handle reconnection for failed/disconnected states
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         this.handleConnectionFailure();
@@ -155,11 +167,16 @@ export class ZixoWebRTC {
     receiverId: string,
     type: 'audio' | 'video'
   ): Promise<string> {
-    // Get local media stream
-    this.localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: type === 'video' ? { width: 720, height: 1280 } : false,
-    });
+    // Get local media stream with better error handling
+    try {
+      this.localStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: type === 'video' ? { width: 720, height: 1280 } : false,
+      });
+    } catch (err: any) {
+      console.error('[Zixo] getUserMedia failed in startCall:', err);
+      throw err;
+    }
 
     this.isCaller = true;
     this.peerConnection = this.createPeerConnection();
@@ -185,6 +202,9 @@ export class ZixoWebRTC {
     // Listen for answer and remote ICE candidates
     this.listenForSignaling(this.callId);
 
+    // Start connection timeout — if the call doesn't connect within 45s, fail gracefully
+    this.startConnectionTimeout();
+
     return this.callId;
   }
 
@@ -206,11 +226,16 @@ export class ZixoWebRTC {
       throw new Error('No offer received from caller. The call may have ended.');
     }
 
-    // Get local media stream
-    this.localStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: callData.type === 'video' ? { width: 720, height: 1280 } : false,
-    });
+    // Get local media stream with better error handling
+    try {
+      this.localStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: callData.type === 'video' ? { width: 720, height: 1280 } : false,
+      });
+    } catch (err: any) {
+      console.error('[Zixo] getUserMedia failed in answerCall:', err);
+      throw err;
+    }
 
     this.peerConnection = this.createPeerConnection();
 
@@ -229,6 +254,9 @@ export class ZixoWebRTC {
 
     // Listen for remote ICE candidates
     this.listenForSignaling(callId);
+
+    // Start connection timeout — if the call doesn't connect within 45s, fail gracefully
+    this.startConnectionTimeout();
   }
 
   /**
@@ -315,6 +343,30 @@ export class ZixoWebRTC {
       candidatesUnsub();
       if (existingUnsub) existingUnsub();
     };
+  }
+
+  /**
+   * Start a connection timeout timer. If the peer connection doesn't reach
+   * 'connected' state within CONNECTION_TIMEOUT_MS, the call is auto-ended.
+   */
+  private startConnectionTimeout(): void {
+    this.clearConnectionTimeout();
+    this.connectionTimeout = setTimeout(() => {
+      if (this.peerConnection && this.peerConnection.connectionState !== 'connected') {
+        console.warn('[Zixo] Connection timeout — call did not connect within 45s, auto-ending');
+        this.handleConnectionFailure();
+      }
+    }, ZixoWebRTC.CONNECTION_TIMEOUT_MS);
+  }
+
+  /**
+   * Clear the connection timeout timer
+   */
+  private clearConnectionTimeout(): void {
+    if (this.connectionTimeout) {
+      clearTimeout(this.connectionTimeout);
+      this.connectionTimeout = null;
+    }
   }
 
   /**
@@ -528,6 +580,9 @@ export class ZixoWebRTC {
   async endCall(): Promise<void> {
     // Stop quality monitoring
     this.stopQualityMonitoring();
+
+    // Clear connection timeout
+    this.clearConnectionTimeout();
 
     // Reset reconnection state
     this.reconnectionState = {

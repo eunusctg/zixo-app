@@ -178,111 +178,46 @@ export function createCallSignal(signal: Omit<RTDBCallSignal, 'createdAt'>): str
 
 /**
  * Listen for incoming calls for a user.
- * Uses onChildAdded for NEW calls only (avoids re-triggering on every
- * data change in the calls node like ICE candidates, offer updates, etc.)
- * combined with a per-call status listener to detect when the caller hangs up.
+ * Uses onValue for reliable, real-time call detection.
+ * Filters for calls where the user is the receiver and status is 'ringing'.
  *
  * IMPORTANT: We use a "first call wins" strategy — only the FIRST incoming
  * ringing call is delivered to the callback. This prevents duplicate call
- * screens when onChildAdded fires multiple times (e.g., on reconnection or
- * when multiple call signals exist in RTDB simultaneously).
+ * screens when multiple call signals exist in RTDB simultaneously.
  */
 export function subscribeToIncomingCalls(
   uid: string,
   callback: (calls: Array<{ id: string; data: RTDBCallSignal }>) => void
 ): () => void {
   const callsRef = ref(rtdb, 'calls');
-  const activeCallIds = new Set<string>();
-  const perCallUnsubs: Record<string, () => void> = {};
-  let disposed = false;
 
-  // Helper: build the current list of active incoming calls and call the callback
-  // Only delivers the FIRST ringing call ("first call wins" strategy)
-  const notifyCallback = () => {
-    if (disposed) return;
+  const unsubscribe = onValue(callsRef, (snap) => {
+    if (!snap.exists()) {
+      callback([]);
+      return;
+    }
 
-    // Read current data for all tracked call IDs
-    const results: Array<{ id: string; data: RTDBCallSignal }> = [];
-    const pendingReads: Promise<void>[] = [];
+    const data = snap.val();
+    const ringingCalls: Array<{ id: string; data: RTDBCallSignal }> = [];
 
-    activeCallIds.forEach((callId) => {
-      pendingReads.push(
-        get(ref(rtdb, `calls/${callId}`)).then((snap) => {
-          if (disposed) return;
-          if (snap.exists()) {
-            const data = snap.val() as RTDBCallSignal;
-            if (data.receiverId === uid && data.status === 'ringing') {
-              results.push({ id: callId, data });
-            } else {
-              // Call is no longer ringing or not for us — stop tracking
-              activeCallIds.delete(callId);
-            }
-          } else {
-            // Call was deleted — stop tracking
-            activeCallIds.delete(callId);
-          }
-        }).catch(() => {})
-      );
-    });
-
-    Promise.all(pendingReads).then(() => {
-      if (disposed) return;
-      // Only deliver the FIRST call — prevents duplicate call screens
-      if (results.length > 0) {
-        callback([results[0]]);
-      } else {
-        callback([]);
+    // Iterate over all calls and find ringing calls for this user
+    Object.entries(data).forEach(([callId, callData]: [string, any]) => {
+      if (callData.receiverId === uid && callData.status === 'ringing') {
+        ringingCalls.push({ id: callId, data: callData as RTDBCallSignal });
       }
     });
-  };
 
-  // Use onChildAdded to detect NEW calls only
-  const childAddedUnsub = onChildAdded(callsRef, (snap) => {
-    if (disposed || !snap.exists()) return;
-    const callData = snap.val() as RTDBCallSignal;
-    const callId = snap.key!;
-
-    // Only care about calls where this user is the receiver and the call is ringing
-    if (callData.receiverId === uid && callData.status === 'ringing') {
-      if (activeCallIds.has(callId)) return; // Already tracking
-
-      // "First call wins": if we're already tracking a ringing call, ignore additional ones
-      if (activeCallIds.size > 0) {
-        console.log(`[Zixo] Ignoring additional incoming call ${callId} — already have a ringing call`);
-        return;
-      }
-
-      activeCallIds.add(callId);
-
-      // Set up a per-call status listener to detect when the caller cancels
-      const callRef = ref(rtdb, `calls/${callId}`);
-      perCallUnsubs[callId] = onValue(callRef, (callSnap) => {
-        if (disposed) return;
-        if (!callSnap.exists() || (callSnap.exists() && callSnap.val().status === 'ended')) {
-          // Call was cancelled/ended by caller
-          activeCallIds.delete(callId);
-          if (perCallUnsubs[callId]) {
-            off(callRef);
-            perCallUnsubs[callId]();
-            delete perCallUnsubs[callId];
-          }
-          notifyCallback();
-        }
-      });
-
-      notifyCallback();
+    // "First call wins": only deliver the first ringing call
+    if (ringingCalls.length > 0) {
+      callback([ringingCalls[0]]);
+    } else {
+      callback([]);
     }
   });
 
   return () => {
-    disposed = true;
     off(callsRef);
-    childAddedUnsub();
-    Object.values(perCallUnsubs).forEach((unsub) => unsub());
-    Object.keys(perCallUnsubs).forEach((callId) => {
-      off(ref(rtdb, `calls/${callId}`));
-    });
-    activeCallIds.clear();
+    unsubscribe();
   };
 }
 

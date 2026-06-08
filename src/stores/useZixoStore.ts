@@ -7,6 +7,53 @@ import { getGroupWebRTC, resetGroupWebRTC } from '@/services/webrtc-group';
 import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, endGroupCallSignal, type RTDBGroupCallSignal } from '@/services/presence';
 import { playOutgoingRingSound, stopOutgoingRingSound, stopRingingSound } from '@/services/messaging';
 
+// ==================== CALL RATE LIMITING ====================
+
+/**
+ * Rate limit for call attempts — prevents rapid repeated call attempts.
+ * Tracks the timestamp of the last call attempt per user.
+ */
+const CALL_RATE_LIMIT_MS = 5000; // 5 seconds between call attempts
+const lastCallAttemptAt: Record<string, number> = {};
+
+function checkCallRateLimit(userId: string): boolean {
+  const now = Date.now();
+  const lastAttempt = lastCallAttemptAt[userId];
+  if (lastAttempt && now - lastAttempt < CALL_RATE_LIMIT_MS) {
+    return false; // Rate limited
+  }
+  lastCallAttemptAt[userId] = now;
+  return true; // Allowed
+}
+
+// ==================== CALL TIMEOUT ====================
+
+/**
+ * Auto-end a call if it stays in 'ringing' or 'connecting' state for too long.
+ * This prevents the user from being stuck on a "Calling..." screen forever
+ * when the remote party never answers or the WebRTC connection never establishes.
+ */
+const CALL_RINGING_TIMEOUT_MS = 45000; // 45 seconds
+let callRingingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+function startCallRingingTimeout(): void {
+  clearCallRingingTimeout();
+  callRingingTimeout = setTimeout(() => {
+    const state = useZixoStore.getState();
+    if (state.activeCall && (state.activeCall.status === 'ringing' || state.activeCall.status === 'connecting')) {
+      console.warn('[Zixo] Call ringing/connecting timeout (45s) — auto-ending call');
+      state.endCall();
+    }
+  }, CALL_RINGING_TIMEOUT_MS);
+}
+
+function clearCallRingingTimeout(): void {
+  if (callRingingTimeout) {
+    clearTimeout(callRingingTimeout);
+    callRingingTimeout = null;
+  }
+}
+
 // ==================== PERMISSION HELPERS ====================
 
 /**
@@ -626,6 +673,8 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       // Stop outgoing ring sound when call transitions from ringing/connecting to connected or ended
       if (status === 'connected' || status === 'ended') {
         stopOutgoingRingSound();
+        // Clear the ringing timeout — the call has progressed past ringing
+        clearCallRingingTimeout();
       }
       return {
         activeCall: state.activeCall ? { ...state.activeCall, status, startedAt: status === 'connected' && !state.activeCall.startedAt ? Date.now() : state.activeCall.startedAt } : null,
@@ -635,6 +684,12 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   startCall: (type, user) => {
     const currentUser = get().currentUser;
     if (!currentUser) return;
+
+    // Rate limit check — prevent rapid repeated call attempts
+    if (!checkCallRateLimit(currentUser.uid)) {
+      console.warn('[Zixo] Call rate limited — too many attempts');
+      return;
+    }
 
     // Guard: Prevent starting a new call if already in an active call or incoming call
     const currentActiveCall = get().activeCall;
@@ -707,6 +762,9 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
       // Play outgoing ring sound (what the caller hears while waiting)
       playOutgoingRingSound();
+
+      // Start ringing timeout — auto-end if still ringing after 45s
+      startCallRingingTimeout();
 
       // Initiate WebRTC call asynchronously
       webrtc.startCall(currentUser.uid, currentUser.displayName, user.uid, type)
@@ -941,6 +999,9 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
 
     // Stop outgoing ring sound (in case the call was still in ringing/connecting)
     stopOutgoingRingSound();
+
+    // Clear ringing timeout
+    clearCallRingingTimeout();
 
     // Always send endCallSignal FIRST to ensure RTDB data is cleaned up, even if WebRTC throws
     if (activeCall?.callId) {
