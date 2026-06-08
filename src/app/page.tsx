@@ -780,6 +780,18 @@ export default function ZixoApp() {
               </motion.div>
             )}
 
+            {activeTab === 'contacts' && (
+              <motion.div
+                key="contacts"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                transition={{ duration: 0.2 }}
+              >
+                {renderContactsTabContent()}
+              </motion.div>
+            )}
+
             {activeTab === 'settings' && (
               <motion.div
                 key="settings"
@@ -1052,6 +1064,86 @@ export default function ZixoApp() {
       setUsersLoading(false);
     }
   }, [currentScreen, currentUser, usersLoaded, usersLoading]);
+
+  const renderContactsTabContent = () => {
+    if (!currentUser) return null;
+    const chatContacts = (chats || [])
+      .map((c) => c?.participantProfiles?.find((p) => p?.uid !== currentUser?.uid))
+      .filter(Boolean) as ZixoUserProfile[];
+
+    return (
+      <div>
+        {/* Header with Find People button */}
+        <div className="px-4 py-3">
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setScreen('contacts')}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-zixo-surface border border-zixo-primary/20 hover:border-zixo-primary/40 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full gradient-primary flex items-center justify-center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                <line x1="11" y1="8" x2="11" y2="14" />
+                <line x1="8" y1="11" x2="14" y2="11" />
+              </svg>
+            </div>
+            <div className="flex-1 text-left">
+              <p className="text-sm font-medium text-zixo-text">Find People</p>
+              <p className="text-xs text-zixo-text-secondary">Search by name, Zixo number, or QR code</p>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zixo-text-secondary">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </motion.button>
+        </div>
+
+        {/* Contacts List */}
+        {chatContacts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+            <div className="w-16 h-16 rounded-full bg-zixo-surface flex items-center justify-center mb-4">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zixo-text-secondary">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="8.5" cy="7" r="4" />
+              </svg>
+            </div>
+            <h3 className="text-base font-semibold text-zixo-text mb-1">No contacts yet</h3>
+            <p className="text-sm text-zixo-text-secondary">Start a chat to add contacts</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/5">
+            {chatContacts.map((contact, i) => (
+              <motion.div
+                key={contact.uid}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: Math.min(i * 0.03, 0.3) }}
+                className="flex items-center gap-3 px-4 py-3 hover:bg-zixo-surface/50 transition-colors cursor-pointer"
+                onClick={() => contact?.uid && handleChatClick(chats.find(c => c.participants.includes(contact.uid))?.id || '')}
+              >
+                <Avatar name={contact.displayName} uid={contact.uid} avatarUrl={contact.avatar} size="lg" online={contact.online} />
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-medium text-zixo-text truncate">{contact.displayName}</h4>
+                  <p className="text-xs text-zixo-text-secondary truncate">{contact.username || contact.bio || ''}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <motion.button
+                    whileTap={{ scale: 0.85 }}
+                    onClick={(e) => { e.stopPropagation(); startCall('audio', contact); }}
+                    className="w-9 h-9 rounded-full flex items-center justify-center text-zixo-secondary hover:bg-zixo-surface-light transition-colors"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+                    </svg>
+                  </motion.button>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderContactsScreen = () => {
     if (!currentUser) return null;

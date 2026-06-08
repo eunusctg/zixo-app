@@ -5,7 +5,7 @@ import type { UploadProgress } from '@/services/storage';
 import { getWebRTC, resetWebRTC } from '@/services/webrtc';
 import { getGroupWebRTC, resetGroupWebRTC } from '@/services/webrtc-group';
 import { endCallSignal, type RTDBCallSignal, leaveGroupCallSignal, endGroupCallSignal, type RTDBGroupCallSignal } from '@/services/presence';
-import { playOutgoingRingSound, stopOutgoingRingSound } from '@/services/messaging';
+import { playOutgoingRingSound, stopOutgoingRingSound, stopRingingSound } from '@/services/messaging';
 
 // ==================== PERMISSION HELPERS ====================
 
@@ -304,7 +304,7 @@ export type Screen =
   | 'new-chat'
   | 'admin-panel';
 
-export type Tab = 'chats' | 'calls' | 'settings';
+export type Tab = 'chats' | 'calls' | 'contacts' | 'settings';
 
 export type CallStatus = 'idle' | 'ringing' | 'connecting' | 'connected' | 'ended';
 
@@ -777,6 +777,9 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       resetWebRTC();
       const webrtc = getWebRTC();
 
+      // Stop incoming ringing sound
+      stopRingingSound();
+
       // Set up callbacks
       webrtc.onRemoteStream = (stream) => {
         useZixoStore.getState().setCallRemoteStream(stream);
@@ -860,6 +863,10 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
   rejectCall: () => {
     const incoming = get().incomingCall;
     const currentUser = get().currentUser;
+
+    // Stop incoming ringing sound
+    stopRingingSound();
+
     if (incoming) {
       // End the call signal so the caller knows it was rejected
       endCallSignal(incoming.callId);

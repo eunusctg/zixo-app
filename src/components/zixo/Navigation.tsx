@@ -5,8 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/zixo-utils';
 
 interface BottomNavProps {
-  activeTab: 'chats' | 'calls' | 'settings';
-  onTabChange: (tab: 'chats' | 'calls' | 'settings') => void;
+  activeTab: 'chats' | 'calls' | 'contacts' | 'settings';
+  onTabChange: (tab: 'chats' | 'calls' | 'contacts' | 'settings') => void;
   unreadCount: number;
 }
 
@@ -28,6 +28,19 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
       icon: (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+        </svg>
+      ),
+      badge: 0,
+    },
+    {
+      id: 'contacts' as const,
+      label: 'Contacts',
+      icon: (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="8.5" cy="7" r="4" />
+          <line x1="20" y1="8" x2="20" y2="14" />
+          <line x1="23" y1="11" x2="17" y2="11" />
         </svg>
       ),
       badge: 0,

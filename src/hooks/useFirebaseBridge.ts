@@ -4,7 +4,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useZixoStore } from '@/stores/useZixoStore';
 import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
 import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory, subscribeToUserProfile } from '@/services/firestore';
-import { initFCM, sendPushNotification, onNotificationBanner, updateMessageBadge, playNotificationSound, playRingingSound, stopOutgoingRingSound, showBrowserNotification, showBannerNotification } from '@/services/messaging';
+import { initFCM, sendPushNotification, onNotificationBanner, updateMessageBadge, playNotificationSound, playRingingSound, stopRingingSound, stopOutgoingRingSound, showBrowserNotification, showBannerNotification } from '@/services/messaging';
 import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToCallStatus, subscribeToMultiplePresence, subscribeToGroupCalls, cleanupStaleCallSignals, endCallSignal, type RTDBCallSignal } from '@/services/presence';
 import { getWebRTC } from '@/services/webrtc';
 import type { BannerNotification } from '@/components/zixo/NotificationBanner';
@@ -761,6 +761,9 @@ export function useFirebaseBridge() {
             console.log('[Zixo] Incoming call was cancelled by caller — recording as missed call');
             const incoming = store.incomingCall;
 
+            // Stop the ringing sound
+            stopRingingSound();
+
             // Record the missed call in call history
             const missedCall: any = {
               id: incoming.callId || `call-${Date.now()}`,
@@ -835,6 +838,9 @@ export function useFirebaseBridge() {
 
             console.log('[Zixo] Incoming call ended by caller (status subscription) — missed call');
             const incoming = store.incomingCall;
+
+            // Stop the ringing sound
+            stopRingingSound();
 
             // Record the missed call
             const missedCall: any = {

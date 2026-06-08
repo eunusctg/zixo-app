@@ -119,19 +119,26 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
           </motion.button>
         </div>
 
-        {/* QR Code */}
+        {/* QR Code - Compact */}
         {user.zixoNumber && (
           <div className="mt-3 pt-3 border-t border-white/5">
             <motion.button
               whileTap={{ scale: 0.97 }}
+              whileHover={{ scale: 1.02 }}
               onClick={() => setShowQRModal(true)}
-              className="flex items-center justify-center w-full"
+              className="flex items-center justify-between w-full px-1 py-1 rounded-lg hover:bg-white/5 transition-colors"
             >
-              <div className="p-2 bg-white rounded-lg">
-                <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={100} level="M" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-white p-1 flex items-center justify-center">
+                  <QRCodeSVG value={`ZIXO:${user.zixoNumber}`} size={24} level="L" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-zixo-text">My QR Code</p>
+                  <p className="text-[10px] text-zixo-text-secondary">Tap to share</p>
+                </div>
               </div>
+              <ChevronRight />
             </motion.button>
-            <p className="text-[10px] text-zixo-text-secondary text-center mt-1.5">Tap QR code to share</p>
           </div>
         )}
       </motion.div>
@@ -191,6 +198,20 @@ export default function SettingsScreen({ user, onEditProfile, onLogout, onBack, 
                 className="mt-3 px-5 py-2 rounded-xl bg-zixo-surface-light text-xs font-medium text-zixo-text-secondary hover:text-zixo-primary transition-colors"
               >
                 <span id="settings-copy-zixo-modal">Copy Number</span>
+              </motion.button>
+
+              <motion.button
+                whileTap={{ scale: 0.97 }}
+                onClick={() => {
+                  setShowQRModal(false);
+                  // Navigate to contacts screen where QR scanner is available
+                  import('@/stores/useZixoStore').then(({ useZixoStore }) => {
+                    useZixoStore.getState().setScreen('contacts');
+                  });
+                }}
+                className="mt-2 px-5 py-2 rounded-xl gradient-primary text-xs font-medium text-white"
+              >
+                Scan QR Code
               </motion.button>
             </motion.div>
           </motion.div>

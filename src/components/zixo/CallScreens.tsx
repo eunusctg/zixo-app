@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Avatar from './Avatar';
 import { cn } from '@/lib/zixo-utils';
 import type { ZixoUserProfile } from '@/services/auth';
+import { stopIncomingRingSound } from '@/services/messaging';
 
 // ==================== SHARED STYLES ====================
 
@@ -97,6 +98,12 @@ export function AudioCallScreen({
     const s = secs % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
+
+  useEffect(() => {
+    if (callStatus === 'connecting' || callStatus === 'connected') {
+      stopIncomingRingSound();
+    }
+  }, [callStatus]);
 
   const isActive = callStatus === 'connected' || (callStatus === 'ringing' && !isIncoming) || callStatus === 'connecting';
 
@@ -434,8 +441,9 @@ export function AudioCallScreen({
             {/* Answer */}
             <div className="flex flex-col items-center gap-2">
               <motion.button
+                whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.85 }}
-                onClick={onAnswer}
+                onClick={() => { stopIncomingRingSound(); onAnswer?.(); }}
                 className="w-20 h-20 rounded-full flex items-center justify-center relative"
                 style={{
                   background: 'linear-gradient(135deg, #25D366, #128C7E)',
@@ -506,6 +514,7 @@ export function AudioCallScreen({
                 {/* Mute */}
                 <div className="flex flex-col items-center gap-2">
                   <motion.button
+                    whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.85 }}
                     onClick={onToggleMute}
                     className={cn(
@@ -549,6 +558,7 @@ export function AudioCallScreen({
                 {/* Speaker */}
                 <div className="flex flex-col items-center gap-2">
                   <motion.button
+                    whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.85 }}
                     onClick={onToggleSpeaker}
                     className={cn(
@@ -585,14 +595,25 @@ export function AudioCallScreen({
                 {/* End Call */}
                 <div className="flex flex-col items-center gap-2">
                   <motion.button
+                    whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.85 }}
                     onClick={onEndCall}
-                    className="w-16 h-16 rounded-full flex items-center justify-center"
+                    className="w-18 h-18 rounded-full flex items-center justify-center relative"
                     style={{
                       background: 'linear-gradient(135deg, #EA4335, #c62828)',
-                      boxShadow: glowRed,
                     }}
                   >
+                    <motion.div
+                      className="absolute inset-0 rounded-full"
+                      animate={{
+                        boxShadow: [
+                          '0 0 20px rgba(234, 67, 53, 0.4), 0 0 40px rgba(234, 67, 53, 0.2)',
+                          '0 0 40px rgba(234, 67, 53, 0.7), 0 0 80px rgba(234, 67, 53, 0.4), 0 0 120px rgba(234, 67, 53, 0.2)',
+                          '0 0 20px rgba(234, 67, 53, 0.4), 0 0 40px rgba(234, 67, 53, 0.2)',
+                        ],
+                      }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                    />
                     <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
                       <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
                     </svg>
@@ -896,6 +917,7 @@ export function VideoCallScreen({
             <div className="flex items-center justify-center gap-5">
               {/* Mute */}
               <motion.button
+                whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.85 }}
                 onClick={(e) => { e.stopPropagation(); onToggleMute(); }}
                 className={cn(
@@ -930,6 +952,7 @@ export function VideoCallScreen({
 
               {/* Toggle Video */}
               <motion.button
+                whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.85 }}
                 onClick={(e) => { e.stopPropagation(); onToggleVideo(); }}
                 className={cn(
@@ -951,6 +974,7 @@ export function VideoCallScreen({
 
               {/* Flip Camera */}
               <motion.button
+                whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.85 }}
                 onClick={(e) => { e.stopPropagation(); onFlipCamera(); }}
                 className="w-14 h-14 rounded-full flex items-center justify-center bg-white/10"
@@ -965,14 +989,25 @@ export function VideoCallScreen({
 
               {/* End Call */}
               <motion.button
+                whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.85 }}
                 onClick={(e) => { e.stopPropagation(); onEndCall(); }}
-                className="w-16 h-16 rounded-full flex items-center justify-center"
+                className="w-18 h-18 rounded-full flex items-center justify-center relative"
                 style={{
                   background: 'linear-gradient(135deg, #EA4335, #c62828)',
-                  boxShadow: glowRed,
                 }}
               >
+                <motion.div
+                  className="absolute inset-0 rounded-full"
+                  animate={{
+                    boxShadow: [
+                      '0 0 20px rgba(234, 67, 53, 0.4), 0 0 40px rgba(234, 67, 53, 0.2)',
+                      '0 0 40px rgba(234, 67, 53, 0.7), 0 0 80px rgba(234, 67, 53, 0.4), 0 0 120px rgba(234, 67, 53, 0.2)',
+                      '0 0 20px rgba(234, 67, 53, 0.4), 0 0 40px rgba(234, 67, 53, 0.2)',
+                    ],
+                  }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                />
                 <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" transform="rotate(135 12 12)">
                   <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72" />
                 </svg>
@@ -1202,8 +1237,9 @@ export function IncomingCallScreen({
           {/* Answer */}
           <div className="flex flex-col items-center gap-2">
             <motion.button
+              whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.85 }}
-              onClick={onAnswer}
+              onClick={() => { stopIncomingRingSound(); onAnswer(); }}
               className="w-20 h-20 rounded-full flex items-center justify-center relative"
               style={{
                 background: callType === 'video'
