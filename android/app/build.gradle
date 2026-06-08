@@ -14,17 +14,6 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    buildTypes {
-        debug {
-            debuggable true
-            minifyEnabled false
-        }
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
-        }
-    }
     signingConfigs {
         release {
             def keystorePath = System.getenv("KEYSTORE_PATH") ?: "zixo-release-key.jks"
@@ -35,6 +24,17 @@ android {
                 keyAlias System.getenv("KEY_ALIAS") ?: "zixo"
                 keyPassword System.getenv("KEY_PASSWORD") ?: "zixo2024"
             }
+        }
+    }
+    buildTypes {
+        debug {
+            debuggable true
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 }
