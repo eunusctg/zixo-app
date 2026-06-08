@@ -76,40 +76,23 @@ export default function SplashScreen({ onComplete }: SplashScreenProps) {
           animate={{ scale: 1, rotateY: 0 }}
           transition={{ type: 'spring', stiffness: 200, damping: 15, delay: 0.2 }}
           className="relative"
-          style={{ perspective: 800 }}
         >
-          <motion.div
-            animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0, 0.3] }}
-            transition={{ duration: 2, repeat: Infinity }}
-            className="absolute -inset-4 rounded-3xl border-2 border-zixo-primary"
-          />
-          {/* 3D rotating ring */}
-          <motion.div
-            initial={{ rotateX: 0, rotateY: 0 }}
-            animate={{ rotateX: [0, 360], rotateY: [0, 360] }}
-            transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
-            className="absolute -inset-6 rounded-3xl border border-zixo-primary/20"
-            style={{ transformStyle: 'preserve-3d', perspective: 600 }}
-          />
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.4, duration: 0.6, type: 'spring', stiffness: 150 }}
-            className="w-24 h-24 rounded-3xl overflow-hidden shadow-2xl glow-primary relative"
-            style={{ transformStyle: 'preserve-3d' }}
+            className="w-24 h-24 rounded-full overflow-hidden relative"
           >
             <img
               src="/logo-new.png"
               alt="Zixo Logo"
               className="w-full h-full object-cover"
-              style={{ transform: 'translateZ(10px)' }}
             />
             {/* 3D shine effect */}
             <motion.div
               animate={{ x: ['-100%', '200%'] }}
               transition={{ duration: 2, repeat: Infinity, repeatDelay: 3, ease: 'easeInOut' }}
               className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
-              style={{ transform: 'translateZ(15px)' }}
             />
           </motion.div>
         </motion.div>
@@ -211,10 +194,7 @@ export function OnboardingScreen({ onComplete, onSignIn, onSignUp }: OnboardingS
               transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
               className="mb-8"
             >
-              <div className={cn(
-                'w-28 h-28 rounded-3xl bg-gradient-to-br flex items-center justify-center mx-auto shadow-2xl',
-                currentPage.gradient
-              )}>
+              <div className="w-28 h-28 rounded-full bg-zixo-surface-light/50 flex items-center justify-center mx-auto">
                 <span className="text-5xl">{currentPage.emoji}</span>
               </div>
             </motion.div>
@@ -486,8 +466,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
                 transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
                 className="mb-6"
               >
-                <div className="w-20 h-20 rounded-3xl gradient-primary flex items-center justify-center mx-auto shadow-2xl glow-primary">
-                  <span className="text-4xl font-extrabold text-white font-heading">Z</span>
+                <div className="w-20 h-20 flex items-center justify-center mx-auto">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 4H15L7 12H15L5 20H15" stroke="#25D366" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                    <circle cx="18" cy="6" r="2" fill="#25D366" fillOpacity="0.8"/>
+                    <path d="M19 10C20.1 10 21 10.9 21 12" stroke="#25D366" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.5"/>
+                    <path d="M19 14C20.7 14 22 15.3 22 17" stroke="#25D366" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.35"/>
+                  </svg>
                 </div>
               </motion.div>
 
@@ -599,8 +584,13 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
             className="text-center mb-8"
           >
             {/* Logo */}
-            <div className="w-16 h-16 rounded-2xl gradient-primary flex items-center justify-center mx-auto mb-4 glow-primary">
-              <span className="text-3xl font-extrabold text-white font-heading">Z</span>
+            <div className="w-16 h-16 flex items-center justify-center mx-auto mb-4">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M5 4H15L7 12H15L5 20H15" stroke="#25D366" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                <circle cx="18" cy="6" r="2" fill="#25D366" fillOpacity="0.8"/>
+                <path d="M19 10C20.1 10 21 10.9 21 12" stroke="#25D366" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.5"/>
+                <path d="M19 14C20.7 14 22 15.3 22 17" stroke="#25D366" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.35"/>
+              </svg>
             </div>
 
             <h2 className="text-2xl font-bold font-heading text-zixo-text">

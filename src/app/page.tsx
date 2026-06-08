@@ -640,14 +640,12 @@ export default function ZixoApp() {
         <div className="shrink-0 bg-[#1F2C34]">
           <div className="flex items-center justify-between px-4 py-3 safe-area-top">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl gradient-primary flex items-center justify-center">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M5 4H15L7 12H15L5 20H15" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-                  <circle cx="18" cy="6" r="2" fill="white" fillOpacity="0.8"/>
-                  <path d="M19 10C20.1 10 21 10.9 21 12" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.5"/>
-                  <path d="M19 14C20.7 14 22 15.3 22 17" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.35"/>
-                </svg>
-              </div>
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M5 4H15L7 12H15L5 20H15" stroke="#25D366" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                <circle cx="18" cy="6" r="2" fill="#25D366" fillOpacity="0.8"/>
+                <path d="M19 10C20.1 10 21 10.9 21 12" stroke="#25D366" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.5"/>
+                <path d="M19 14C20.7 14 22 15.3 22 17" stroke="#25D366" strokeWidth="1.5" strokeLinecap="round" fill="none" fillOpacity="0.35"/>
+              </svg>
               <h1 className="text-xl font-bold font-heading gradient-primary bg-clip-text text-transparent">Zixo</h1>
             </div>
             <div className="flex items-center gap-2">
