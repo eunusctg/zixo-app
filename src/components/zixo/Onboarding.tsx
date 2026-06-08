@@ -324,16 +324,26 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
       if (!store.isAuthenticated || !store.currentUser) {
         store.login(result.profile);
       }
-      // Show Zixo Number if available
-      if (result.profile.zixoNumber) {
+      // Show Zixo Number if available (with null safety)
+      if (result?.profile?.zixoNumber) {
         setUserZixoNumber(result.profile.zixoNumber);
         setShowZixoNumber(true);
-      } else {
-        onAuth({ email: result.profile.email, displayName: result.profile.displayName });
+      } else if (result?.profile) {
+        onAuth({ email: result.profile.email || '', displayName: result.profile.displayName });
       }
     } catch (err: any) {
       const errorCode = err?.code || '';
-      if (errorCode !== 'auth/popup-closed-by-user') {
+      // Handle popup-related errors gracefully
+      if (errorCode === 'auth/popup-closed-by-user') {
+        // User cancelled — no error needed
+      } else if (errorCode === 'auth/popup-blocked') {
+        setError('Pop-up was blocked by your browser. Please allow pop-ups for this site and try again.');
+      } else if (errorCode === 'auth/unauthorized-domain') {
+        setError(err?.message || 'This domain is not authorized for sign-in. Please add it in Firebase Console > Authentication > Settings > Authorized domains.');
+      } else if (err?.message && !errorCode) {
+        // Errors thrown with `new Error()` (like our unauthorized-domain wrapper) won't have a code
+        setError(err.message);
+      } else {
         setError(getFirebaseErrorMessage(errorCode));
       }
     } finally {

@@ -82,6 +82,7 @@ export function getAuthErrorMessage(error: AuthError | { code?: string }): strin
     'auth/requires-recent-login': 'This operation requires a recent login. Please sign in again.',
     'auth/unverified-email': 'Please verify your email before signing in.',
     'auth/account-exists-with-different-credential': 'An account already exists with this email using a different sign-in method.',
+    'auth/unauthorized-domain': 'This domain is not authorized for sign-in. Please add it in Firebase Console > Authentication > Settings > Authorized domains, or try accessing the app from an authorized domain.',
     'auth/invalid-verification-code': 'The verification code is invalid. Please try again.',
     'auth/invalid-verification-id': 'The verification ID is invalid. Please restart the verification process.',
     'auth/expired-action-code': 'This link has expired. Please request a new one.',
@@ -174,16 +175,27 @@ export function isAdmin(user: ZixoUserProfile | null): boolean {
 export async function generateUniqueZixoNumber(): Promise<string> {
   const MAX_ATTEMPTS = 10;
 
+  // Null-check: if db is undefined, return a fallback number
+  if (!db) {
+    console.warn('[Zixo Auth] Firestore db is undefined in generateUniqueZixoNumber, returning fallback');
+    return String(Date.now()).slice(-8);
+  }
+
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     // Generate random 8-digit number (10000000 - 99999999)
     const num = Math.floor(Math.random() * 90000000) + 10000000;
     const zixoNumber = String(num);
 
-    // Check if it already exists in the zixoNumbers collection
-    const docRef = doc(db, 'zixoNumbers', zixoNumber);
-    const docSnap = await getDoc(docRef);
+    try {
+      // Check if it already exists in the zixoNumbers collection
+      const docRef = doc(db, 'zixoNumbers', zixoNumber);
+      const docSnap = await getDoc(docRef);
 
-    if (!docSnap.exists()) {
+      if (!docSnap.exists()) {
+        return zixoNumber;
+      }
+    } catch (err) {
+      console.warn('[Zixo Auth] Error checking zixoNumber uniqueness, using generated number:', err);
       return zixoNumber;
     }
   }
@@ -204,12 +216,18 @@ export async function ensureZixoNumber(uid: string, existingProfile?: Record<str
     return existingProfile.zixoNumber;
   }
 
+  // Null-check: if db is undefined (shouldn't happen but defensive), return a fallback
+  if (!db) {
+    console.warn('[Zixo Auth] Firestore db is undefined in ensureZixoNumber, returning fallback');
+    return String(Date.now()).slice(-8);
+  }
+
   // Double-check Firestore in case the profile data is stale
   try {
     const userDoc = await getDoc(doc(db, 'users', uid));
     if (userDoc.exists()) {
       const data = userDoc.data();
-      if (data.zixoNumber) {
+      if (data?.zixoNumber) {
         // Also ensure the mapping exists in zixoNumbers collection
         const mappingRef = doc(db, 'zixoNumbers', data.zixoNumber);
         const mappingSnap = await getDoc(mappingRef);
@@ -224,16 +242,24 @@ export async function ensureZixoNumber(uid: string, existingProfile?: Record<str
   }
 
   // Generate and assign a new zixoNumber
-  const zixoNumber = await generateUniqueZixoNumber();
+  let zixoNumber: string;
+  try {
+    zixoNumber = await generateUniqueZixoNumber();
+  } catch (err) {
+    console.warn('[Zixo Auth] Failed to generate zixoNumber:', err);
+    zixoNumber = String(Date.now()).slice(-8);
+  }
 
   // Save to user profile
-  await setDoc(doc(db, 'users', uid), { zixoNumber }, { merge: true });
-
-  // Create mapping in zixoNumbers collection
-  await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid });
-
-  // Sync zixoNumber to RTDB
-  await syncUserProfileToRTDB(uid, { zixoNumber }, true);
+  try {
+    await setDoc(doc(db, 'users', uid), { zixoNumber }, { merge: true });
+    // Create mapping in zixoNumbers collection
+    await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid });
+    // Sync zixoNumber to RTDB
+    await syncUserProfileToRTDB(uid, { zixoNumber }, true);
+  } catch (err) {
+    console.warn('[Zixo Auth] Failed to save zixoNumber to Firestore:', err);
+  }
 
   return zixoNumber;
 }
@@ -378,21 +404,34 @@ export async function loginWithEmail(
  * Sign in with Google
  */
 export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUserProfile }> {
-  const credential = await signInWithPopup(auth, googleProvider);
+  let credential;
+  try {
+    credential = await signInWithPopup(auth, googleProvider);
+  } catch (err: any) {
+    // Provide a clear error for unauthorized domains (e.g., zixocall.eu.cc not in Firebase authorized domains)
+    if (err?.code === 'auth/unauthorized-domain') {
+      throw new Error('This domain is not authorized for sign-in. Please add it in Firebase Console > Authentication > Settings > Authorized domains, or try accessing the app from an authorized domain.');
+    }
+    throw err;
+  }
   const user = credential.user;
+
+  // Safely derive display name and username parts
+  const nameStr = user.displayName || user.email?.split('@')[0] || 'user';
+  const safeUsername = `@${nameStr.toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
+  const safeDisplayName = user.displayName || user.email?.split('@')[0] || 'User';
 
   // Check if user profile exists
   let profile = await getUserProfile(user.uid);
 
   if (!profile) {
     // First-time Google sign-in: create profile
-    const username = `@${(user.displayName || user.email?.split('@')[0] || 'user').toLowerCase().replace(/\s+/g, '')}${Math.floor(Math.random() * 1000)}`;
     const zixoNumber = await generateUniqueZixoNumber();
     profile = {
       uid: user.uid,
-      displayName: user.displayName || user.email?.split('@')[0] || 'User',
+      displayName: safeDisplayName,
       email: user.email || '',
-      username,
+      username: safeUsername,
       bio: 'Living free, connecting freely 🌍',
       avatar: user.photoURL || '',
       online: true,
@@ -406,7 +445,7 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
       createdAt: serverTimestamp(),
       lastSeen: serverTimestamp(),
     });
-    await setDoc(doc(db, 'usernames', username), { uid: user.uid });
+    await setDoc(doc(db, 'usernames', safeUsername), { uid: user.uid });
     // Create zixoNumber mapping for fast lookup
     await setDoc(doc(db, 'zixoNumbers', zixoNumber), { uid: user.uid });
     // Sync profile to RTDB for fallback access

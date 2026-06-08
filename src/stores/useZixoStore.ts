@@ -19,10 +19,14 @@ async function queryBrowserPermission(
   name: 'microphone' | 'camera' | 'geolocation'
 ): Promise<'granted' | 'denied' | 'prompt' | 'unsupported'> {
   try {
+    if (typeof navigator === 'undefined' || !navigator.permissions || !navigator.permissions.query) {
+      return 'unsupported';
+    }
     const result = await navigator.permissions.query({ name: name as PermissionName });
     return result.state as 'granted' | 'denied' | 'prompt';
   } catch {
     // Firefox doesn't support 'microphone'/'camera' as PermissionName
+    // Some browsers throw for certain permission names
     return 'unsupported';
   }
 }
@@ -304,7 +308,7 @@ export type Screen =
   | 'new-chat'
   | 'admin-panel';
 
-export type Tab = 'chats' | 'calls' | 'contacts' | 'settings';
+export type Tab = 'chats' | 'calls' | 'settings';
 
 export type CallStatus = 'idle' | 'ringing' | 'connecting' | 'connected' | 'ended';
 
@@ -648,7 +652,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for calls' });
 
     // Define the callback that proceeds with the call after permissions are granted
-    const proceedWithCall = (granted: boolean) => {
+    const proceedWithCall = async (granted: boolean) => {
       if (!granted) return;
 
       const state = useZixoStore.getState();
@@ -662,7 +666,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       }
 
       // Reset any previous WebRTC instance
-      resetWebRTC();
+      await resetWebRTC();
       const webrtc = getWebRTC();
 
       // Set up callbacks
@@ -764,7 +768,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
     neededPermissions.push({ type: 'microphone', status: 'requesting', message: 'Microphone access is needed for calls' });
 
     // Define the callback that proceeds with answering after permissions are granted
-    const proceedWithAnswer = (granted: boolean) => {
+    const proceedWithAnswer = async (granted: boolean) => {
       if (!granted) {
         // Reject the incoming call if permissions denied
         try { endCallSignal(savedCallId); } catch {}
@@ -782,7 +786,7 @@ export const useZixoStore = create<ZixoState>((set, get) => ({
       }
 
       // Reset any previous WebRTC instance
-      resetWebRTC();
+      await resetWebRTC();
       const webrtc = getWebRTC();
 
       // Stop incoming ringing sound

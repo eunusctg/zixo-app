@@ -8,11 +8,11 @@
  */
 
 import { ref, onValue, off, onChildAdded, get } from 'firebase/database';
-import { db as firestoreDb, doc, setDoc, getDoc, updateDoc, onSnapshot, deleteDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, onSnapshot, deleteDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { rtdb } from './firebase';
 import { createCallSignal, updateCallSignal, endCallSignal, addICECandidate, subscribeToIncomingCalls, type RTDBCallSignal } from './presence';
 
-// Free Google STUN servers
+// STUN + TURN servers for reliable NAT traversal
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -20,6 +20,22 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    // Free TURN servers from Open Relay Project for reliable NAT traversal
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
 };
 
@@ -184,7 +200,7 @@ export class ZixoWebRTC {
     let offer = callData.offer;
     if (!offer) {
       console.log('[Zixo] Offer not in callData, waiting for it from RTDB...');
-      offer = await this.waitForOffer(callId, 10000); // 10s timeout
+      offer = (await this.waitForOffer(callId, 10000)) ?? undefined; // 10s timeout
     }
     if (!offer) {
       throw new Error('No offer received from caller. The call may have ended.');
@@ -578,11 +594,16 @@ export function getWebRTC(): ZixoWebRTC {
   return webrtcInstance;
 }
 
-export function resetWebRTC(): void {
+export async function resetWebRTC(): Promise<void> {
   if (webrtcInstance) {
-    // Synchronous cleanup: stop tracks, close peer connection, unsubscribe
-    // Don't await — endCall's async parts (RTDB cleanup) are non-blocking
-    webrtcInstance.endCall();
+    try {
+      // Properly wait for the old instance's endCall to complete before creating a new one.
+      // This prevents race conditions where the old peer connection isn't fully closed
+      // when the new instance starts using the same media devices.
+      await webrtcInstance.endCall();
+    } catch (err) {
+      console.warn('[Zixo WebRTC] Error during resetWebRTC cleanup:', err);
+    }
   }
   webrtcInstance = new ZixoWebRTC();
 }

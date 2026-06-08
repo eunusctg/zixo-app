@@ -282,11 +282,12 @@ export function useFirebaseBridge() {
         }
       } catch (error) {
         console.error('[Zixo Bridge] Error loading user profile:', error);
+        const nameStr = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'user';
         const tempProfile: ZixoUserProfile = {
           uid: firebaseUser.uid,
-          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+          displayName: nameStr,
           email: firebaseUser.email || '',
-          username: `@${(firebaseUser.displayName || 'user').toLowerCase().replace(/\s+/g, '')}`,
+          username: `@${nameStr.toLowerCase().replace(/\s+/g, '')}`,
           bio: 'Living free, connecting freely',
           avatar: firebaseUser.photoURL || '',
           online: true,
@@ -298,17 +299,29 @@ export function useFirebaseBridge() {
         console.log('[Zixo Bridge] Using temp profile due to error');
         login(tempProfile);
 
-        setTimeout(async () => {
+        // Retry loading the profile after a delay
+        const retryLoad = async (attempt: number) => {
+          if (attempt > 3) {
+            console.error('[Zixo Bridge] Profile load retry exhausted after 3 attempts');
+            return;
+          }
           try {
             const profile = await getUserProfile(firebaseUser.uid);
             if (profile) {
-              console.log('[Zixo Bridge] Profile loaded on retry');
+              console.log(`[Zixo Bridge] Profile loaded on retry attempt ${attempt}`);
               login(profile);
+            } else {
+              // Profile doesn't exist yet — retry with exponential backoff
+              const delay = Math.pow(2, attempt) * 1000;
+              setTimeout(() => retryLoad(attempt + 1), delay);
             }
           } catch (retryError) {
-            console.error('[Zixo Bridge] Profile load retry also failed:', retryError);
+            console.warn(`[Zixo Bridge] Profile load retry attempt ${attempt} failed:`, retryError);
+            const delay = Math.pow(2, attempt) * 1000;
+            setTimeout(() => retryLoad(attempt + 1), delay);
           }
-        }, 2000);
+        };
+        setTimeout(() => retryLoad(1), 2000);
       }
     }
   };
@@ -691,6 +704,38 @@ export function useFirebaseBridge() {
       .catch((error) => {
         console.warn('[Zixo] Failed to load call history, will retry:', error);
         // Don't set callHistoryLoaded so the effect can retry on next render
+        // Retry after 5 seconds
+        setTimeout(() => {
+          const store = useZixoStore.getState();
+          if (store.isAuthenticated && store.currentUser) {
+            getCallHistory(store.currentUser.uid)
+              .then((calls) => {
+                callHistoryLoaded.current = true;
+                if (calls.length > 0) {
+                  const uiCalls = calls.map((c) => ({
+                    id: c.id,
+                    callerId: c.callerId,
+                    callerName: c.callerName,
+                    callerAvatar: c.callerAvatar,
+                    receiverId: c.receiverId,
+                    receiverName: c.receiverName,
+                    receiverAvatar: c.receiverAvatar,
+                    type: c.type,
+                    direction: c.direction,
+                    duration: c.duration,
+                    timestamp: c.timestamp?.toMillis?.() || Date.now(),
+                  }));
+                  store.setCallHistory(uiCalls);
+                } else {
+                  callHistoryLoaded.current = true;
+                }
+              })
+              .catch((retryErr) => {
+                console.warn('[Zixo] Call history retry also failed:', retryErr);
+                callHistoryLoaded.current = true; // Prevent infinite retries
+              });
+          }
+        }, 5000);
       });
   }, [isAuthenticated, currentUser, setCallHistory]);
 

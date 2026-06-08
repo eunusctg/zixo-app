@@ -19,7 +19,7 @@ import { CallHistoryList, ContactsScreen } from '@/components/zixo/CallHistory';
 import SettingsScreen from '@/components/zixo/SettingsScreen';
 import ProfileEditScreen from '@/components/zixo/ProfileEditScreen';
 import AdminPanel from '@/components/zixo/AdminPanel';
-import { BottomNav, FAB, SearchBar } from '@/components/zixo/Navigation';
+import { BottomNav, FAB, SearchBar, CallsDialFAB } from '@/components/zixo/Navigation';
 import { OnlineStatus, EncryptionBadge } from '@/components/zixo/Common';
 import ErrorBoundary from '@/components/zixo/ErrorBoundary';
 import NotificationBanner from '@/components/zixo/NotificationBanner';
@@ -771,24 +771,30 @@ export default function ZixoApp() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 10 }}
                 transition={{ duration: 0.2 }}
+                className="relative"
               >
+                {/* Call History */}
                 <CallHistoryList
                   calls={callHistory}
                   currentUserId={currentUser.uid}
                   onCallBack={handleCallBack}
                 />
-              </motion.div>
-            )}
 
-            {activeTab === 'contacts' && (
-              <motion.div
-                key="contacts"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                transition={{ duration: 0.2 }}
-              >
+                {/* Separator between call history and contacts */}
+                {callHistory.length > 0 && (
+                  <div className="mx-4 my-3">
+                    <div className="h-px bg-white/5" />
+                  </div>
+                )}
+
+                {/* Contacts section inside Calls tab */}
                 {renderContactsTabContent()}
+
+                {/* 3D Dial FAB */}
+                <CallsDialFAB
+                  onNewCall={() => setScreen('contacts')}
+                  onAddContact={() => setScreen('contacts')}
+                />
               </motion.div>
             )}
 
@@ -1345,7 +1351,9 @@ export default function ZixoApp() {
             transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
             className="will-change-transform"
           >
-            {renderScreen()}
+            <ErrorBoundary>
+              {renderScreen()}
+            </ErrorBoundary>
           </motion.div>
         </AnimatePresence>
       </div>

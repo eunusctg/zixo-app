@@ -1,12 +1,12 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/zixo-utils';
 
 interface BottomNavProps {
-  activeTab: 'chats' | 'calls' | 'contacts' | 'settings';
-  onTabChange: (tab: 'chats' | 'calls' | 'contacts' | 'settings') => void;
+  activeTab: 'chats' | 'calls' | 'settings';
+  onTabChange: (tab: 'chats' | 'calls' | 'settings') => void;
   unreadCount: number;
 }
 
@@ -28,19 +28,6 @@ export function BottomNav({ activeTab, onTabChange, unreadCount }: BottomNavProp
       icon: (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
-        </svg>
-      ),
-      badge: 0,
-    },
-    {
-      id: 'contacts' as const,
-      label: 'Contacts',
-      icon: (
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-          <circle cx="8.5" cy="7" r="4" />
-          <line x1="20" y1="8" x2="20" y2="14" />
-          <line x1="23" y1="11" x2="17" y2="11" />
         </svg>
       ),
       badge: 0,
@@ -243,5 +230,131 @@ export function SearchBar({ value, onChange, isExpanded, onToggle, placeholder =
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+// ==================== 3D DIAL FAB (for Calls Tab) ====================
+
+interface CallsDialFABProps {
+  onNewCall: () => void;
+  onAddContact: () => void;
+}
+
+export function CallsDialFAB({ onNewCall, onAddContact }: CallsDialFABProps) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="fixed bottom-20 right-4 z-40">
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.8 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.8 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+            className="absolute bottom-16 right-0 flex flex-col gap-2 items-end"
+          >
+            {/* New Call Option */}
+            <motion.button
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ delay: 0.05 }}
+              onClick={() => { onNewCall(); setIsOpen(false); }}
+              className="flex items-center gap-2.5 glass rounded-full px-4 py-2.5 text-sm font-medium text-zixo-text hover:bg-zixo-surface-light/80 transition-all duration-200"
+              style={{
+                background: 'rgba(31, 44, 52, 0.9)',
+                backdropFilter: 'blur(16px)',
+                border: '1px solid rgba(37, 211, 102, 0.2)',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.3), 0 0 20px rgba(37, 211, 102, 0.1)',
+              }}
+            >
+              <span>New Call</span>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, #25D366, #128C7E)' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+                </svg>
+              </div>
+            </motion.button>
+
+            {/* Add Contact Option */}
+            <motion.button
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={{ delay: 0.1 }}
+              onClick={() => { onAddContact(); setIsOpen(false); }}
+              className="flex items-center gap-2.5 glass rounded-full px-4 py-2.5 text-sm font-medium text-zixo-text hover:bg-zixo-surface-light/80 transition-all duration-200"
+              style={{
+                background: 'rgba(31, 44, 52, 0.9)',
+                backdropFilter: 'blur(16px)',
+                border: '1px solid rgba(52, 183, 241, 0.2)',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.3), 0 0 20px rgba(52, 183, 241, 0.1)',
+              }}
+            >
+              <span>Add Contact</span>
+              <div className="w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, #34B7F1, #128C7E)' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="8.5" cy="7" r="4" />
+                  <line x1="20" y1="8" x2="20" y2="14" />
+                  <line x1="23" y1="11" x2="17" y2="11" />
+                </svg>
+              </div>
+            </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 3D Dial FAB Button */}
+      <motion.button
+        whileTap={{ scale: 0.9 }}
+        whileHover={{ scale: 1.05, y: -2 }}
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all duration-300 relative"
+        style={{
+          background: isOpen
+            ? 'linear-gradient(135deg, #EA4335, #c62828)'
+            : 'linear-gradient(135deg, #25D366, #128C7E)',
+          boxShadow: isOpen
+            ? '0 4px 20px rgba(234, 67, 53, 0.4), 0 8px 32px rgba(234, 67, 53, 0.2)'
+            : '0 4px 20px rgba(37, 211, 102, 0.4), 0 8px 32px rgba(37, 211, 102, 0.2), inset 0 1px 0 rgba(255,255,255,0.2)',
+          transform: isOpen ? 'rotate(45deg)' : 'rotate(0deg)',
+          perspective: 800,
+        }}
+      >
+        {/* 3D highlight */}
+        <div
+          className="absolute inset-0 rounded-full pointer-events-none"
+          style={{
+            background: isOpen
+              ? 'linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 50%)'
+              : 'linear-gradient(180deg, rgba(255,255,255,0.25) 0%, transparent 50%)',
+          }}
+        />
+        {isOpen ? (
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        ) : (
+          /* 3D Dialpad SVG */
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="none" stroke="white" strokeWidth="1.5" opacity="0.3" />
+            <circle cx="8" cy="9" r="1.5" fill="white" />
+            <circle cx="12" cy="9" r="1.5" fill="white" />
+            <circle cx="16" cy="9" r="1.5" fill="white" />
+            <circle cx="8" cy="13" r="1.5" fill="white" />
+            <circle cx="12" cy="13" r="1.5" fill="white" />
+            <circle cx="16" cy="13" r="1.5" fill="white" />
+            <circle cx="12" cy="17" r="1.5" fill="white" />
+          </svg>
+        )}
+      </motion.button>
+    </div>
   );
 }
