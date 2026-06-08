@@ -1,93 +1,24 @@
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Fix duplicate calls, add missed call logic, add outgoing ring sound
+Task: Fix all errors - Zixo Number, QR, Admin Settings not showing
 
 Work Log:
-- Read and analyzed all call-related source files: useFirebaseBridge.ts, CallScreens.tsx, useZixoStore.ts, presence.ts, webrtc.ts, messaging.ts
-- Identified root cause of duplicate calls: subscribeToIncomingCalls used onValue on the entire `calls` node, firing on every data change (ICE candidates, offer updates, etc.)
-- Rewrote subscribeToIncomingCalls to use onChildAdded (fires only for NEW calls) + per-call status listeners (detects caller cancellation)
-- Added missed call recording in 3 places: (1) when caller cancels before answer (useFirebaseBridge 8b), (2) when calls array goes empty while incomingCall exists (useFirebaseBridge 8), (3) when receiver rejects the call (useZixoStore rejectCall)
-- Added playOutgoingRingSound() and stopOutgoingRingSound() functions to messaging.ts
-- Integrated outgoing ring sound: starts when call is initiated (ringing), stops when connected/ended/failed
-- Added guards in startCall to prevent starting a new call while already in an active or incoming call
-- Added double-check in proceedWithCall callback (after permission dialog)
-- Added stopOutgoingRingSound() in endCall, setCallStatus(connected/ended), and call failure handler
-- Build succeeded and deployed to Cloudflare Pages
+- Explored project structure and read all key source files
+- Identified that the app build was stale - latest code with Zixo Number, QR, Admin features was never deployed
+- Found wrangler.toml had wrong build output directory (.open-next/assets instead of .vercel/output/static)
+- Found that FIREBASE_PRIVATE_KEY was not set as Cloudflare Pages secret, breaking admin API
+- Found that useFirebaseBridge only tried to assign Zixo Number once on auth state change - no retry or real-time profile sync
+- Fixed wrangler.toml to point to correct build output directory
+- Added robust Zixo Number retry logic in useFirebaseBridge - retries every 5 seconds if assignment fails
+- Added real-time Firestore profile subscription in useFirebaseBridge - syncs zixoNumber, role, avatar, displayName changes
+- Added fallback UI in SettingsScreen - shows "Assigning Zixo Number..." spinner when zixoNumber is empty
+- Set FIREBASE_PRIVATE_KEY as Cloudflare Pages secret (for admin API)
+- Built and deployed to Cloudflare Pages twice (initial fix + retry/profile sync fix)
+- Pushed all changes to GitHub
 
 Stage Summary:
-- Fixed duplicate call signals by replacing broad onValue listener with targeted onChildAdded + per-call status listeners
-- Implemented missed call recording (direction: 'missed') in call history with Firestore persistence
-- Added outgoing ring sound (dual-tone 440Hz+480Hz repeating pattern) that plays while waiting for receiver to answer
-- Fixed black screen by preventing multiple simultaneous calls that corrupted state
-- Deployed to https://625befee.zixo.pages.dev
-
----
-Task ID: 3
-Agent: Main Agent
-Task: Fix outgoing and incoming call screen black screen issue
-
-Work Log:
-- Read all call-related source files: CallScreens.tsx, useZixoStore.ts, useFirebaseBridge.ts, presence.ts, webrtc.ts, page.tsx, messaging.ts
-- Identified 5 root causes of black screen and duplicate calls:
-  1. subscribeToIncomingCalls used onValue on entire `calls` node - fires on EVERY data change (ICE candidates, offer updates, status changes), not just new calls
-  2. setCallStatus/toggleSpeaker/setCallRemoteStream/setCallLocalStream had bug: returned `{ activeCall: null }` when activeCall was null, which could overwrite a just-created activeCall during rapid state transitions
-  3. No guard against duplicate incoming call handling in useFirebaseBridge - callback could fire multiple times, each triggering setIncomingCall + setScreen
-  4. No guard in startCall against starting a call while already in one
-  5. No deduplication of call signals - same incoming call could be processed multiple times
-- Fixed subscribeToIncomingCalls in presence.ts: replaced onValue with onChildAdded (only fires for NEW children) + added notifiedCalls Set for deduplication + added per-call status listener to detect caller cancellation
-- Fixed all Zustand setters that could overwrite activeCall with null: setCallStatus, toggleSpeaker, setCallRemoteStream, setCallLocalStream now return {} when activeCall is null
-- Added guards in useFirebaseBridge: skip incoming call if already in activeCall, skip if already showing this incoming call, re-check after async profile fetch
-- Added missed call handling: when call cancelled callback fires empty array, clear incomingCall and go back to home
-- Added guards in startCall and answerCall: don't proceed if already in an active/incoming call
-- Added call cancellation detection: when WebRTC promise resolves but activeCall was already cleared, don't set state
-- Added playIncomingRingSound() and playOutgoingRingSound() to messaging.ts using Web Audio API
-- Integrated ring sounds: outgoing sound plays on startCall, incoming sound plays on setIncomingCall, both stop on answer/connect/end/reject
-- Fixed handleAnswerCall in page.tsx to use fresh store state instead of stale closure
-- Build succeeded and deployed to Cloudflare Pages
-- Pushed to GitHub
-
-Stage Summary:
-- Root cause: onValue listener on `calls/` node fired on every RTDB write (ICE candidates, etc.), causing duplicate call triggers that corrupted React state
-- Fixed by switching to onChildAdded + deduplication + per-call status monitoring
-- Fixed Zustand setter bug that could null out activeCall during race conditions
-- Added comprehensive guards against duplicate call processing
-- Added incoming and outgoing ring sounds using Web Audio API
-- Added missed call recording when call is rejected
-- Deployed to https://e04b7c5c.zixo.pages.dev and https://zixocall.eu.cc
-
----
-Task ID: 8
-Agent: Main Agent
-Task: Fix all errors, fix call answer flow, animated buttons, QR improvements, contacts menu
-
-Work Log:
-- Read all key source files: CallScreens.tsx, useZixoStore.ts, useFirebaseBridge.ts, Navigation.tsx, SettingsScreen.tsx, CallHistory.tsx, page.tsx
-- Verified build succeeds with no compilation errors
-- Fixed "Failed to answer call" issue in useZixoStore.ts:
-  - Saved callData and callId in closure so they survive permission dialog
-  - Added fallback: if incomingCall is null after permissions, uses saved data
-  - Added try-catch around webrtc.answerCall() with better error handling
-  - Uses saved callId in catch handler for proper endCallSignal
-- Fixed hangup button sizing: replaced invalid `w-18 h-18` with `w-[68px] h-[68px]` in both AudioCallScreen and VideoCallScreen
-- Added animated button effects:
-  - Mute button: spring animation with key-based re-render (scale 0.6→1, rotate -15→0)
-  - Speaker button: spring animation with key-based re-render (scale 0.6→1, rotate 15→0)
-  - End Call button: breathing animation (scale: [1, 1.05, 1]) with 2s loop
-  - Labels: wrapped in motion.span with fade-in (y: -5→0, opacity: 0→1)
-- Profile card QR code: made smaller (container w-7 h-7, padding p-0.5, QR size 20)
-- Added swipe-to-scan QR in contacts tab:
-  - Drag gesture on QR code section with dragConstraints={{ left: 0, right: 200 }}
-  - Auto-triggers scanner when swiped past 100px
-  - Visual hint: "Swipe right to scan →" with pulsing arrow
-- Verified Contacts tab already present in Navigation.tsx (4 tabs: Chats, Calls, Contacts, Settings)
-- Rebuilt and deployed to https://8f50be3b.zixo.pages.dev
-- Pushed to GitHub as commit 434a99c
-
-Stage Summary:
-- Fixed answer call flow with saved closure data to survive permission dialog delays
-- Fixed invalid Tailwind class w-18 h-18 → w-[68px] h-[68px] for proper hangup button sizing
-- Added spring and breathing animations to mute, speaker, and hangup buttons
-- Made profile card QR code smaller (w-7 h-7, size 20)
-- Added swipe-to-scan QR feature in contacts with drag gesture and visual hint
-- All features deployed to https://8f50be3b.zixo.pages.dev and https://zixo.pages.dev
+- Root cause: App was never redeployed with latest feature code + no retry mechanism for Zixo Number assignment
+- Key fixes: Real-time profile sync, Zixo Number retry, fallback UI, correct wrangler.toml
+- Deployment: https://zixo.pages.dev (latest code with all features)
+- Admin API: RTDB fallback works even without correct FIREBASE_PRIVATE_KEY
