@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useZixoStore } from '@/stores/useZixoStore';
-import { onAuthChange, getUserProfile, updateOnlineStatus, type ZixoUserProfile } from '@/services/auth';
+import { onAuthChange, getUserProfile, updateOnlineStatus, checkRedirectResult, type ZixoUserProfile } from '@/services/auth';
 import { subscribeToUserChats, subscribeToChatMessages, getUserProfiles, getCallHistory, subscribeToUserProfile } from '@/services/firestore';
 import { initFCM, sendPushNotification, onNotificationBanner, updateMessageBadge, playNotificationSound, playRingingSound, stopRingingSound, stopOutgoingRingSound, showBrowserNotification, showBannerNotification } from '@/services/messaging';
 import { setupPresence, subscribeToTyping, subscribeToIncomingCalls, subscribeToCallStatus, subscribeToMultiplePresence, subscribeToGroupCalls, cleanupStaleCallSignals, endCallSignal, type RTDBCallSignal } from '@/services/presence';
@@ -341,6 +341,13 @@ export function useFirebaseBridge() {
     // Also listen for ID token changes (refresh) to keep the session alive.
     // This prevents false logouts when the token is refreshed but onAuthStateChanged
     // doesn't fire (which can happen on some platforms).
+    // Check for redirect sign-in result (Capacitor Android/iOS)
+    // When using signInWithRedirect, the result is available after the page reloads.
+    // This clears the pending redirect state and processes the sign-in.
+    checkRedirectResult().catch((err: any) => {
+      console.warn("[Zixo Bridge] checkRedirectResult error:", err);
+    });
+
     const tokenUnsub = onIdTokenChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         // Token refreshed — clear any pending logout timer

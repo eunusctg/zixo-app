@@ -297,6 +297,14 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     try {
       const { loginWithGoogle } = await import('@/services/auth');
       const result = await loginWithGoogle();
+      // In Capacitor native, signInWithRedirect navigates away from the page.
+      // The promise never resolves — the sign-in result comes through onAuthStateChanged
+      // when the page reloads after the OAuth redirect. So if result is undefined/null,
+      // just return (the bridge hook will handle the rest after redirect).
+      if (!result) {
+        // Redirect flow in progress — page will navigate away
+        return;
+      }
       // Immediately update the Zustand store to prevent race conditions
       // with the Firebase bridge's onAuthStateChanged
       const { useZixoStore } = await import('@/stores/useZixoStore');
@@ -314,7 +322,7 @@ export function AuthScreen({ mode, onAuth, onSwitchMode, onBack }: AuthScreenPro
     } catch (err: any) {
       const errorCode = err?.code || '';
       // Handle popup-related errors gracefully
-      if (errorCode === 'auth/popup-closed-by-user') {
+      if (errorCode === 'auth/popup-closed-by-user' || errorCode === 'auth/redirect-cancelled-by-user') {
         // User cancelled — no error needed
       } else if (errorCode === 'auth/popup-blocked') {
         setError('Pop-up was blocked by your browser. Please allow pop-ups for this site and try again.');

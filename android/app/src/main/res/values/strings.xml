@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Zixo</string>
+    <string name="title_activity_main">Zixo</string>
+    <string name="package_name">com.zixo.call</string>
+    <string name="custom_url_scheme">com.zixo.call</string>
+    <string name="server_client_id">809372450511-<YOUR_WEB_CLIENT_ID>.apps.googleusercontent.com</string>
+</resources>

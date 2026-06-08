@@ -2,6 +2,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   sendPasswordResetEmail,
@@ -20,6 +22,63 @@ import {
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, set as rtdbSet, update as rtdbUpdate } from 'firebase/database';
 import { auth, db, rtdb } from './firebase';
+
+// ==================== CAPACITOR NATIVE DETECTION ====================
+
+/**
+ * Check if the app is running inside a Capacitor native shell (Android/iOS).
+ * Capacitor injects a global `Capacitor` object with isNativePlatform().
+ */
+function isCapacitorNative(): boolean {
+  return typeof window !== 'undefined' &&
+    typeof (window as any).Capacitor !== 'undefined' &&
+    (window as any).Capacitor.isNativePlatform?.() === true;
+}
+
+// ==================== REDIRECT RESULT HANDLING ====================
+
+/**
+ * Callback for redirect sign-in result.
+ * Set by the app's bridge hook so it can process the result.
+ */
+let redirectResultCallback: ((result: { user: User; profile: ZixoUserProfile } | null, error?: Error) => void) | null = null;
+
+/**
+ * Set the callback that will be invoked when getRedirectResult resolves.
+ * The app's useFirebaseBridge hook calls this on mount.
+ */
+export function setRedirectResultCallback(
+  cb: (result: { user: User; profile: ZixoUserProfile } | null, error?: Error) => void
+): void {
+  redirectResultCallback = cb;
+}
+
+/**
+ * Check for redirect sign-in result on app load.
+ * Must be called once after Firebase Auth initializes.
+ * In Capacitor native, signInWithRedirect is used instead of signInWithPopup,
+ * and the result is picked up here when the app reloads after the OAuth redirect.
+ */
+export async function checkRedirectResult(): Promise<void> {
+  if (!isCapacitorNative()) return;
+
+  try {
+    const result = await getRedirectResult(auth);
+    if (result) {
+      console.log('[Zixo Auth] Got redirect result, processing sign-in...');
+      const user = result.user;
+      const profile = await processGoogleSignIn(user);
+      if (redirectResultCallback) {
+        redirectResultCallback({ user, profile });
+      }
+    }
+  } catch (err: any) {
+    console.error('[Zixo Auth] Redirect result error:', err);
+    if (redirectResultCallback) {
+      redirectResultCallback(null, new Error(getAuthErrorMessage(err)));
+    }
+  }
+}
 
 // ==================== RTDB PROFILE SYNC ====================
 
@@ -87,6 +146,8 @@ export function getAuthErrorMessage(error: AuthError | { code?: string }): strin
     'auth/invalid-verification-id': 'The verification ID is invalid. Please restart the verification process.',
     'auth/expired-action-code': 'This link has expired. Please request a new one.',
     'auth/invalid-action-code': 'This link is invalid. Please request a new one.',
+    'auth/redirect-cancelled-by-user': 'Sign-in was cancelled.',
+    'auth/redirect-operation': 'A redirect sign-in operation is already in progress.',
   };
 
   return errorMessages[code] || 'An unexpected error occurred. Please try again.';
@@ -400,24 +461,14 @@ export async function loginWithEmail(
   return { user: credential.user, profile };
 }
 
-/**
- * Sign in with Google
- */
-export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUserProfile }> {
-  let credential;
-  try {
-    credential = await signInWithPopup(auth, googleProvider);
-  } catch (err: any) {
-    // Provide a clear error for unauthorized domains (e.g., zixocall.eu.cc not in Firebase authorized domains)
-    if (err?.code === 'auth/unauthorized-domain') {
-      throw new Error('This domain is not authorized for sign-in. Please add it in Firebase Console > Authentication > Settings > Authorized domains, or try accessing the app from an authorized domain.');
-    }
-    throw err;
-  }
-  const user = credential.user;
+// ==================== GOOGLE SIGN-IN HELPERS ====================
 
+/**
+ * Process a Google sign-in user (shared logic for popup and redirect flows).
+ * Creates profile if first time, updates online status if returning.
+ */
+async function processGoogleSignIn(user: User): Promise<ZixoUserProfile> {
   // Safely derive display name and username parts with null safety
-  // IMPORTANT: user.displayName, user.email can be null for some Google accounts
   const nameStr = (user.displayName && user.displayName.length > 0)
     ? user.displayName
     : (user.email && user.email.length > 0)
@@ -468,6 +519,47 @@ export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUser
     }
   }
 
+  return profile;
+}
+
+/**
+ * Sign in with Google
+ * In Capacitor native app: uses signInWithRedirect (popup doesn't work in WebView)
+ * In browser: uses signInWithPopup (better UX with popup)
+ */
+export async function loginWithGoogle(): Promise<{ user: User; profile: ZixoUserProfile }> {
+  // In Capacitor native (Android/iOS WebView), use redirect instead of popup
+  // Popup doesn't work because WebView can't maintain sessionStorage across OAuth redirects
+  if (isCapacitorNative()) {
+    console.log('[Zixo Auth] Capacitor native detected — using signInWithRedirect for Google Sign-In');
+    try {
+      await signInWithRedirect(auth, googleProvider);
+      // NOTE: This navigates away from the page. The result is handled
+      // by checkRedirectResult() when the page reloads after the OAuth redirect.
+      // The promise resolves but the actual sign-in result comes later.
+      // Return a special marker — the calling code should know we're in redirect mode.
+      // The real result will come through the redirectResultCallback.
+      return new Promise(() => {}); // Never resolves — result comes via callback
+    } catch (err: any) {
+      if (err?.code === 'auth/unauthorized-domain') {
+        throw new Error('This domain is not authorized for sign-in. Please add it in Firebase Console > Authentication > Settings > Authorized domains, or try accessing the app from an authorized domain.');
+      }
+      throw err;
+    }
+  }
+
+  // Browser: use popup (standard flow)
+  let credential;
+  try {
+    credential = await signInWithPopup(auth, googleProvider);
+  } catch (err: any) {
+    if (err?.code === 'auth/unauthorized-domain') {
+      throw new Error('This domain is not authorized for sign-in. Please add it in Firebase Console > Authentication > Settings > Authorized domains, or try accessing the app from an authorized domain.');
+    }
+    throw err;
+  }
+  const user = credential.user;
+  const profile = await processGoogleSignIn(user);
   return { user, profile };
 }
 
