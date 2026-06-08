@@ -55,3 +55,39 @@ Stage Summary:
 - Added incoming and outgoing ring sounds using Web Audio API
 - Added missed call recording when call is rejected
 - Deployed to https://e04b7c5c.zixo.pages.dev and https://zixocall.eu.cc
+
+---
+Task ID: 8
+Agent: Main Agent
+Task: Fix all errors, fix call answer flow, animated buttons, QR improvements, contacts menu
+
+Work Log:
+- Read all key source files: CallScreens.tsx, useZixoStore.ts, useFirebaseBridge.ts, Navigation.tsx, SettingsScreen.tsx, CallHistory.tsx, page.tsx
+- Verified build succeeds with no compilation errors
+- Fixed "Failed to answer call" issue in useZixoStore.ts:
+  - Saved callData and callId in closure so they survive permission dialog
+  - Added fallback: if incomingCall is null after permissions, uses saved data
+  - Added try-catch around webrtc.answerCall() with better error handling
+  - Uses saved callId in catch handler for proper endCallSignal
+- Fixed hangup button sizing: replaced invalid `w-18 h-18` with `w-[68px] h-[68px]` in both AudioCallScreen and VideoCallScreen
+- Added animated button effects:
+  - Mute button: spring animation with key-based re-render (scale 0.6→1, rotate -15→0)
+  - Speaker button: spring animation with key-based re-render (scale 0.6→1, rotate 15→0)
+  - End Call button: breathing animation (scale: [1, 1.05, 1]) with 2s loop
+  - Labels: wrapped in motion.span with fade-in (y: -5→0, opacity: 0→1)
+- Profile card QR code: made smaller (container w-7 h-7, padding p-0.5, QR size 20)
+- Added swipe-to-scan QR in contacts tab:
+  - Drag gesture on QR code section with dragConstraints={{ left: 0, right: 200 }}
+  - Auto-triggers scanner when swiped past 100px
+  - Visual hint: "Swipe right to scan →" with pulsing arrow
+- Verified Contacts tab already present in Navigation.tsx (4 tabs: Chats, Calls, Contacts, Settings)
+- Rebuilt and deployed to https://8f50be3b.zixo.pages.dev
+- Pushed to GitHub as commit 434a99c
+
+Stage Summary:
+- Fixed answer call flow with saved closure data to survive permission dialog delays
+- Fixed invalid Tailwind class w-18 h-18 → w-[68px] h-[68px] for proper hangup button sizing
+- Added spring and breathing animations to mute, speaker, and hangup buttons
+- Made profile card QR code smaller (w-7 h-7, size 20)
+- Added swipe-to-scan QR feature in contacts with drag gesture and visual hint
+- All features deployed to https://8f50be3b.zixo.pages.dev and https://zixo.pages.dev
