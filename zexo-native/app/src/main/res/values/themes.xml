@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Zexo" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0F0F1A</item>
+        <item name="android:navigationBarColor">#0F0F1A</item>
+        <item name="android:windowBackground">#0F0F1A</item>
+    </style>
+    <style name="Theme.Zexo.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#0F0F1A</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_call_notification</item>
+        <item name="postSplashScreenTheme">@style/Theme.Zexo</item>
+    </style>
+</resources>

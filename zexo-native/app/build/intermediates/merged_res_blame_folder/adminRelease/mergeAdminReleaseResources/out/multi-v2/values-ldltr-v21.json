@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.zexo.app-mergeAdminReleaseResources-81:/values-ldltr-v21/values-ldltr-v21.xml",
+            "map": [
+                {
+                    "source": "/home/z/.gradle/caches/8.9/transforms/cf5febcb1d6280a99217e830b6a51c93/transformed/appcompat-1.6.1/res/values-ldltr-v21/values-ldltr-v21.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "112",
+                        "endOffsets": "163"
+                    }
+                }
+            ]
+        }
+    ]
+}

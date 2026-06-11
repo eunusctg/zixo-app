@@ -1,0 +1,3 @@
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.contacts.QRScannerViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.contacts.QRScannerViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.contacts.NewChatViewModel

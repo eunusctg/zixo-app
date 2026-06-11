@@ -1,0 +1,20 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.zexo.app-mergeAdminReleaseResources-81:/values-v25/values-v25.xml",
+            "map": [
+                {
+                    "source": "/home/z/.gradle/caches/8.9/transforms/cf5febcb1d6280a99217e830b6a51c93/transformed/appcompat-1.6.1/res/values-v25/values-v25.xml",
+                    "from": {
+                        "startLines": "2,3,4,6",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "55,126,209,308",
+                        "endLines": "2,3,5,7",
+                        "endColumns": "70,82,12,12",
+                        "endOffsets": "121,204,303,414"
+                    }
+                }
+            ]
+        }
+    ]
+}

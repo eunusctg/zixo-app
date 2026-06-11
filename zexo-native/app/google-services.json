@@ -1,0 +1,74 @@
+{
+  "project_info": {
+    "project_number": "809372450511",
+    "project_id": "zixo-call",
+    "storage_bucket": "zixo-call.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:809372450511:android:zexo_user_app_id",
+        "android_client_info": {
+          "package_name": "com.zexo.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
+          "client_type": 3
+        },
+        {
+          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.zexo.app",
+            "certificate_hash": "FB5A27727B1D733F324578AC64FD15F153EA8643"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgNhIaIG5jcRkQ7frreFjo1Cz8F3_JfPk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:809372450511:android:zexo_admin_app_id",
+        "android_client_info": {
+          "package_name": "com.zexo.admin"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
+          "client_type": 3
+        },
+        {
+          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.zexo.admin",
+            "certificate_hash": "FB5A27727B1D733F324578AC64FD15F153EA8643"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBgNhIaIG5jcRkQ7frreFjo1Cz8F3_JfPk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

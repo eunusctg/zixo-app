@@ -1,0 +1,4 @@
+#!/bin/sh
+export ANDROID_HOME=/home/z/android-sdk
+export JAVA_HOME=/usr
+exec java -Xmx4g -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain "$@"
