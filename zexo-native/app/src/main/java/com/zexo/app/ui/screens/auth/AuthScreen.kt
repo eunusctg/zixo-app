@@ -355,7 +355,7 @@ fun AuthScreen(
             OutlinedButton(
                 onClick = {
                     val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                        .requestIdToken("709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com")
+                        .requestIdToken("809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com")
                         .requestEmail()
                         .build()
                     val googleSignInClient = GoogleSignIn.getClient(navController.context, gso)

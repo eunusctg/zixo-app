@@ -421,7 +421,7 @@
     <string name="default_error_message">"Invalid input"</string>
     <string name="default_error_msg">Unknown error</string>
     <string name="default_popup_window_title" ns2:ignore="ExtraTranslation">"Pop-Up Window"</string>
-    <string name="default_web_client_id" translatable="false">709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com</string>
+    <string name="default_web_client_id" translatable="false">809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com</string>
     <string name="dropdown_menu">"Dropdown menu"</string>
     <string name="fallback_menu_item_copy_link">Copy link</string>
     <string name="fallback_menu_item_open_in_browser">Open in browser</string>
@@ -434,13 +434,14 @@
     <string name="fingerprint_error_no_fingerprints">No fingerprints enrolled.</string>
     <string name="fingerprint_error_user_canceled">Fingerprint operation canceled by user.</string>
     <string name="fingerprint_not_recognized">Not recognized</string>
+    <string name="firebase_database_url" translatable="false">https://zixo-call-default-rtdb.firebaseio.com</string>
     <string name="gcm_defaultSenderId" translatable="false">809372450511</string>
     <string name="generic_error_no_device_credential">No PIN, pattern, or password set.</string>
     <string name="generic_error_no_keyguard">This device does not support PIN, pattern, or password.</string>
     <string name="generic_error_user_canceled">Authentication canceled by user.</string>
-    <string name="google_api_key" translatable="false">AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA</string>
-    <string name="google_app_id" translatable="false">1:809372450511:android:zexo_user_app_id</string>
-    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA</string>
+    <string name="google_api_key" translatable="false">AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs</string>
+    <string name="google_app_id" translatable="false">1:809372450511:android:291641412d03842c66c1ba</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs</string>
     <string name="google_storage_bucket" translatable="false">zixo-call.firebasestorage.app</string>
     <string name="in_progress">In progress</string>
     <string name="indeterminate">Partially checked</string>

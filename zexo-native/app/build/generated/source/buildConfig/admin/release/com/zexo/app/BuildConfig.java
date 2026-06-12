@@ -8,8 +8,8 @@ public final class BuildConfig {
   public static final String APPLICATION_ID = "com.zexo.admin";
   public static final String BUILD_TYPE = "release";
   public static final String FLAVOR = "admin";
-  public static final int VERSION_CODE = 4;
-  public static final String VERSION_NAME = "1.4.0";
+  public static final int VERSION_CODE = 5;
+  public static final String VERSION_NAME = "1.5.0";
   // Field from product flavor: admin
   public static final Boolean IS_ADMIN = true;
 }

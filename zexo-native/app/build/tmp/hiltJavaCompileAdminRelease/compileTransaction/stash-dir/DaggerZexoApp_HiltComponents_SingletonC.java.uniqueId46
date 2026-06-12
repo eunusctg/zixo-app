@@ -14,9 +14,11 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import com.zexo.app.data.repository.AuthRepository;
 import com.zexo.app.data.repository.CallRepository;
 import com.zexo.app.data.repository.ChatRepository;
+import com.zexo.app.data.repository.FirebaseAuthRestApi;
 import com.zexo.app.data.repository.StatusRepository;
 import com.zexo.app.data.repository.UserRepository;
 import com.zexo.app.di.AppModule_ProvideAuthRepositoryFactory;
+import com.zexo.app.di.AppModule_ProvideAuthRestApiFactory;
 import com.zexo.app.di.AppModule_ProvideCallRepositoryFactory;
 import com.zexo.app.di.AppModule_ProvideChatRepositoryFactory;
 import com.zexo.app.di.AppModule_ProvideFirebaseAuthFactory;
@@ -687,6 +689,8 @@ public final class DaggerZexoApp_HiltComponents_SingletonC {
 
     private Provider<FirebaseDatabase> provideRtdbProvider;
 
+    private Provider<FirebaseAuthRestApi> provideAuthRestApiProvider;
+
     private Provider<AuthRepository> provideAuthRepositoryProvider;
 
     private Provider<UserRepository> provideUserRepositoryProvider;
@@ -708,11 +712,12 @@ public final class DaggerZexoApp_HiltComponents_SingletonC {
       this.provideFirebaseAuthProvider = DoubleCheck.provider(new SwitchingProvider<FirebaseAuth>(singletonCImpl, 1));
       this.provideFirestoreProvider = DoubleCheck.provider(new SwitchingProvider<FirebaseFirestore>(singletonCImpl, 2));
       this.provideRtdbProvider = DoubleCheck.provider(new SwitchingProvider<FirebaseDatabase>(singletonCImpl, 3));
+      this.provideAuthRestApiProvider = DoubleCheck.provider(new SwitchingProvider<FirebaseAuthRestApi>(singletonCImpl, 4));
       this.provideAuthRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<AuthRepository>(singletonCImpl, 0));
-      this.provideUserRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<UserRepository>(singletonCImpl, 4));
-      this.provideCallRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<CallRepository>(singletonCImpl, 5));
-      this.provideChatRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<ChatRepository>(singletonCImpl, 6));
-      this.provideStatusRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<StatusRepository>(singletonCImpl, 7));
+      this.provideUserRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<UserRepository>(singletonCImpl, 5));
+      this.provideCallRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<CallRepository>(singletonCImpl, 6));
+      this.provideChatRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<ChatRepository>(singletonCImpl, 7));
+      this.provideStatusRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<StatusRepository>(singletonCImpl, 8));
     }
 
     @Override
@@ -749,7 +754,7 @@ public final class DaggerZexoApp_HiltComponents_SingletonC {
       public T get() {
         switch (id) {
           case 0: // com.zexo.app.data.repository.AuthRepository 
-          return (T) AppModule_ProvideAuthRepositoryFactory.provideAuthRepository(singletonCImpl.provideFirebaseAuthProvider.get(), singletonCImpl.provideFirestoreProvider.get(), singletonCImpl.provideRtdbProvider.get());
+          return (T) AppModule_ProvideAuthRepositoryFactory.provideAuthRepository(singletonCImpl.provideFirebaseAuthProvider.get(), singletonCImpl.provideFirestoreProvider.get(), singletonCImpl.provideRtdbProvider.get(), singletonCImpl.provideAuthRestApiProvider.get());
 
           case 1: // com.google.firebase.auth.FirebaseAuth 
           return (T) AppModule_ProvideFirebaseAuthFactory.provideFirebaseAuth();
@@ -760,16 +765,19 @@ public final class DaggerZexoApp_HiltComponents_SingletonC {
           case 3: // com.google.firebase.database.FirebaseDatabase 
           return (T) AppModule_ProvideRtdbFactory.provideRtdb();
 
-          case 4: // com.zexo.app.data.repository.UserRepository 
+          case 4: // com.zexo.app.data.repository.FirebaseAuthRestApi 
+          return (T) AppModule_ProvideAuthRestApiFactory.provideAuthRestApi();
+
+          case 5: // com.zexo.app.data.repository.UserRepository 
           return (T) AppModule_ProvideUserRepositoryFactory.provideUserRepository(singletonCImpl.provideFirestoreProvider.get());
 
-          case 5: // com.zexo.app.data.repository.CallRepository 
+          case 6: // com.zexo.app.data.repository.CallRepository 
           return (T) AppModule_ProvideCallRepositoryFactory.provideCallRepository(singletonCImpl.provideFirestoreProvider.get(), singletonCImpl.provideRtdbProvider.get());
 
-          case 6: // com.zexo.app.data.repository.ChatRepository 
+          case 7: // com.zexo.app.data.repository.ChatRepository 
           return (T) AppModule_ProvideChatRepositoryFactory.provideChatRepository(singletonCImpl.provideFirestoreProvider.get(), singletonCImpl.provideRtdbProvider.get());
 
-          case 7: // com.zexo.app.data.repository.StatusRepository 
+          case 8: // com.zexo.app.data.repository.StatusRepository 
           return (T) AppModule_ProvideStatusRepositoryFactory.provideStatusRepository(singletonCImpl.provideFirestoreProvider.get());
 
           default: throw new AssertionError(id);

@@ -19,7 +19,7 @@ class FirebaseAuthRestApi @Inject constructor() {
 
     companion object {
         private const val TAG = "FirebaseAuthRestApi"
-        private const val API_KEY = "AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA"
+        private const val API_KEY = "AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs"
         private const val BASE_URL = "https://identitytoolkit.googleapis.com/v1/accounts"
         private const val SIGN_UP_URL = "$BASE_URL:signUp?key=$API_KEY"
         private const val SIGN_IN_URL = "$BASE_URL:signInWithPassword?key=$API_KEY"

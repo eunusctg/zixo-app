@@ -19,19 +19,19 @@ public final class FirebaseAuthRestApi {
     @org.jetbrains.annotations.NotNull()
     private static final java.lang.String TAG = "FirebaseAuthRestApi";
     @org.jetbrains.annotations.NotNull()
-    private static final java.lang.String API_KEY = "AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA";
+    private static final java.lang.String API_KEY = "AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs";
     @org.jetbrains.annotations.NotNull()
     private static final java.lang.String BASE_URL = "https://identitytoolkit.googleapis.com/v1/accounts";
     @org.jetbrains.annotations.NotNull()
-    private static final java.lang.String SIGN_UP_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA";
+    private static final java.lang.String SIGN_UP_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs";
     @org.jetbrains.annotations.NotNull()
-    private static final java.lang.String SIGN_IN_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA";
+    private static final java.lang.String SIGN_IN_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs";
     @org.jetbrains.annotations.NotNull()
-    private static final java.lang.String RESET_PASSWORD_URL = "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA";
+    private static final java.lang.String RESET_PASSWORD_URL = "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs";
     @org.jetbrains.annotations.NotNull()
-    private static final java.lang.String SEND_VERIFICATION_URL = "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA";
+    private static final java.lang.String SEND_VERIFICATION_URL = "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs";
     @org.jetbrains.annotations.NotNull()
-    private static final java.lang.String EXCHANGE_TOKEN_URL = "https://securetoken.googleapis.com/v1/token?key=AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA";
+    private static final java.lang.String EXCHANGE_TOKEN_URL = "https://securetoken.googleapis.com/v1/token?key=AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs";
     @org.jetbrains.annotations.NotNull()
     public static final com.zexo.app.data.repository.FirebaseAuthRestApi.Companion Companion = null;
     

@@ -1,71 +1,74 @@
 {
   "project_info": {
     "project_number": "809372450511",
+    "firebase_url": "https://zixo-call-default-rtdb.firebaseio.com",
     "project_id": "zixo-call",
     "storage_bucket": "zixo-call.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:809372450511:android:zexo_user_app_id",
-        "android_client_info": {
-          "package_name": "com.zexo.app"
-        }
-      },
-      "oauth_client": [
-        {
-          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
-          "client_type": 3
-        },
-        {
-          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.zexo.app",
-            "certificate_hash": "FB5A27727B1D733F324578AC64FD15F153EA8643"
-          }
-        }
-      ],
-      "api_key": [
-        {
-          "current_key": "AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:809372450511:android:zexo_admin_app_id",
+        "mobilesdk_app_id": "1:809372450511:android:c81469336fe04f7a66c1ba",
         "android_client_info": {
           "package_name": "com.zexo.admin"
         }
       },
       "oauth_client": [
         {
-          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
+          "client_id": "809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com",
           "client_type": 3
-        },
-        {
-          "client_id": "709938510908-8m5h2b4ht2dn885r3b2kuq1f2he3h0lu.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.zexo.admin",
-            "certificate_hash": "FB5A27727B1D733F324578AC64FD15F153EA8643"
-          }
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA"
+          "current_key": "AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:809372450511:android:291641412d03842c66c1ba",
+        "android_client_info": {
+          "package_name": "com.zexo.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "809372450511-54ins15s29a8p56jumh5j66ot30s287c.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.zexo.app",
+            "certificate_hash": "fb5a27727b1d733f324578ac64fd15f153ea8643"
+          }
+        },
+        {
+          "client_id": "809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

@@ -1,4 +1,4 @@
-#Fri Jun 12 14:13:52 UTC 2026
+#Fri Jun 12 14:30:04 UTC 2026
 base.0=/home/z/my-project/zexo-native/app/build/intermediates/dex/userRelease/mergeDexUserRelease/classes.dex
 base.1=/home/z/my-project/zexo-native/app/build/intermediates/dex/userRelease/mergeDexUserRelease/classes2.dex
 base.2=/home/z/my-project/zexo-native/app/build/intermediates/dex/userRelease/mergeDexUserRelease/classes3.dex

@@ -1097,6 +1097,7 @@ string fingerprint_error_lockout
 string fingerprint_error_no_fingerprints
 string fingerprint_error_user_canceled
 string fingerprint_not_recognized
+string firebase_database_url
 string gcm_defaultSenderId
 string generic_error_no_device_credential
 string generic_error_no_keyguard
