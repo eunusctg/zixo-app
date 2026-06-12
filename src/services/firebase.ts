@@ -9,8 +9,8 @@ import { getAnalytics, isSupported as isAnalyticsSupported } from 'firebase/anal
 // ==================== FIREBASE CONFIGURATION ====================
 // Production credentials for Zixo app (zixo-call project)
 const firebaseConfig = {
-  apiKey: "AIzaSyBgNhIaIG5jcRkQ7frreFjo1Cz8F3_JfPk",
-  authDomain: "zixo-call.firebaseapp.com",
+  apiKey: "AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA",
+  authDomain: "zixo.pages.dev",
   databaseURL: "https://zixo-call-default-rtdb.firebaseio.com",
   projectId: "zixo-call",
   storageBucket: "zixo-call.firebasestorage.app",

@@ -468,6 +468,323 @@ export async function getAllUsers(currentUid: string, maxResults: number = 50): 
   return users.slice(0, maxResults);
 }
 
+// ==================== DOMAIN AUTHORIZATION ====================
+
+/**
+ * Check if the current domain is authorized for Firebase Auth
+ * and attempt to register it if not.
+ *
+ * Firebase requires the domain to be listed in:
+ * Console > Authentication > Settings > Authorized domains
+ *
+ * This function calls the /api/setup endpoint to auto-register
+ * the current hostname.
+ */
+export async function ensureDomainAuthorized(): Promise<{
+  authorized: boolean;
+  domain: string;
+  message?: string;
+}> {
+  if (typeof window === 'undefined') {
+    return { authorized: false, domain: 'server' };
+  }
+
+  const hostname = window.location.hostname;
+  // All domains that are authorized in Firebase Console > Authentication > Settings > Authorized domains
+  // Keep this list in sync with the Firebase Console configuration
+  // zixo.pages.dev is the PRIMARY deployment domain
+  const knownDomains = [
+    'localhost',
+    '127.0.0.1',
+    'zixo.pages.dev',           // Primary deployment domain
+    'zixocall.space-z.ai',      // Custom domain
+    'zixocall.eu.cc',           // Custom domain
+    'zixo-call.firebaseapp.com', // Firebase default
+    'zixo-call.web.app',        // Firebase default
+    'zixo-app.pages.dev',       // Alt deployment
+    'zixo-app-cfy.pages.dev',   // Alt deployment
+  ];
+
+  // If on a known domain, it should already be authorized
+  if (knownDomains.includes(hostname)) {
+    return { authorized: true, domain: hostname };
+  }
+
+  // For Cloudflare Pages preview/deployment URLs, try auto-registering
+  if (hostname.endsWith('.pages.dev') || hostname.endsWith('.space-z.ai')) {
+    try {
+      const response = await fetch(`/api/setup?action=add-domain&domain=${encodeURIComponent(hostname)}&token=zixo-setup-2024`);
+      const data = await response.json();
+      if (data.success) {
+        console.log(`[Zixo Auth] Domain ${hostname} registered as authorized`);
+        return { authorized: true, domain: hostname, message: 'Domain registered successfully' };
+      }
+      return { authorized: false, domain: hostname, message: data.error || 'Failed to register domain' };
+    } catch (err) {
+      console.warn('[Zixo Auth] Failed to auto-register domain:', err);
+      return { authorized: false, domain: hostname, message: 'Could not auto-register domain' };
+    }
+  }
+
+  // For any other domain, warn the user
+  return {
+    authorized: false,
+    domain: hostname,
+    message: `This domain (${hostname}) may not be authorized. Add it in Firebase Console > Authentication > Settings > Authorized domains.`,
+  };
+}
+
+/**
+ * Diagnose auth issues by checking common problems
+ * Returns a list of diagnostic findings
+ */
+export async function diagnoseAuthIssues(): Promise<Array<{
+  check: string;
+  status: 'ok' | 'warning' | 'error';
+  message: string;
+}>> {
+  const findings: Array<{ check: string; status: 'ok' | 'warning' | 'error'; message: string }> = [];
+
+  // 1. Check if Firebase Auth is initialized
+  try {
+    if (!auth) {
+      findings.push({ check: 'Firebase Auth', status: 'error', message: 'Firebase Auth is not initialized' });
+    } else {
+      findings.push({ check: 'Firebase Auth', status: 'ok', message: 'Firebase Auth initialized' });
+    }
+  } catch (err) {
+    findings.push({ check: 'Firebase Auth', status: 'error', message: `Firebase Auth error: ${err}` });
+  }
+
+  // 2. Check domain authorization
+  const domainCheck = await ensureDomainAuthorized();
+  if (!domainCheck.authorized) {
+    findings.push({
+      check: 'Domain Authorization',
+      status: 'error',
+      message: domainCheck.message || `Domain ${domainCheck.domain} is not authorized`,
+    });
+  } else {
+    findings.push({
+      check: 'Domain Authorization',
+      status: 'ok',
+      message: `Domain ${domainCheck.domain} is authorized`,
+    });
+  }
+
+  // 3. Check network connectivity to Firebase
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch('https://www.googleapis.com/identitytoolkit/v3/relyingparty/', {
+      method: 'HEAD',
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    findings.push({ check: 'Firebase Connectivity', status: 'ok', message: 'Can reach Firebase servers' });
+  } catch (err) {
+    findings.push({ check: 'Firebase Connectivity', status: 'error', message: 'Cannot reach Firebase servers — check your network' });
+  }
+
+  // 4. Check if there's a stale auth session
+  try {
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      const tokenResult = await currentUser.getIdTokenResult();
+      const expirationTime = new Date(tokenResult.expirationTime).getTime();
+      const now = Date.now();
+      if (expirationTime < now) {
+        findings.push({
+          check: 'Session Token',
+          status: 'warning',
+          message: 'Your session token has expired. Please sign in again.',
+        });
+      } else {
+        findings.push({ check: 'Session Token', status: 'ok', message: 'Session token is valid' });
+      }
+    }
+  } catch (err) {
+    findings.push({ check: 'Session Token', status: 'warning', message: 'Could not verify session token' });
+  }
+
+  // 5. Validate API key by making a test request to Firebase Identity Toolkit
+  try {
+    const apiKeyResult = await validateApiKey();
+    if (!apiKeyResult.valid) {
+      findings.push({
+        check: 'API Key',
+        status: 'error',
+        message: apiKeyResult.message,
+      });
+    } else {
+      findings.push({ check: 'API Key', status: 'ok', message: apiKeyResult.message });
+    }
+  } catch (err) {
+    findings.push({ check: 'API Key', status: 'warning', message: 'Could not validate API key' });
+  }
+
+  // 6. Check Firebase Auth config (sign-in methods, authorized domains) via server
+  try {
+    const response = await fetch('/api/setup?action=status');
+    if (response.ok) {
+      const config = await response.json();
+      if (config.signInMethods) {
+        const methods: string[] = [];
+        if (config.signInMethods.emailPassword) methods.push('Email/Password');
+        if (config.signInMethods.google) methods.push('Google');
+        if (config.signInMethods.phone) methods.push('Phone');
+        if (methods.length === 0) {
+          findings.push({
+            check: 'Sign-In Methods',
+            status: 'error',
+            message: 'No sign-in methods are enabled! Go to Firebase Console > Authentication > Sign-in method and enable at least one.',
+          });
+        } else {
+          findings.push({ check: 'Sign-In Methods', status: 'ok', message: `Enabled: ${methods.join(', ')}` });
+        }
+      }
+      if (config.authorizedDomains) {
+        const currentDomain = window.location.hostname;
+        if (!config.authorizedDomains.includes(currentDomain)) {
+          findings.push({
+            check: 'Domain Authorization (Server)',
+            status: 'error',
+            message: `Domain ${currentDomain} is NOT in the server-side authorized domains list: ${config.authorizedDomains.join(', ')}`,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    // Server-side check failed — non-critical, just skip
+    console.warn('[Zixo Auth] Server-side config check failed:', err);
+  }
+
+  return findings;
+}
+
+// ==================== AUTH STATE CLEANUP ====================
+
+/**
+ * Clear all Firebase Auth state from the browser.
+ * This wipes IndexedDB entries, localStorage keys, and session data
+ * that Firebase Auth uses to persist sessions. Useful when auth state
+ * becomes corrupted and causes "invalid credential" errors.
+ *
+ * After calling this, the page should be refreshed to re-initialize Firebase.
+ */
+export async function clearAuthState(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
+  // 1. Sign out from Firebase Auth first
+  try {
+    await signOut(auth);
+  } catch (err) {
+    console.warn('[Zixo Auth] Sign out during clearAuthState failed (may be OK):', err);
+  }
+
+  // 2. Clear Firebase Auth IndexedDB entries
+  try {
+    const databases = await indexedDB.databases();
+    for (const db of databases) {
+      if (db.name && (db.name.startsWith('firebase') || db.name.includes('firebase'))) {
+        await new Promise<void>((resolve, reject) => {
+          const request = indexedDB.deleteDatabase(db.name!);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+          request.onblocked = () => resolve(); // If blocked, still continue
+        });
+        console.log(`[Zixo Auth] Deleted IndexedDB: ${db.name}`);
+      }
+    }
+  } catch (err) {
+    console.warn('[Zixo Auth] Failed to clear Firebase IndexedDB:', err);
+  }
+
+  // 3. Clear Firebase-related localStorage entries
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('firebase') || key.includes('[DEFAULT]'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => {
+      localStorage.removeItem(key);
+      console.log(`[Zixo Auth] Removed localStorage: ${key}`);
+    });
+  } catch (err) {
+    console.warn('[Zixo Auth] Failed to clear localStorage:', err);
+  }
+
+  // 4. Clear Firebase-related sessionStorage entries
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && (key.startsWith('firebase') || key.includes('[DEFAULT]'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => {
+      sessionStorage.removeItem(key);
+      console.log(`[Zixo Auth] Removed sessionStorage: ${key}`);
+    });
+  } catch (err) {
+    console.warn('[Zixo Auth] Failed to clear sessionStorage:', err);
+  }
+
+  console.log('[Zixo Auth] Auth state cleared. Page will refresh.');
+}
+
+/**
+ * Validate the Firebase API key by making a test request to the Identity Toolkit.
+ * This helps diagnose if the API key is restricted or invalid.
+ */
+export async function validateApiKey(): Promise<{
+  valid: boolean;
+  message: string;
+}> {
+  try {
+    // Try to fetch the public config — this doesn't require auth
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/projects/zixo-call/accounts:createAuthUri?key=AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: 'test@invalid.test',
+          continueUri: window.location.origin,
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (response.ok || data.error?.message?.includes('EMAIL_NOT_FOUND')) {
+      // If we get EMAIL_NOT_FOUND, the API key works — it just means the test email doesn't exist
+      return { valid: true, message: 'API key is valid and working' };
+    }
+
+    if (data.error?.message?.includes('API key not valid')) {
+      return { valid: false, message: 'API key is invalid or has been revoked. Check Firebase Console > Project Settings.' };
+    }
+
+    if (data.error?.message?.includes('access not configured') || data.error?.message?.includes('referer')) {
+      return { valid: false, message: `API key is restricted. The current domain (${window.location.hostname}) is not in the allowed referrers. Go to Google Cloud Console > APIs & Services > Credentials > API Keys > HTTP referrer restrictions and add this domain.` };
+    }
+
+    if (data.error?.message?.includes('PROJECT_NOT_FOUND') || data.error?.message?.includes('INVALID_PROJECT_ID')) {
+      return { valid: false, message: 'Firebase project not found. The project ID may have changed.' };
+    }
+
+    // If we get any other error, the key works but there may be other issues
+    return { valid: true, message: `API key responds (status: ${response.status}). Error: ${data.error?.message || 'none'}` };
+  } catch (err: any) {
+    return { valid: false, message: `Cannot reach Firebase servers: ${err.message}. Check your network connection.` };
+  }
+}
+
 // ==================== PHONE AUTH (OTP) ====================
 
 let recaptchaVerifier: RecaptchaVerifier | null = null;

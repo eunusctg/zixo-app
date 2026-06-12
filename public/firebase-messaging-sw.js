@@ -9,8 +9,8 @@ importScripts('https://www.gstatic.com/firebasejs/12.14.0/firebase-messaging-com
 
 // Initialize Firebase in the service worker
 firebase.initializeApp({
-  apiKey: "AIzaSyBgNhIaIG5jcRkQ7frreFjo1Cz8F3_JfPk",
-  authDomain: "zixo-call.firebaseapp.com",
+  apiKey: "AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA",
+  authDomain: "zixo.pages.dev",
   databaseURL: "https://zixo-call-default-rtdb.firebaseio.com",
   projectId: "zixo-call",
   storageBucket: "zixo-call.firebasestorage.app",
