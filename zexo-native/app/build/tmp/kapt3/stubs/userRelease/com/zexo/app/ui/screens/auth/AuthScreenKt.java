@@ -1,8 +1,5 @@
 package com.zexo.app.ui.screens.auth;
 
-import android.content.Intent;
-import android.util.Log;
-import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.compose.animation.*;
 import androidx.compose.foundation.layout.*;
 import androidx.compose.foundation.text.KeyboardOptions;
@@ -12,18 +9,12 @@ import androidx.compose.runtime.*;
 import androidx.compose.ui.Alignment;
 import androidx.compose.ui.Modifier;
 import androidx.compose.ui.graphics.Brush;
-import androidx.compose.ui.text.SpanStyle;
 import androidx.compose.ui.text.font.FontWeight;
 import androidx.compose.ui.text.input.KeyboardType;
 import androidx.compose.ui.text.input.PasswordVisualTransformation;
 import androidx.compose.ui.text.input.VisualTransformation;
 import androidx.compose.ui.text.style.TextAlign;
 import androidx.navigation.NavHostController;
-import com.google.android.gms.auth.api.signin.GoogleSignIn;
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
-import com.google.android.gms.common.api.ApiException;
-import com.zexo.app.BuildConfig;
-import com.zexo.app.R;
 import com.zexo.app.ui.navigation.Screen;
 import com.zexo.app.ui.theme.*;
 

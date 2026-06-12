@@ -1,0 +1,1562 @@
+     1→     1→package com.zexo.app.ui.screens.home
+     2→     2→
+     3→     3→import androidx.compose.animation.*
+     4→     4→import androidx.compose.animation.core.*
+     5→     5→import androidx.compose.foundation.background
+     6→     6→import androidx.compose.foundation.clickable
+     7→     7→import androidx.compose.foundation.interaction.MutableInteractionSource
+     8→     8→import androidx.compose.foundation.layout.*
+     9→     9→import androidx.compose.foundation.lazy.LazyColumn
+    10→    10→import androidx.compose.foundation.lazy.items
+    11→    11→import androidx.compose.foundation.pager.HorizontalPager
+    12→    12→import androidx.compose.foundation.pager.PagerState
+    13→    13→import androidx.compose.foundation.pager.rememberPagerState
+    14→    14→import androidx.compose.foundation.shape.CircleShape
+    15→    15→import androidx.compose.foundation.shape.RoundedCornerShape
+    16→    16→import androidx.compose.material.icons.Icons
+    17→    17→import androidx.compose.material.icons.filled.*
+    18→    18→import androidx.compose.material.icons.outlined.*
+    19→    19→import androidx.compose.material3.*
+    20→    20→import androidx.compose.runtime.*
+    21→    21→import androidx.compose.ui.Alignment
+    22→    22→import androidx.compose.ui.Modifier
+    23→    23→import androidx.compose.ui.draw.clip
+    24→    24→import androidx.compose.ui.draw.rotate
+    25→    25→import androidx.compose.ui.draw.shadow
+    26→    26→import androidx.compose.ui.graphics.Brush
+    27→    27→import androidx.compose.ui.graphics.Color
+    28→    28→import androidx.compose.ui.graphics.vector.ImageVector
+    29→    29→import androidx.compose.ui.layout.ContentScale
+    30→    30→import androidx.compose.ui.text.font.FontWeight
+    31→    31→import androidx.compose.ui.text.style.TextOverflow
+    32→    32→import androidx.compose.ui.unit.dp
+    33→    33→import androidx.compose.ui.unit.sp
+    34→    34→import androidx.hilt.navigation.compose.hiltViewModel
+    35→    35→import androidx.navigation.NavHostController
+    36→    36→import coil.compose.AsyncImage
+    37→    37→import com.zexo.app.data.model.CallRecord
+    38→    38→import com.zexo.app.data.model.Chat
+    39→    39→import com.zexo.app.data.model.Status
+    40→    40→import com.zexo.app.data.model.User
+    41→    41→import com.zexo.app.ui.navigation.HomeTab
+    42→    42→import com.zexo.app.ui.navigation.Screen
+    43→    43→import com.zexo.app.ui.theme.*
+    44→    44→import kotlinx.coroutines.launch
+    45→    45→
+    46→    46→// ═══════════════════════════════════════════════════════════════════════
+    47→    47→//  Main HomeScreen composable
+    48→    48→// ═══════════════════════════════════════════════════════════════════════
+    49→    49→
+    50→    50→@OptIn(ExperimentalMaterial3Api::class)
+    51→    51→@Composable
+    52→    52→fun HomeScreen(
+    53→    53→    navController: NavHostController,
+    54→    54→    viewModel: HomeViewModel = hiltViewModel()
+    55→    55→) {
+    56→    56→    val selectedTab by viewModel.selectedTab.collectAsState()
+    57→    57→    val currentUser by viewModel.currentUser.collectAsState()
+    58→    58→    val searchQuery by viewModel.searchQuery.collectAsState()
+    59→    59→    val isSearching by viewModel.isSearching.collectAsState()
+    60→    60→
+    61→    61→    val pagerState = rememberPagerState(
+    62→    62→        initialPage = 0,
+    63→    63→        pageCount = { HomeTab.entries.size }
+    64→    64→    )
+    65→    65→    val scope = rememberCoroutineScope()
+    66→    66→
+    67→    67→    // Sync pager ↔ tabs
+    68→    68→    LaunchedEffect(pagerState.currentPage) {
+    69→    69→        viewModel.selectTab(HomeTab.entries[pagerState.currentPage])
+    70→    70→    }
+    71→    71→    LaunchedEffect(selectedTab) {
+    72→    72→        val idx = HomeTab.entries.indexOf(selectedTab)
+    73→    73→        if (pagerState.currentPage != idx) {
+    74→    74→            pagerState.animateScrollToPage(idx)
+    75→    75→        }
+    76→    76→    }
+    77→    77→
+    78→    78→    // FAB expanded state
+    79→    79→    var fabExpanded by remember { mutableStateOf(false) }
+    80→    80→
+    81→    81→    Scaffold(
+    82→    82→        containerColor = ZexoBackground,
+    83→    83→        topBar = {
+    84→    84→            HomeTopBar(
+    85→    85→                currentUser = currentUser,
+    86→    86→                searchQuery = searchQuery,
+    87→    87→                onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+    88→    88→                onClearSearch = { viewModel.clearSearch() },
+    89→    89→                isSearching = isSearching,
+    90→    90→                onAvatarClick = {
+    91→    91→                    currentUser?.uid?.let { uid ->
+    92→    92→                        navController.navigate(Screen.Profile.createRoute(uid))
+    93→    93→                    }
+    94→    94→                },
+    95→    95→                onAdminClick = {
+    96→    96→                    navController.navigate(Screen.AdminLanding.route)
+    97→    97→                },
+    98→    98→                isAdmin = viewModel.isAdmin
+    99→    99→            )
+   100→   100→        },
+   101→   101→        floatingActionButton = {
+   102→   102→            AnimatedFab(
+   103→   103→                selectedTab = selectedTab,
+   104→   104→                expanded = fabExpanded,
+   105→   105→                onExpandToggle = { fabExpanded = !fabExpanded },
+   106→   106→                onDismiss = { fabExpanded = false },
+   107→   107→                navController = navController
+   108→   108→            )
+   109→   109→        }
+   110→   110→    ) { paddingValues ->
+   111→   111→        Column(
+   112→   112→            modifier = Modifier
+   113→   113→                .fillMaxSize()
+   114→   114→                .padding(paddingValues)
+   115→   115→                .background(ZexoBackground)
+   116→   116→        ) {
+   117→   117→            // Tab row
+   118→   118→            ZexoTabRow(
+   119→   119→                selectedTab = selectedTab,
+   120→   120→                onTabSelected = { tab ->
+   121→   121→                    viewModel.selectTab(tab)
+   122→   122→                    scope.launch {
+   123→   123→                        val idx = HomeTab.entries.indexOf(tab)
+   124→   124→                        pagerState.animateScrollToPage(idx)
+   125→   125→                    }
+   126→   126→                }
+   127→   127→            )
+   128→   128→
+   129→   129→            // Pager
+   130→   130→            HorizontalPager(
+   131→   131→                state = pagerState,
+   132→   132→                modifier = Modifier.fillMaxSize(),
+   133→   133→                beyondViewportPageCount = 3
+   134→   134→            ) { page ->
+   135→   135→                when (HomeTab.entries[page]) {
+   136→   136→                    HomeTab.CHATS -> ChatsTabContent(viewModel, navController)
+   137→   137→                    HomeTab.STATUS -> StatusTabContent(viewModel, navController)
+   138→   138→                    HomeTab.CALLS -> CallsTabContent(viewModel, navController)
+   139→   139→                    HomeTab.SETTINGS -> SettingsTabContent(viewModel, navController)
+   140→   140→                }
+   141→   141→            }
+   142→   142→        }
+   143→   143→    }
+   144→   144→
+   145→   145→    // Dismiss FAB menu on tab change
+   146→   146→    LaunchedEffect(selectedTab) {
+   147→   147→        fabExpanded = false
+   148→   148→    }
+   149→   149→}
+   150→   150→
+   151→   151→// ═══════════════════════════════════════════════════════════════════════
+   152→   152→//  Top bar with search
+   153→   153→// ═══════════════════════════════════════════════════════════════════════
+   154→   154→
+   155→   155→@Composable
+   156→   156→private fun HomeTopBar(
+   157→   157→    currentUser: User?,
+   158→   158→    searchQuery: String,
+   159→   159→    onSearchQueryChange: (String) -> Unit,
+   160→   160→    onClearSearch: () -> Unit,
+   161→   161→    isSearching: Boolean,
+   162→   162→    onAvatarClick: () -> Unit,
+   163→   163→    onAdminClick: () -> Unit,
+   164→   164→    isAdmin: Boolean
+   165→   165→) {
+   166→   166→    var searchActive by remember { mutableStateOf(false) }
+   167→   167→
+   168→   168→    Surface(
+   169→   169→        color = ZexoSurface,
+   170→   170→        tonalElevation = 2.dp
+   171→   171→    ) {
+   172→   172→        Column {
+   173→   173→            // Main header row
+   174→   174→            Row(
+   175→   175→                modifier = Modifier
+   176→   176→                    .fillMaxWidth()
+   177→   177→                    .padding(horizontal = 16.dp, vertical = 10.dp),
+   178→   178→                verticalAlignment = Alignment.CenterVertically
+   179→   179→            ) {
+   180→   180→                // Avatar
+   181→   181→                Box(
+   182→   182→                    modifier = Modifier
+   183→   183→                        .size(40.dp)
+   184→   184→                        .clip(CircleShape)
+   185→   185→                        .background(ZexoPrimary)
+   186→   186→                        .clickable(onClick = onAvatarClick),
+   187→   187→                    contentAlignment = Alignment.Center
+   188→   188→                ) {
+   189→   189→                    if (currentUser?.avatar.isNullOrBlank()) {
+   190→   190→                        Text(
+   191→   191→                            text = currentUser?.displayName?.take(1)?.uppercase() ?: "Z",
+   192→   192→                            color = Color.White,
+   193→   193→                            fontWeight = FontWeight.Bold,
+   194→   194→                            fontSize = 18.sp
+   195→   195→                        )
+   196→   196→                    } else {
+   197→   197→                        AsyncImage(
+   198→   198→                            model = currentUser!!.avatar,
+   199→   199→                            contentDescription = null,
+   200→   200→                            modifier = Modifier.fillMaxSize(),
+   201→   201→                            contentScale = ContentScale.Crop
+   202→   202→                        )
+   203→   203→                    }
+   204→   204→                }
+   205→   205→
+   206→   206→                Spacer(modifier = Modifier.width(12.dp))
+   207→   207→
+   208→   208→                // Title + Zixo number
+   209→   209→                Column(modifier = Modifier.weight(1f)) {
+   210→   210→                    Text(
+   211→   211→                        text = "Zexo",
+   212→   212→                        fontSize = 22.sp,
+   213→   213→                        fontWeight = FontWeight.Bold,
+   214→   214→                        color = ZexoTextPrimary
+   215→   215→                    )
+   216→   216→                    currentUser?.zixoNumber?.let { zixo ->
+   217→   217→                        Text(
+   218→   218→                            text = zixo,
+   219→   219→                            fontSize = 11.sp,
+   220→   220→                            color = ZexoSecondary,
+   221→   221→                            fontWeight = FontWeight.Medium
+   222→   222→                        )
+   223→   223→                    }
+   224→   224→                }
+   225→   225→
+   226→   226→                // Action icons
+   227→   227→                if (isAdmin) {
+   228→   228→                    IconButton(onClick = onAdminClick) {
+   229→   229→                        Icon(
+   230→   230→                            Icons.Default.AdminPanelSettings,
+   231→   231→                            contentDescription = "Admin",
+   232→   232→                            tint = ZexoSecondary
+   233→   233→                        )
+   234→   234→                    }
+   235→   235→                }
+   236→   236→
+   237→   237→                IconButton(onClick = { searchActive = !searchActive }) {
+   238→   238→                    Icon(
+   239→   239→                        if (searchActive) Icons.Default.Close else Icons.Default.Search,
+   240→   240→                        contentDescription = "Search",
+   241→   241→                        tint = ZexoTextPrimary
+   242→   242→                    )
+   243→   243→                }
+   244→   244→            }
+   245→   245→
+   246→   246→            // Search bar
+   247→   247→            AnimatedVisibility(
+   248→   248→                visible = searchActive,
+   249→   249→                enter = expandVertically() + fadeIn(),
+   250→   250→                exit = shrinkVertically() + fadeOut()
+   251→   251→            ) {
+   252→   252→                OutlinedTextField(
+   253→   253→                    value = searchQuery,
+   254→   254→                    onValueChange = onSearchQueryChange,
+   255→   255→                    modifier = Modifier
+   256→   256→                        .fillMaxWidth()
+   257→   257→                        .padding(horizontal = 16.dp, vertical = 4.dp),
+   258→   258→                    placeholder = {
+   259→   259→                        Text("Search chats, people…", color = ZexoTextSecondary)
+   260→   260→                    },
+   261→   261→                    leadingIcon = {
+   262→   262→                        Icon(
+   263→   263→                            Icons.Default.Search,
+   264→   264→                            contentDescription = null,
+   265→   265→                            tint = ZexoTextSecondary
+   266→   266→                        )
+   267→   267→                    },
+   268→   268→                    trailingIcon = {
+   269→   269→                        if (searchQuery.isNotEmpty()) {
+   270→   270→                            IconButton(onClick = onClearSearch) {
+   271→   271→                                Icon(
+   272→   272→                                    Icons.Default.Clear,
+   273→   273→                                    contentDescription = "Clear",
+   274→   274→                                    tint = ZexoTextSecondary
+   275→   275→                                )
+   276→   276→                            }
+   277→   277→                        }
+   278→   278→                        if (isSearching) {
+   279→   279→                            CircularProgressIndicator(
+   280→   280→                                modifier = Modifier.size(18.dp),
+   281→   281→                                color = ZexoPrimary,
+   282→   282→                                strokeWidth = 2.dp
+   283→   283→                            )
+   284→   284→                        }
+   285→   285→                    },
+   286→   286→                    singleLine = true,
+   287→   287→                    shape = RoundedCornerShape(12.dp),
+   288→   288→                    colors = OutlinedTextFieldDefaults.colors(
+   289→   289→                        focusedBorderColor = ZexoPrimary,
+   290→   290→                        unfocusedBorderColor = ZexoSurfaceLight,
+   291→   291→                        focusedContainerColor = ZexoBackground,
+   292→   292→                        unfocusedContainerColor = ZexoBackground,
+   293→   293→                        focusedTextColor = ZexoTextPrimary,
+   294→   294→                        unfocusedTextColor = ZexoTextPrimary,
+   295→   295→                        cursorColor = ZexoPrimary
+   296→   296→                    )
+   297→   297→                )
+   298→   298→            }
+   299→   299→        }
+   300→   300→    }
+   301→   301→}
+   302→   302→
+   303→   303→// ═══════════════════════════════════════════════════════════════════════
+   304→   304→//  Tab row
+   305→   305→// ═══════════════════════════════════════════════════════════════════════
+   306→   306→
+   307→   307→@Composable
+   308→   308→private fun ZexoTabRow(
+   309→   309→    selectedTab: HomeTab,
+   310→   310→    onTabSelected: (HomeTab) -> Unit
+   311→   311→) {
+   312→   312→    Surface(
+   313→   313→        color = ZexoSurface,
+   314→   314→        tonalElevation = 1.dp
+   315→   315→    ) {
+   316→   316→        Row(
+   317→   317→            modifier = Modifier
+   318→   318→                .fillMaxWidth()
+   319→   319→                .padding(horizontal = 8.dp, vertical = 4.dp),
+   320→   320→            horizontalArrangement = Arrangement.SpaceEvenly
+   321→   321→        ) {
+   322→   322→            HomeTab.entries.forEach { tab ->
+   323→   323→                val isSelected = tab == selectedTab
+   324→   324→                ZexoTabItem(
+   325→   325→                    tab = tab,
+   326→   326→                    selected = isSelected,
+   327→   327→                    onClick = { onTabSelected(tab) }
+   328→   328→                )
+   329→   329→            }
+   330→   330→        }
+   331→   331→    }
+   332→   332→}
+   333→   333→
+   334→   334→@Composable
+   335→   335→private fun ZexoTabItem(
+   336→   336→    tab: HomeTab,
+   337→   337→    selected: Boolean,
+   338→   338→    onClick: () -> Unit
+   339→   339→) {
+   340→   340→    val icon: ImageVector = when (tab) {
+   341→   341→        HomeTab.CHATS -> Icons.Default.Chat
+   342→   342→        HomeTab.STATUS -> Icons.Default.CameraAlt
+   343→   343→        HomeTab.CALLS -> Icons.Default.Call
+   344→   344→        HomeTab.SETTINGS -> Icons.Default.Settings
+   345→   345→    }
+   346→   346→    val selectedIcon: ImageVector = when (tab) {
+   347→   347→        HomeTab.CHATS -> Icons.Filled.Chat
+   348→   348→        HomeTab.STATUS -> Icons.Filled.CameraAlt
+   349→   349→        HomeTab.CALLS -> Icons.Filled.Call
+   350→   350→        HomeTab.SETTINGS -> Icons.Filled.Settings
+   351→   351→    }
+   352→   352→
+   353→   353→    val animatedColor by animateColorAsState(
+   354→   354→        targetValue = if (selected) ZexoPrimary else ZexoTextSecondary,
+   355→   355→        animationSpec = tween(250), label = "tabColor"
+   356→   356→    )
+   357→   357→
+   358→   358→    Column(
+   359→   359→        modifier = Modifier
+   360→   360→            .clip(RoundedCornerShape(10.dp))
+   361→   361→            .clickable(onClick = onClick)
+   362→   362→            .background(if (selected) ZexoPrimary.copy(alpha = 0.12f) else Color.Transparent)
+   363→   363→            .padding(horizontal = 20.dp, vertical = 8.dp),
+   364→   364→        horizontalAlignment = Alignment.CenterHorizontally
+   365→   365→    ) {
+   366→   366→        Icon(
+   367→   367→            imageVector = if (selected) selectedIcon else icon,
+   368→   368→            contentDescription = tab.label,
+   369→   369→            tint = animatedColor,
+   370→   370→            modifier = Modifier.size(22.dp)
+   371→   371→        )
+   372→   372→        Spacer(modifier = Modifier.height(2.dp))
+   373→   373→        Text(
+   374→   374→            text = tab.label,
+   375→   375→            fontSize = 11.sp,
+   376→   376→            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+   377→   377→            color = animatedColor
+   378→   378→        )
+   379→   379→        // Indicator dot
+   380→   380→        AnimatedVisibility(visible = selected) {
+   381→   381→            Box(
+   382→   382→                modifier = Modifier
+   383→   383→                    .padding(top = 2.dp)
+   384→   384→                    .width(16.dp)
+   385→   385→                    .height(3.dp)
+   386→   386→                    .clip(RoundedCornerShape(2.dp))
+   387→   387→                    .background(ZexoPrimary)
+   388→   388→            )
+   389→   389→        }
+   390→   390→    }
+   391→   391→}
+   392→   392→
+   393→   393→// ═══════════════════════════════════════════════════════════════════════
+   394→   394→//  Animated FAB with dropdown menus
+   395→   395→// ═══════════════════════════════════════════════════════════════════════
+   396→   396→
+   397→   397→@Composable
+   398→   398→private fun AnimatedFab(
+   399→   399→    selectedTab: HomeTab,
+   400→   400→    expanded: Boolean,
+   401→   401→    onExpandToggle: () -> Unit,
+   402→   402→    onDismiss: () -> Unit,
+   403→   403→    navController: NavHostController
+   404→   404→) {
+   405→   405→    // Only show FAB on Chats and Calls tabs
+   406→   406→    if (selectedTab != HomeTab.CHATS && selectedTab != HomeTab.CALLS) return
+   407→   407→
+   408→   408→    val rotation by animateFloatAsState(
+   409→   409→        targetValue = if (expanded) 45f else 0f,
+   410→   410→        animationSpec = tween(300),
+   411→   411→        label = "fabRotation"
+   412→   412→    )
+   413→   413→
+   414→   414→    val fabIcon: ImageVector = when (selectedTab) {
+   415→   415→        HomeTab.CHATS -> Icons.Default.Chat
+   416→   416→        HomeTab.CALLS -> Icons.Default.Call
+   417→   417→        else -> Icons.Default.Add
+   418→   418→    }
+   419→   419→
+   420→   420→    val fabColor = when (selectedTab) {
+   421→   421→        HomeTab.CHATS -> ZexoPrimary
+   422→   422→        HomeTab.CALLS -> ZexoSecondary
+   423→   423→        else -> ZexoPrimary
+   424→   424→    }
+   425→   425→
+   426→   426→    Box(
+   427→   427→        modifier = Modifier.padding(end = 16.dp, bottom = 16.dp)
+   428→   428→    ) {
+   429→   429→        // Dimming overlay
+   430→   430→        AnimatedVisibility(
+   431→   431→            visible = expanded,
+   432→   432→            enter = fadeIn(tween(200)),
+   433→   433→            exit = fadeOut(tween(200))
+   434→   434→        ) {
+   435→   435→            // Invisible click-away layer – handled by onDismiss calls elsewhere
+   436→   436→        }
+   437→   437→
+   438→   438→        // Dropdown menu items (shown above FAB)
+   439→   439→        AnimatedVisibility(
+   440→   440→            visible = expanded,
+   441→   441→            enter = fadeIn(tween(200)) + slideInVertically(initialOffsetY = { it / 2 }),
+   442→   442→            exit = fadeOut(tween(150)) + slideOutVertically(targetOffsetY = { it / 2 })
+   443→   443→        ) {
+   444→   444→            Column(
+   445→   445→                horizontalAlignment = Alignment.End,
+   446→   446→                verticalArrangement = Arrangement.spacedBy(10.dp),
+   447→   447→                modifier = Modifier.padding(bottom = 12.dp)
+   448→   448→            ) {
+   449→   449→                when (selectedTab) {
+   450→   450→                    HomeTab.CHATS -> ChatFabMenu(navController, onDismiss)
+   451→   451→                    HomeTab.CALLS -> CallsFabMenu(navController, onDismiss)
+   452→   452→                    else -> {}
+   453→   453→                }
+   454→   454→            }
+   455→   455→        }
+   456→   456→
+   457→   457→        // Main FAB button
+   458→   458→        FloatingActionButton(
+   459→   459→            onClick = onExpandToggle,
+   460→   460→            containerColor = fabColor,
+   461→   461→            shape = CircleShape,
+   462→   462→            elevation = FloatingActionButtonDefaults.elevation(
+   463→   463→                defaultElevation = 6.dp,
+   464→   464→                pressedElevation = 10.dp
+   465→   465→            )
+   466→   466→        ) {
+   467→   467→            Icon(
+   468→   468→                imageVector = Icons.Default.Add,
+   469→   469→                contentDescription = "Action",
+   470→   470→                tint = Color.White,
+   471→   471→                modifier = Modifier.rotate(rotation)
+   472→   472→            )
+   473→   473→        }
+   474→   474→    }
+   475→   475→}
+   476→   476→
+   477→   477→@Composable
+   478→   478→private fun FabMenuItem(
+   479→   479→    icon: ImageVector,
+   480→   480→    label: String,
+   481→   481→    backgroundColor: Color = ZexoSurfaceLight,
+   482→   482→    iconTint: Color = ZexoPrimary,
+   483→   483→    onClick: () -> Unit
+   484→   484→) {
+   485→   485→    Row(
+   486→   486→        verticalAlignment = Alignment.CenterVertically,
+   487→   487→        modifier = Modifier
+   488→   488→            .clip(RoundedCornerShape(24.dp))
+   489→   489→            .background(backgroundColor)
+   490→   490→            .clickable(onClick = onClick)
+   491→   491→            .padding(horizontal = 14.dp, vertical = 10.dp),
+   492→   492→        horizontalArrangement = Arrangement.spacedBy(8.dp)
+   493→   493→    ) {
+   494→   494→        Text(
+   495→   495→            text = label,
+   496→   496→            color = ZexoTextPrimary,
+   497→   497→            fontSize = 13.sp,
+   498→   498→            fontWeight = FontWeight.Medium
+   499→   499→        )
+   500→   500→        Box(
+   501→   501→            modifier = Modifier
+   502→   502→                .size(36.dp)
+   503→   503→                .clip(CircleShape)
+   504→   504→                .background(iconTint),
+   505→   505→            contentAlignment = Alignment.Center
+   506→   506→        ) {
+   507→   507→            Icon(
+   508→   508→                imageVector = icon,
+   509→   509→                contentDescription = label,
+   510→   510→                tint = Color.White,
+   511→   511→                modifier = Modifier.size(18.dp)
+   512→   512→            )
+   513→   513→        }
+   514→   514→    }
+   515→   515→}
+   516→   516→
+   517→   517→@Composable
+   518→   518→private fun ChatFabMenu(navController: NavHostController, onDismiss: () -> Unit) {
+   519→   519→    FabMenuItem(
+   520→   520→        icon = Icons.Default.Star,
+   521→   521→        label = "New Status",
+   522→   522→        iconTint = ZexoGreen
+   523→   523→    ) {
+   524→   524→        onDismiss()
+   525→   525→        navController.navigate(Screen.NewStatus.route)
+   526→   526→    }
+   527→   527→    FabMenuItem(
+   528→   528→        icon = Icons.Default.Group,
+   529→   529→        label = "New Group",
+   530→   530→        iconTint = ZexoBlue
+   531→   531→    ) {
+   532→   532→        onDismiss()
+   533→   533→        // TODO: Navigate to NewGroup screen
+   534→   534→        navController.navigate(Screen.NewChat.route)
+   535→   535→    }
+   536→   536→    FabMenuItem(
+   537→   537→        icon = Icons.Default.Chat,
+   538→   538→        label = "New Chat",
+   539→   539→        iconTint = ZexoPrimary
+   540→   540→    ) {
+   541→   541→        onDismiss()
+   542→   542→        navController.navigate(Screen.NewChat.route)
+   543→   543→    }
+   544→   544→}
+   545→   545→
+   546→   546→@Composable
+   547→   547→private fun CallsFabMenu(navController: NavHostController, onDismiss: () -> Unit) {
+   548→   548→    FabMenuItem(
+   549→   549→        icon = Icons.Default.QrCodeScanner,
+   550→   550→        label = "Scan QR",
+   551→   551→        iconTint = ZexoSecondary
+   552→   552→    ) {
+   553→   553→        onDismiss()
+   554→   554→        navController.navigate(Screen.QRScanner.route)
+   555→   555→    }
+   556→   556→    FabMenuItem(
+   557→   557→        icon = Icons.Default.PersonAdd,
+   558→   558→        label = "New Contact",
+   559→   559→        iconTint = ZexoGreen
+   560→   560→    ) {
+   561→   561→        onDismiss()
+   562→   562→        // TODO: Navigate to NewContact screen
+   563→   563→        navController.navigate(Screen.NewChat.route)
+   564→   564→    }
+   565→   565→    FabMenuItem(
+   566→   566→        icon = Icons.Default.Dialpad,
+   567→   567→        label = "Dial Pad",
+   568→   568→        iconTint = ZexoOrange
+   569→   569→    ) {
+   570→   570→        onDismiss()
+   571→   571→        navController.navigate(Screen.DialPad.route)
+   572→   572→    }
+   573→   573→    FabMenuItem(
+   574→   574→        icon = Icons.Default.Call,
+   575→   575→        label = "New Call",
+   576→   576→        iconTint = ZexoPrimary
+   577→   577→    ) {
+   578→   578→        onDismiss()
+   579→   579→        navController.navigate(Screen.NewChat.route)
+   580→   580→    }
+   581→   581→}
+   582→   582→
+   583→   583→// ═══════════════════════════════════════════════════════════════════════
+   584→   584→//  Chats Tab
+   585→   585→// ═══════════════════════════════════════════════════════════════════════
+   586→   586→
+   587→   587→@Composable
+   588→   588→private fun ChatsTabContent(
+   589→   589→    viewModel: HomeViewModel,
+   590→   590→    navController: NavHostController
+   591→   591→) {
+   592→   592→    val chats by viewModel.filteredChats.collectAsState()
+   593→   593→    val searchResults by viewModel.searchResults.collectAsState()
+   594→   594→    val searchQuery by viewModel.searchQuery.collectAsState()
+   595→   595→    val isLoading by viewModel.isLoading.collectAsState()
+   596→   596→
+   597→   597→    if (isLoading) {
+   598→   598→        Box(
+   599→   599→            modifier = Modifier.fillMaxSize(),
+   600→   600→            contentAlignment = Alignment.Center
+   601→   601→        ) {
+   602→   602→            CircularProgressIndicator(color = ZexoPrimary)
+   603→   603→        }
+   604→   604→        return
+   605→   605→    }
+   606→   606→
+   607→   607→    // Show search results if searching
+   608→   608→    if (searchQuery.isNotBlank()) {
+   609→   609→        if (searchResults.isEmpty()) {
+   610→   610→            Box(
+   611→   611→                modifier = Modifier.fillMaxSize(),
+   612→   612→                contentAlignment = Alignment.Center
+   613→   613→            ) {
+   614→   614→                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+   615→   615→                    Icon(
+   616→   616→                        Icons.Default.Search,
+   617→   617→                        contentDescription = null,
+   618→   618→                        modifier = Modifier.size(48.dp),
+   619→   619→                        tint = ZexoTextSecondary
+   620→   620→                    )
+   621→   621→                    Spacer(modifier = Modifier.height(8.dp))
+   622→   622→                    Text(
+   623→   623→                        "No results for \"$searchQuery\"",
+   624→   624→                        color = ZexoTextSecondary,
+   625→   625→                        fontSize = 14.sp
+   626→   626→                    )
+   627→   627→                }
+   628→   628→            }
+   629→   629→        } else {
+   630→   630→            LazyColumn(
+   631→   631→                modifier = Modifier.fillMaxSize(),
+   632→   632→                contentPadding = PaddingValues(vertical = 8.dp)
+   633→   633→            ) {
+   634→   634→                items(searchResults, key = { it.uid }) { user ->
+   635→   635→                    SearchUserItem(
+   636→   636→                        user = user,
+   637→   637→                        isOnline = viewModel.isUserOnline(user.uid),
+   638→   638→                        onClick = {
+   639→   639→                            navController.navigate(Screen.Profile.createRoute(user.uid))
+   640→   640→                        }
+   641→   641→                    )
+   642→   642→                }
+   643→   643→            }
+   644→   644→        }
+   645→   645→        return
+   646→   646→    }
+   647→   647→
+   648→   648→    if (chats.isEmpty()) {
+   649→   649→        EmptyState(
+   650→   650→            icon = Icons.Default.Chat,
+   651→   651→            title = "No conversations yet",
+   652→   652→            subtitle = "Start a new chat to connect with people"
+   653→   653→        )
+   654→   654→        return
+   655→   655→    }
+   656→   656→
+   657→   657→    LazyColumn(
+   658→   658→        modifier = Modifier.fillMaxSize(),
+   659→   659→        contentPadding = PaddingValues(vertical = 4.dp)
+   660→   660→    ) {
+   661→   661→        items(chats, key = { it.id }) { chat ->
+   662→   662→            ChatItem(
+   663→   663→                chat = chat,
+   664→   664→                viewModel = viewModel,
+   665→   665→                onClick = {
+   666→   666→                    val otherUser = viewModel.getOtherUser(chat)
+   667→   667→                    val otherUserId = otherUser?.uid ?: chat.participants.firstOrNull { it != viewModel.currentUser.value?.uid } ?: ""
+   668→   668→                    navController.navigate(Screen.Chat.createRoute(chat.id, otherUserId))
+   669→   669→                },
+   670→   670→                onAvatarClick = {
+   671→   671→                    val otherUser = viewModel.getOtherUser(chat)
+   672→   672→                    otherUser?.uid?.let { uid ->
+   673→   673→                        navController.navigate(Screen.Profile.createRoute(uid))
+   674→   674→                    }
+   675→   675→                }
+   676→   676→            )
+   677→   677→        }
+   678→   678→    }
+   679→   679→}
+   680→   680→
+   681→   681→@Composable
+   682→   682→private fun ChatItem(
+   683→   683→    chat: Chat,
+   684→   684→    viewModel: HomeViewModel,
+   685→   685→    onClick: () -> Unit,
+   686→   686→    onAvatarClick: () -> Unit
+   687→   687→) {
+   688→   688→    val otherUser = viewModel.getOtherUser(chat)
+   689→   689→    val unread = viewModel.getUnreadCount(chat)
+   690→   690→    val isOnline = otherUser?.uid?.let { viewModel.isUserOnline(it) } == true
+   691→   691→    val isGroup = chat.isGroup
+   692→   692→
+   693→   693→    val displayName = if (isGroup) chat.groupName else otherUser?.displayName ?: "Unknown"
+   694→   694→    val avatarUrl = if (isGroup) chat.groupAvatar else otherUser?.avatar ?: ""
+   695→   695→    val typing = chat.typing.isNotEmpty()
+   696→   696→
+   697→   697→    Row(
+   698→   698→        modifier = Modifier
+   699→   699→            .fillMaxWidth()
+   700→   700→            .clickable(onClick = onClick)
+   701→   701→            .background(ZexoBackground)
+   702→   702→            .padding(horizontal = 16.dp, vertical = 10.dp),
+   703→   703→        verticalAlignment = Alignment.CenterVertically
+   704→   704→    ) {
+   705→   705→        // Avatar with online indicator
+   706→   706→        Box {
+   707→   707→            Box(
+   708→   708→                modifier = Modifier
+   709→   709→                    .size(52.dp)
+   710→   710→                    .clip(CircleShape)
+   711→   711→                    .background(ZexoSurfaceLight)
+   712→   712→                    .clickable(onClick = onAvatarClick),
+   713→   713→                contentAlignment = Alignment.Center
+   714→   714→            ) {
+   715→   715→                if (avatarUrl.isBlank()) {
+   716→   716→                    if (isGroup) {
+   717→   717→                        Icon(
+   718→   718→                            Icons.Default.Group,
+   719→   719→                            contentDescription = null,
+   720→   720→                            tint = ZexoTextSecondary,
+   721→   721→                            modifier = Modifier.size(26.dp)
+   722→   722→                        )
+   723→   723→                    } else {
+   724→   724→                        Text(
+   725→   725→                            text = displayName.take(1).uppercase(),
+   726→   726→                            fontSize = 22.sp,
+   727→   727→                            fontWeight = FontWeight.SemiBold,
+   728→   728→                            color = ZexoPrimary
+   729→   729→                        )
+   730→   730→                    }
+   731→   731→                } else {
+   732→   732→                    AsyncImage(
+   733→   733→                        model = avatarUrl,
+   734→   734→                        contentDescription = null,
+   735→   735→                        modifier = Modifier.fillMaxSize(),
+   736→   736→                        contentScale = ContentScale.Crop
+   737→   737→                    )
+   738→   738→                }
+   739→   739→            }
+   740→   740→            // Online dot
+   741→   741→            if (isOnline && !isGroup) {
+   742→   742→                Box(
+   743→   743→                    modifier = Modifier
+   744→   744→                        .align(Alignment.BottomEnd)
+   745→   745→                        .size(14.dp)
+   746→   746→                        .clip(CircleShape)
+   747→   747→                        .background(ZexoOnline)
+   748→   748→                        .padding(2.dp)
+   749→   749→                ) {
+   750→   750→                    Box(
+   751→   751→                        modifier = Modifier
+   752→   752→                            .fillMaxSize()
+   753→   753→                            .clip(CircleShape)
+   754→   754→                            .background(ZexoOnline)
+   755→   755→                    )
+   756→   756→                }
+   757→   757→            }
+   758→   758→        }
+   759→   759→
+   760→   760→        Spacer(modifier = Modifier.width(14.dp))
+   761→   761→
+   762→   762→        // Name + last message
+   763→   763→        Column(modifier = Modifier.weight(1f)) {
+   764→   764→            Row(verticalAlignment = Alignment.CenterVertically) {
+   765→   765→                Text(
+   766→   766→                    text = displayName,
+   767→   767→                    fontSize = 15.sp,
+   768→   768→                    fontWeight = FontWeight.SemiBold,
+   769→   769→                    color = ZexoTextPrimary,
+   770→   770→                    maxLines = 1,
+   771→   771→                    overflow = TextOverflow.Ellipsis,
+   772→   772→                    modifier = Modifier.weight(1f)
+   773→   773→                )
+   774→   774→                // Time
+   775→   775→                chat.lastMessageTime?.let { ts ->
+   776→   776→                    Text(
+   777→   777→                        text = formatTimestamp(ts),
+   778→   778→                        fontSize = 11.sp,
+   779→   779→                        color = if (unread > 0) ZexoPrimary else ZexoTextSecondary
+   780→   780→                    )
+   781→   781→                }
+   782→   782→            }
+   783→   783→
+   784→   784→            Spacer(modifier = Modifier.height(2.dp))
+   785→   785→
+   786→   786→            Row(verticalAlignment = Alignment.CenterVertically) {
+   787→   787→                if (typing) {
+   788→   788→                    Text(
+   789→   789→                        text = "typing…",
+   790→   790→                        fontSize = 13.sp,
+   791→   791→                        color = ZexoPrimary,
+   792→   792→                        fontWeight = FontWeight.Medium,
+   793→   793→                        maxLines = 1,
+   794→   794→                        modifier = Modifier.weight(1f)
+   795→   795→                    )
+   796→   796→                } else {
+   797→   797→                    Text(
+   798→   798→                        text = chat.lastMessage.ifBlank { "No messages yet" },
+   799→   799→                        fontSize = 13.sp,
+   800→   800→                        color = ZexoTextSecondary,
+   801→   801→                        maxLines = 1,
+   802→   802→                        overflow = TextOverflow.Ellipsis,
+   803→   803→                        modifier = Modifier.weight(1f)
+   804→   804→                    )
+   805→   805→                }
+   806→   806→
+   807→   807→                // Unread badge
+   808→   808→                if (unread > 0) {
+   809→   809→                    Box(
+   810→   810→                        modifier = Modifier
+   811→   811→                            .padding(start = 6.dp)
+   812→   812→                            .size(minOf(22.dp + (unread.toString().length * 4).dp, 36.dp))
+   813→   813→                            .height(22.dp)
+   814→   814→                            .clip(RoundedCornerShape(11.dp))
+   815→   815→                            .background(ZexoPrimary),
+   816→   816→                        contentAlignment = Alignment.Center
+   817→   817→                    ) {
+   818→   818→                        Text(
+   819→   819→                            text = if (unread > 99) "99+" else unread.toString(),
+   820→   820→                            color = Color.White,
+   821→   821→                            fontSize = 11.sp,
+   822→   822→                            fontWeight = FontWeight.Bold
+   823→   823→                        )
+   824→   824→                    }
+   825→   825→                }
+   826→   826→            }
+   827→   827→        }
+   828→   828→    }
+   829→   829→}
+   830→   830→
+   831→   831→@Composable
+   832→   832→private fun SearchUserItem(
+   833→   833→    user: User,
+   834→   834→    isOnline: Boolean,
+   835→   835→    onClick: () -> Unit
+   836→   836→) {
+   837→   837→    Row(
+   838→   838→        modifier = Modifier
+   839→   839→            .fillMaxWidth()
+   840→   840→            .clickable(onClick = onClick)
+   841→   841→            .background(ZexoBackground)
+   842→   842→            .padding(horizontal = 16.dp, vertical = 10.dp),
+   843→   843→        verticalAlignment = Alignment.CenterVertically
+   844→   844→    ) {
+   845→   845→        Box {
+   846→   846→            Box(
+   847→   847→                modifier = Modifier
+   848→   848→                    .size(48.dp)
+   849→   849→                    .clip(CircleShape)
+   850→   850→                    .background(ZexoSurfaceLight),
+   851→   851→                contentAlignment = Alignment.Center
+   852→   852→            ) {
+   853→   853→                if (user.avatar.isBlank()) {
+   854→   854→                    Text(
+   855→   855→                        text = user.displayName.take(1).uppercase(),
+   856→   856→                        fontSize = 20.sp,
+   857→   857→                        fontWeight = FontWeight.SemiBold,
+   858→   858→                        color = ZexoPrimary
+   859→   859→                    )
+   860→   860→                } else {
+   861→   861→                    AsyncImage(
+   862→   862→                        model = user.avatar,
+   863→   863→                        contentDescription = null,
+   864→   864→                        modifier = Modifier.fillMaxSize(),
+   865→   865→                        contentScale = ContentScale.Crop
+   866→   866→                    )
+   867→   867→                }
+   868→   868→            }
+   869→   869→            if (isOnline) {
+   870→   870→                Box(
+   871→   871→                    modifier = Modifier
+   872→   872→                        .align(Alignment.BottomEnd)
+   873→   873→                        .size(12.dp)
+   874→   874→                        .clip(CircleShape)
+   875→   875→                        .background(ZexoOnline)
+   876→   876→                )
+   877→   877→            }
+   878→   878→        }
+   879→   879→        Spacer(modifier = Modifier.width(14.dp))
+   880→   880→        Column {
+   881→   881→            Text(
+   882→   882→                text = user.displayName,
+   883→   883→                fontSize = 15.sp,
+   884→   884→                fontWeight = FontWeight.SemiBold,
+   885→   885→                color = ZexoTextPrimary
+   886→   886→            )
+   887→   887→            Text(
+   888→   888→                text = user.username,
+   889→   889→                fontSize = 12.sp,
+   890→   890→                color = ZexoTextSecondary
+   891→   891→            )
+   892→   892→        }
+   893→   893→    }
+   894→   894→}
+   895→   895→
+   896→   896→// ═══════════════════════════════════════════════════════════════════════
+   897→   897→//  Status Tab
+   898→   898→// ═══════════════════════════════════════════════════════════════════════
+   899→   899→
+   900→   900→@Composable
+   901→   901→private fun StatusTabContent(
+   902→   902→    viewModel: HomeViewModel,
+   903→   903→    navController: NavHostController
+   904→   904→) {
+   905→   905→    val statuses by viewModel.statuses.collectAsState()
+   906→   906→    val groupedStatuses by viewModel.groupedStatuses.collectAsState()
+   907→   907→    val currentUser by viewModel.currentUser.collectAsState()
+   908→   908→
+   909→   909→    LazyColumn(
+   910→   910→        modifier = Modifier.fillMaxSize(),
+   911→   911→        contentPadding = PaddingValues(vertical = 8.dp)
+   912→   912→    ) {
+   913→   913→        // My Status
+   914→   914→        item {
+   915→   915→            val myStatuses = groupedStatuses[currentUser?.uid]
+   916→   916→            MyStatusItem(
+   917→   917→                hasStatus = myStatuses.isNullOrEmpty().not(),
+   918→   918→                onClick = {
+   919→   919→                    if (myStatuses.isNullOrEmpty()) {
+   920→   920→                        navController.navigate(Screen.NewStatus.route)
+   921→   921→                    } else {
+   922→   922→                        myStatuses.firstOrNull()?.id?.let { sid ->
+   923→   923→                            navController.navigate(Screen.StatusView.createRoute(sid))
+   924→   924→                        }
+   925→   925→                    }
+   926→   926→                }
+   927→   927→            )
+   928→   928→        }
+   929→   929→
+   930→   930→        if (groupedStatuses.isNotEmpty()) {
+   931→   931→            item {
+   932→   932→                Text(
+   933→   933→                    text = "Recent updates",
+   934→   934→                    fontSize = 13.sp,
+   935→   935→                    fontWeight = FontWeight.SemiBold,
+   936→   936→                    color = ZexoTextSecondary,
+   937→   937→                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+   938→   938→                )
+   939→   939→            }
+   940→   940→        }
+   941→   941→
+   942→   942→        // Other people's statuses
+   943→   943→        groupedStatuses.entries
+   944→   944→            .filter { it.key != currentUser?.uid }
+   945→   945→            .forEach { (userId, userStatuses) ->
+   946→   946→                item(key = "status_$userId") {
+   947→   947→                    UserStatusItem(
+   948→   948→                        statuses = userStatuses,
+   949→   949→                        isOnline = viewModel.isUserOnline(userId),
+   950→   950→                        onClick = {
+   951→   951→                            userStatuses.firstOrNull()?.id?.let { sid ->
+   952→   952→                                navController.navigate(Screen.StatusView.createRoute(sid))
+   953→   953→                            }
+   954→   954→                        },
+   955→   955→                        onAvatarClick = {
+   956→   956→                            navController.navigate(Screen.Profile.createRoute(userId))
+   957→   957→                        }
+   958→   958→                    )
+   959→   959→                }
+   960→   960→            }
+   961→   961→
+   962→   962→        if (groupedStatuses.size <= 1) {
+   963→   963→            item {
+   964→   964→                EmptyState(
+   965→   965→                    icon = Icons.Default.CameraAlt,
+   966→   966→                    title = "No status updates",
+   967→   967→                    subtitle = "Statuses from your contacts will appear here"
+   968→   968→                )
+   969→   969→            }
+   970→   970→        }
+   971→   971→    }
+   972→   972→}
+   973→   973→
+   974→   974→@Composable
+   975→   975→private fun MyStatusItem(
+   976→   976→    hasStatus: Boolean,
+   977→   977→    onClick: () -> Unit
+   978→   978→) {
+   979→   979→    Row(
+   980→   980→        modifier = Modifier
+   981→   981→            .fillMaxWidth()
+   982→   982→            .clickable(onClick = onClick)
+   983→   983→            .background(ZexoBackground)
+   984→   984→            .padding(horizontal = 16.dp, vertical = 10.dp),
+   985→   985→        verticalAlignment = Alignment.CenterVertically
+   986→   986→    ) {
+   987→   987→        Box {
+   988→   988→            Box(
+   989→   989→                modifier = Modifier
+   990→   990→                    .size(56.dp)
+   991→   991→                    .clip(CircleShape)
+   992→   992→                    .background(ZexoSurfaceLight),
+   993→   993→                contentAlignment = Alignment.Center
+   994→   994→            ) {
+   995→   995→                Icon(
+   996→   996→                    Icons.Default.Person,
+   997→   997→                    contentDescription = null,
+   998→   998→                    tint = ZexoTextSecondary,
+   999→   999→                    modifier = Modifier.size(28.dp)
+  1000→  1000→                )
+  1001→  1001→            }
+  1002→  1002→            // Add button
+  1003→  1003→            Box(
+  1004→  1004→                modifier = Modifier
+  1005→  1005→                    .align(Alignment.BottomEnd)
+  1006→  1006→                    .size(22.dp)
+  1007→  1007→                    .clip(CircleShape)
+  1008→  1008→                    .background(ZexoPrimary)
+  1009→  1009→                    .padding(1.dp),
+  1010→  1010→                contentAlignment = Alignment.Center
+  1011→  1011→            ) {
+  1012→  1012→                Icon(
+  1013→  1013→                    Icons.Default.Add,
+  1014→  1014→                    contentDescription = "Add status",
+  1015→  1015→                    tint = Color.White,
+  1016→  1016→                    modifier = Modifier.size(14.dp)
+  1017→  1017→                )
+  1018→  1018→            }
+  1019→  1019→        }
+  1020→  1020→        Spacer(modifier = Modifier.width(14.dp))
+  1021→  1021→        Column {
+  1022→  1022→            Text(
+  1023→  1023→                text = "My Status",
+  1024→  1024→                fontSize = 15.sp,
+  1025→  1025→                fontWeight = FontWeight.SemiBold,
+  1026→  1026→                color = ZexoTextPrimary
+  1027→  1027→            )
+  1028→  1028→            Text(
+  1029→  1029→                text = if (hasStatus) "Tap to view" else "Tap to add status update",
+  1030→  1030→                fontSize = 13.sp,
+  1031→  1031→                color = ZexoTextSecondary
+  1032→  1032→            )
+  1033→  1033→        }
+  1034→  1034→    }
+  1035→  1035→}
+  1036→  1036→
+  1037→  1037→@Composable
+  1038→  1038→private fun UserStatusItem(
+  1039→  1039→    statuses: List<Status>,
+  1040→  1040→    isOnline: Boolean,
+  1041→  1041→    onClick: () -> Unit,
+  1042→  1042→    onAvatarClick: () -> Unit
+  1043→  1043→) {
+  1044→  1044→    val first = statuses.firstOrNull() ?: return
+  1045→  1045→    val seen = statuses.all { currentUserUid()?.let { uid -> uid in it.seenBy } == true }
+  1046→  1046→
+  1047→  1047→    Row(
+  1048→  1048→        modifier = Modifier
+  1049→  1049→            .fillMaxWidth()
+  1050→  1050→            .clickable(onClick = onClick)
+  1051→  1051→            .background(ZexoBackground)
+  1052→  1052→            .padding(horizontal = 16.dp, vertical = 8.dp),
+  1053→  1053→        verticalAlignment = Alignment.CenterVertically
+  1054→  1054→    ) {
+  1055→  1055→        // Status ring avatar
+  1056→  1056→        Box(
+  1057→  1057→            modifier = Modifier
+  1058→  1058→                .size(56.dp)
+  1059→  1059→                .clip(CircleShape)
+  1060→  1060→                .background(
+  1061→  1061→                    if (seen) ZexoSurfaceLight else ZexoPrimary
+  1062→  1062→                )
+  1063→  1063→                .padding(3.dp)
+  1064→  1064→                .clip(CircleShape)
+  1065→  1065→                .background(ZexoBackground)
+  1066→  1066→                .padding(2.dp)
+  1067→  1067→                .clickable(onClick = onAvatarClick),
+  1068→  1068→            contentAlignment = Alignment.Center
+  1069→  1069→        ) {
+  1070→  1070→            if (first.userAvatar.isBlank()) {
+  1071→  1071→                Text(
+  1072→  1072→                    text = first.userName.take(1).uppercase(),
+  1073→  1073→                    fontSize = 22.sp,
+  1074→  1074→                    fontWeight = FontWeight.SemiBold,
+  1075→  1075→                    color = ZexoPrimary
+  1076→  1076→                )
+  1077→  1077→            } else {
+  1078→  1078→                AsyncImage(
+  1079→  1079→                    model = first.userAvatar,
+  1080→  1080→                    contentDescription = null,
+  1081→  1081→                    modifier = Modifier
+  1082→  1082→                        .fillMaxSize()
+  1083→  1083→                        .clip(CircleShape),
+  1084→  1084→                    contentScale = ContentScale.Crop
+  1085→  1085→                )
+  1086→  1086→            }
+  1087→  1087→        }
+  1088→  1088→        if (isOnline) {
+  1089→  1089→            Box(
+  1090→  1090→                modifier = Modifier
+  1091→  1091→                    .offset(x = (-14).dp, y = 14.dp)
+  1092→  1092→                    .size(10.dp)
+  1093→  1093→                    .clip(CircleShape)
+  1094→  1094→                    .background(ZexoOnline)
+  1095→  1095→            )
+  1096→  1096→        }
+  1097→  1097→
+  1098→  1098→        Spacer(modifier = Modifier.width(10.dp))
+  1099→  1099→
+  1100→  1100→        Column {
+  1101→  1101→            Text(
+  1102→  1102→                text = first.userName,
+  1103→  1103→                fontSize = 15.sp,
+  1104→  1104→                fontWeight = FontWeight.SemiBold,
+  1105→  1105→                color = ZexoTextPrimary
+  1106→  1106→            )
+  1107→  1107→            Text(
+  1108→  1108→                text = formatTimestamp(first.createdAt),
+  1109→  1109→                fontSize = 13.sp,
+  1110→  1110→                color = ZexoTextSecondary
+  1111→  1111→            )
+  1112→  1112→        }
+  1113→  1113→    }
+  1114→  1114→}
+  1115→  1115→
+  1116→  1116→// ═══════════════════════════════════════════════════════════════════════
+  1117→  1117→//  Calls Tab
+  1118→  1118→// ═══════════════════════════════════════════════════════════════════════
+  1119→  1119→
+  1120→  1120→@Composable
+  1121→  1121→private fun CallsTabContent(
+  1122→  1122→    viewModel: HomeViewModel,
+  1123→  1123→    navController: NavHostController
+  1124→  1124→) {
+  1125→  1125→    val callHistory by viewModel.callHistory.collectAsState()
+  1126→  1126→
+  1127→  1127→    if (callHistory.isEmpty()) {
+  1128→  1128→        EmptyState(
+  1129→  1129→            icon = Icons.Default.Call,
+  1130→  1130→            title = "No call history",
+  1131→  1131→            subtitle = "Your call history will appear here"
+  1132→  1132→        )
+  1133→  1133→        return
+  1134→  1134→    }
+  1135→  1135→
+  1136→  1136→    LazyColumn(
+  1137→  1137→        modifier = Modifier.fillMaxSize(),
+  1138→  1138→        contentPadding = PaddingValues(vertical = 4.dp)
+  1139→  1139→    ) {
+  1140→  1140→        items(callHistory, key = { it.id }) { record ->
+  1141→  1141→            CallItem(
+  1142→  1142→                record = record,
+  1143→  1143→                onClick = {
+  1144→  1144→                    // Navigate to user profile
+  1145→  1145→                    val uid = record.callerId
+  1146→  1146→                    navController.navigate(Screen.Profile.createRoute(uid))
+  1147→  1147→                }
+  1148→  1148→            )
+  1149→  1149→        }
+  1150→  1150→    }
+  1151→  1151→}
+  1152→  1152→
+  1153→  1153→@Composable
+  1154→  1154→private fun CallItem(
+  1155→  1155→    record: CallRecord,
+  1156→  1156→    onClick: () -> Unit
+  1157→  1157→) {
+  1158→  1158→    val isOutgoing = record.direction == "outgoing"
+  1159→  1159→    val isVideo = record.type == "video"
+  1160→  1160→
+  1161→  1161→    val directionIcon = when (record.direction) {
+  1162→  1162→        "outgoing" -> Icons.Default.CallMade
+  1163→  1163→        "incoming" -> Icons.Default.CallReceived
+  1164→  1164→        "missed" -> Icons.Default.CallEnd
+  1165→  1165→        else -> Icons.Default.Call
+  1166→  1166→    }
+  1167→  1167→    val directionTint = when (record.direction) {
+  1168→  1168→        "missed" -> ZexoRed
+  1169→  1169→        "incoming" -> ZexoGreen
+  1170→  1170→        else -> ZexoTextSecondary
+  1171→  1171→    }
+  1172→  1172→
+  1173→  1173→    Row(
+  1174→  1174→        modifier = Modifier
+  1175→  1175→            .fillMaxWidth()
+  1176→  1176→            .clickable(onClick = onClick)
+  1177→  1177→            .background(ZexoBackground)
+  1178→  1178→            .padding(horizontal = 16.dp, vertical = 10.dp),
+  1179→  1179→        verticalAlignment = Alignment.CenterVertically
+  1180→  1180→    ) {
+  1181→  1181→        // Avatar
+  1182→  1182→        Box(
+  1183→  1183→            modifier = Modifier
+  1184→  1184→                .size(50.dp)
+  1185→  1185→                .clip(CircleShape)
+  1186→  1186→                .background(ZexoSurfaceLight),
+  1187→  1187→            contentAlignment = Alignment.Center
+  1188→  1188→        ) {
+  1189→  1189→            val avatarUrl = if (isOutgoing) record.receiverAvatar else record.callerAvatar
+  1190→  1190→            val name = if (isOutgoing) record.receiverName else record.callerName
+  1191→  1191→            if (avatarUrl.isBlank()) {
+  1192→  1192→                Text(
+  1193→  1193→                    text = name.take(1).uppercase(),
+  1194→  1194→                    fontSize = 20.sp,
+  1195→  1195→                    fontWeight = FontWeight.SemiBold,
+  1196→  1196→                    color = ZexoPrimary
+  1197→  1197→                )
+  1198→  1198→            } else {
+  1199→  1199→                AsyncImage(
+  1200→  1200→                    model = avatarUrl,
+  1201→  1201→                    contentDescription = null,
+  1202→  1202→                    modifier = Modifier.fillMaxSize(),
+  1203→  1203→                    contentScale = ContentScale.Crop
+  1204→  1204→                )
+  1205→  1205→            }
+  1206→  1206→        }
+  1207→  1207→
+  1208→  1208→        Spacer(modifier = Modifier.width(14.dp))
+  1209→  1209→
+  1210→  1210→        // Info
+  1211→  1211→        Column(modifier = Modifier.weight(1f)) {
+  1212→  1212→            Text(
+  1213→  1213→                text = if (isOutgoing) record.receiverName else record.callerName,
+  1214→  1214→                fontSize = 15.sp,
+  1215→  1215→                fontWeight = FontWeight.SemiBold,
+  1216→  1216→                color = if (record.direction == "missed") ZexoRed else ZexoTextPrimary,
+  1217→  1217→                maxLines = 1,
+  1218→  1218→                overflow = TextOverflow.Ellipsis
+  1219→  1219→            )
+  1220→  1220→            Row(verticalAlignment = Alignment.CenterVertically) {
+  1221→  1221→                Icon(
+  1222→  1222→                    imageVector = directionIcon,
+  1223→  1223→                    contentDescription = null,
+  1224→  1224→                    modifier = Modifier.size(14.dp),
+  1225→  1225→                    tint = directionTint
+  1226→  1226→                )
+  1227→  1227→                Spacer(modifier = Modifier.width(4.dp))
+  1228→  1228→                Text(
+  1229→  1229→                    text = formatCallInfo(record),
+  1230→  1230→                    fontSize = 13.sp,
+  1231→  1231→                    color = ZexoTextSecondary
+  1232→  1232→                )
+  1233→  1233→            }
+  1234→  1234→        }
+  1235→  1235→
+  1236→  1236→        // Call action
+  1237→  1237→        IconButton(onClick = onClick) {
+  1238→  1238→            Icon(
+  1239→  1239→                imageVector = if (isVideo) Icons.Default.Videocam else Icons.Default.Call,
+  1240→  1240→                contentDescription = "Call back",
+  1241→  1241→                tint = ZexoSecondary
+  1242→  1242→            )
+  1243→  1243→        }
+  1244→  1244→    }
+  1245→  1245→}
+  1246→  1246→
+  1247→  1247→// ═══════════════════════════════════════════════════════════════════════
+  1248→  1248→//  Settings Tab (placeholder)
+  1249→  1249→// ═══════════════════════════════════════════════════════════════════════
+  1250→  1250→
+  1251→  1251→@Composable
+  1252→  1252→private fun SettingsTabContent(
+  1253→  1253→    viewModel: HomeViewModel,
+  1254→  1254→    navController: NavHostController
+  1255→  1255→) {
+  1256→  1256→    val currentUser by viewModel.currentUser.collectAsState()
+  1257→  1257→
+  1258→  1258→    LazyColumn(
+  1259→  1259→        modifier = Modifier.fillMaxSize(),
+  1260→  1260→        contentPadding = PaddingValues(vertical = 8.dp)
+  1261→  1261→    ) {
+  1262→  1262→        // Profile card
+  1263→  1263→        item {
+  1264→  1264→            SettingsProfileCard(
+  1265→  1265→                user = currentUser,
+  1266→  1266→                onClick = {
+  1267→  1267→                    currentUser?.uid?.let { uid ->
+  1268→  1268→                        navController.navigate(Screen.Profile.createRoute(uid))
+  1269→  1269→                    }
+  1270→  1270→                },
+  1271→  1271→                onEditClick = {
+  1272→  1272→                    navController.navigate(Screen.ProfileEdit.route)
+  1273→  1273→                }
+  1274→  1274→            )
+  1275→  1275→        }
+  1276→  1276→
+  1277→  1277→        // Settings items
+  1278→  1278→        item { SettingsDivider() }
+  1279→  1279→
+  1280→  1280→        item {
+  1281→  1281→            SettingsItem(
+  1282→  1282→                icon = Icons.Default.Notifications,
+  1283→  1283→                label = "Notifications",
+  1284→  1284→                tint = ZexoOrange
+  1285→  1285→            ) { navController.navigate(Screen.Settings.route) }
+  1286→  1286→        }
+  1287→  1287→        item {
+  1288→  1288→            SettingsItem(
+  1289→  1289→                icon = Icons.Default.Lock,
+  1290→  1290→                label = "Privacy & Security",
+  1291→  1291→                tint = ZexoPrimary
+  1292→  1292→            ) { navController.navigate(Screen.Settings.route) }
+  1293→  1293→        }
+  1294→  1294→        item {
+  1295→  1295→            SettingsItem(
+  1296→  1296→                icon = Icons.Default.Palette,
+  1297→  1297→                label = "Appearance",
+  1298→  1298→                tint = ZexoSecondary
+  1299→  1299→            ) { navController.navigate(Screen.Settings.route) }
+  1300→  1300→        }
+  1301→  1301→        item {
+  1302→  1302→            SettingsItem(
+  1303→  1303→                icon = Icons.Default.Storage,
+  1304→  1304→                label = "Data & Storage",
+  1305→  1305→                tint = ZexoBlue
+  1306→  1306→            ) { navController.navigate(Screen.Settings.route) }
+  1307→  1307→        }
+  1308→  1308→        item {
+  1309→  1309→            SettingsItem(
+  1310→  1310→                icon = Icons.Default.Language,
+  1311→  1311→                label = "Language",
+  1312→  1312→                tint = ZexoGreen
+  1313→  1313→            ) { navController.navigate(Screen.Settings.route) }
+  1314→  1314→        }
+  1315→  1315→
+  1316→  1316→        item { SettingsDivider() }
+  1317→  1317→
+  1318→  1318→        item {
+  1319→  1319→            SettingsItem(
+  1320→  1320→                icon = Icons.Default.Help,
+  1321→  1321→                label = "Help & Support",
+  1322→  1322→                tint = ZexoTextSecondary
+  1323→  1323→            ) {}
+  1324→  1324→        }
+  1325→  1325→        item {
+  1326→  1326→            SettingsItem(
+  1327→  1327→                icon = Icons.Default.Info,
+  1328→  1328→                label = "About Zexo",
+  1329→  1329→                tint = ZexoTextSecondary
+  1330→  1330→            ) {}
+  1331→  1331→        }
+  1332→  1332→
+  1333→  1333→        item { SettingsDivider() }
+  1334→  1334→
+  1335→  1335→        item {
+  1336→  1336→            SettingsItem(
+  1337→  1337→                icon = Icons.Default.Logout,
+  1338→  1338→                label = "Log Out",
+  1339→  1339→                tint = ZexoRed
+  1340→  1340→            ) {
+  1341→  1341→                navController.navigate(Screen.Auth.route) {
+  1342→  1342→                    popUpTo(0) { inclusive = true }
+  1343→  1343→                }
+  1344→  1344→            }
+  1345→  1345→        }
+  1346→  1346→    }
+  1347→  1347→}
+  1348→  1348→
+  1349→  1349→@Composable
+  1350→  1350→private fun SettingsProfileCard(
+  1351→  1351→    user: User?,
+  1352→  1352→    onClick: () -> Unit,
+  1353→  1353→    onEditClick: () -> Unit
+  1354→  1354→) {
+  1355→  1355→    Row(
+  1356→  1356→        modifier = Modifier
+  1357→  1357→            .fillMaxWidth()
+  1358→  1358→            .clickable(onClick = onClick)
+  1359→  1359→            .background(ZexoBackground)
+  1360→  1360→            .padding(horizontal = 16.dp, vertical = 12.dp),
+  1361→  1361→        verticalAlignment = Alignment.CenterVertically
+  1362→  1362→    ) {
+  1363→  1363→        Box(
+  1364→  1364→            modifier = Modifier
+  1365→  1365→                .size(60.dp)
+  1366→  1366→                .clip(CircleShape)
+  1367→  1367→                .background(ZexoPrimary),
+  1368→  1368→            contentAlignment = Alignment.Center
+  1369→  1369→        ) {
+  1370→  1370→            if (user?.avatar.isNullOrBlank()) {
+  1371→  1371→                Text(
+  1372→  1372→                    text = user?.displayName?.take(1)?.uppercase() ?: "Z",
+  1373→  1373→                    fontSize = 26.sp,
+  1374→  1374→                    fontWeight = FontWeight.Bold,
+  1375→  1375→                    color = Color.White
+  1376→  1376→                )
+  1377→  1377→            } else {
+  1378→  1378→                AsyncImage(
+  1379→  1379→                    model = user!!.avatar,
+  1380→  1380→                    contentDescription = null,
+  1381→  1381→                    modifier = Modifier.fillMaxSize(),
+  1382→  1382→                    contentScale = ContentScale.Crop
+  1383→  1383→                )
+  1384→  1384→            }
+  1385→  1385→        }
+  1386→  1386→        Spacer(modifier = Modifier.width(14.dp))
+  1387→  1387→        Column(modifier = Modifier.weight(1f)) {
+  1388→  1388→            Text(
+  1389→  1389→                text = user?.displayName ?: "Unknown",
+  1390→  1390→                fontSize = 17.sp,
+  1391→  1391→                fontWeight = FontWeight.SemiBold,
+  1392→  1392→                color = ZexoTextPrimary
+  1393→  1393→            )
+  1394→  1394→            Text(
+  1395→  1395→                text = user?.bio ?: "",
+  1396→  1396→                fontSize = 13.sp,
+  1397→  1397→                color = ZexoTextSecondary,
+  1398→  1398→                maxLines = 1,
+  1399→  1399→                overflow = TextOverflow.Ellipsis
+  1400→  1400→            )
+  1401→  1401→            user?.zixoNumber?.let {
+  1402→  1402→                Text(
+  1403→  1403→                    text = it,
+  1404→  1404→                    fontSize = 12.sp,
+  1405→  1405→                    color = ZexoSecondary,
+  1406→  1406→                    fontWeight = FontWeight.Medium
+  1407→  1407→                )
+  1408→  1408→            }
+  1409→  1409→        }
+  1410→  1410→        IconButton(onClick = onEditClick) {
+  1411→  1411→            Icon(
+  1412→  1412→                Icons.Default.Edit,
+  1413→  1413→                contentDescription = "Edit",
+  1414→  1414→                tint = ZexoPrimary
+  1415→  1415→            )
+  1416→  1416→        }
+  1417→  1417→    }
+  1418→  1418→}
+  1419→  1419→
+  1420→  1420→@Composable
+  1421→  1421→private fun SettingsItem(
+  1422→  1422→    icon: ImageVector,
+  1423→  1423→    label: String,
+  1424→  1424→    tint: Color,
+  1425→  1425→    onClick: () -> Unit
+  1426→  1426→) {
+  1427→  1427→    Row(
+  1428→  1428→        modifier = Modifier
+  1429→  1429→            .fillMaxWidth()
+  1430→  1430→            .clickable(onClick = onClick)
+  1431→  1431→            .background(ZexoBackground)
+  1432→  1432→            .padding(horizontal = 16.dp, vertical = 13.dp),
+  1433→  1433→        verticalAlignment = Alignment.CenterVertically
+  1434→  1434→    ) {
+  1435→  1435→        Box(
+  1436→  1436→            modifier = Modifier
+  1437→  1437→                .size(36.dp)
+  1438→  1438→                .clip(RoundedCornerShape(10.dp))
+  1439→  1439→                .background(tint.copy(alpha = 0.15f)),
+  1440→  1440→            contentAlignment = Alignment.Center
+  1441→  1441→        ) {
+  1442→  1442→            Icon(
+  1443→  1443→                icon,
+  1444→  1444→                contentDescription = label,
+  1445→  1445→                tint = tint,
+  1446→  1446→                modifier = Modifier.size(20.dp)
+  1447→  1447→            )
+  1448→  1448→        }
+  1449→  1449→        Spacer(modifier = Modifier.width(14.dp))
+  1450→  1450→        Text(
+  1451→  1451→            text = label,
+  1452→  1452→            fontSize = 15.sp,
+  1453→  1453→            color = ZexoTextPrimary,
+  1454→  1454→            modifier = Modifier.weight(1f)
+  1455→  1455→        )
+  1456→  1456→        Icon(
+  1457→  1457→            Icons.Default.ChevronRight,
+  1458→  1458→            contentDescription = null,
+  1459→  1459→            tint = ZexoTextSecondary,
+  1460→  1460→            modifier = Modifier.size(20.dp)
+  1461→  1461→        )
+  1462→  1462→    }
+  1463→  1463→}
+  1464→  1464→
+  1465→  1465→@Composable
+  1466→  1466→private fun SettingsDivider() {
+  1467→  1467→    HorizontalDivider(
+  1468→  1468→        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+  1469→  1469→        color = ZexoSurfaceLight,
+  1470→  1470→        thickness = 1.dp
+  1471→  1471→    )
+  1472→  1472→}
+  1473→  1473→
+  1474→  1474→// ═══════════════════════════════════════════════════════════════════════
+  1475→  1475→//  Shared composables
+  1476→  1476→// ═══════════════════════════════════════════════════════════════════════
+  1477→  1477→
+  1478→  1478→@Composable
+  1479→  1479→private fun EmptyState(
+  1480→  1480→    icon: ImageVector,
+  1481→  1481→    title: String,
+  1482→  1482→    subtitle: String
+  1483→  1483→) {
+  1484→  1484→    Box(
+  1485→  1485→        modifier = Modifier.fillMaxSize(),
+  1486→  1486→        contentAlignment = Alignment.Center
+  1487→  1487→    ) {
+  1488→  1488→        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+  1489→  1489→            Box(
+  1490→  1490→                modifier = Modifier
+  1491→  1491→                    .size(72.dp)
+  1492→  1492→                    .clip(CircleShape)
+  1493→  1493→                    .background(ZexoSurfaceLight),
+  1494→  1494→                contentAlignment = Alignment.Center
+  1495→  1495→            ) {
+  1496→  1496→                Icon(
+  1497→  1497→                    icon,
+  1498→  1498→                    contentDescription = null,
+  1499→  1499→                    modifier = Modifier.size(36.dp),
+  1500→  1500→                    tint = ZexoTextSecondary
+  1501→  1501→                )
+  1502→  1502→            }
+  1503→  1503→            Spacer(modifier = Modifier.height(16.dp))
+  1504→  1504→            Text(
+  1505→  1505→                text = title,
+  1506→  1506→                fontSize = 16.sp,
+  1507→  1507→                fontWeight = FontWeight.SemiBold,
+  1508→  1508→                color = ZexoTextPrimary
+  1509→  1509→            )
+  1510→  1510→            Spacer(modifier = Modifier.height(4.dp))
+  1511→  1511→            Text(
+  1512→  1512→                text = subtitle,
+  1513→  1513→                fontSize = 13.sp,
+  1514→  1514→                color = ZexoTextSecondary,
+  1515→  1515→                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+  1516→  1516→            )
+  1517→  1517→        }
+  1518→  1518→    }
+  1519→  1519→}
+  1520→  1520→
+  1521→  1521→// ═══════════════════════════════════════════════════════════════════════
+  1522→  1522→//  Utility functions
+  1523→  1523→// ═══════════════════════════════════════════════════════════════════════
+  1524→  1524→
+  1525→  1525→private fun formatTimestamp(ts: Long): String {
+  1526→  1526→    val now = System.currentTimeMillis()
+  1527→  1527→    val diff = now - ts
+  1528→  1528→    return when {
+  1529→  1529→        diff < 60_000 -> "now"
+  1530→  1530→        diff < 3_600_000 -> "${diff / 60_000}m"
+  1531→  1531→        diff < 86_400_000 -> "${diff / 3_600_000}h"
+  1532→  1532→        diff < 604_800_000 -> "${diff / 86_400_000}d"
+  1533→  1533→        else -> {
+  1534→  1534→            val date = java.text.SimpleDateFormat("MMM dd", java.util.Locale.getDefault())
+  1535→  1535→            date.format(java.util.Date(ts))
+  1536→  1536→        }
+  1537→  1537→    }
+  1538→  1538→}
+  1539→  1539→
+  1540→  1540→private fun formatCallInfo(record: CallRecord): String {
+  1541→  1541→    val time = record.timestamp?.let { formatTimestamp(it) } ?: ""
+  1542→  1542→    val duration = if (record.duration > 0) {
+  1543→  1543→        val mins = record.duration / 60
+  1544→  1544→        val secs = record.duration % 60
+  1545→  1545→        "($mins:${secs.toString().padStart(2, '0')})"
+  1546→  1546→    } else ""
+  1547→  1547→    val direction = when (record.direction) {
+  1548→  1548→        "outgoing" -> "Outgoing"
+  1549→  1549→        "incoming" -> "Incoming"
+  1550→  1550→        "missed" -> "Missed"
+  1551→  1551→        else -> record.direction.replaceFirstChar { it.uppercase() }
+  1552→  1552→    }
+  1553→  1553→    return "$direction $duration $time".trim()
+  1554→  1554→}
+  1555→  1555→
+  1556→  1556→// Helper to get current user UID inside composable context
+  1557→  1557→@Composable
+  1558→  1558→private fun currentUserUid(): String? {
+  1559→  1559→    val viewModel: HomeViewModel = hiltViewModel()
+  1560→  1560→    return viewModel.currentUser.collectAsState().value?.uid
+  1561→  1561→}
+  1562→  1562→

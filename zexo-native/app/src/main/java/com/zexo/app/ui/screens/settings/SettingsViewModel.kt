@@ -34,7 +34,7 @@ data class SettingsUiState(
     val isLoggingOut: Boolean = false,
     val logoutSuccess: Boolean = false,
     val error: String? = null,
-    val appVersion: String = "1.3.0"
+    val appVersion: String = "1.6.0"
 )
 
 @HiltViewModel

@@ -1,9 +1,5 @@
 package com.zexo.app.ui.screens.auth
 
-import android.content.Intent
-import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -25,23 +20,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
-import com.zexo.app.BuildConfig
-import com.zexo.app.R
 import com.zexo.app.ui.navigation.Screen
 import com.zexo.app.ui.theme.*
 
@@ -55,34 +42,9 @@ fun AuthScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    
-    val googleSignInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        try {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            val account = task.getResult(ApiException::class.java)
-            account?.idToken?.let { token ->
-                isLoading = true
-                viewModel.signInWithGoogle(token) { result ->
-                    isLoading = false
-                    result.onSuccess {
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo(Screen.Auth.route) { inclusive = true }
-                        }
-                    }.onFailure {
-                        errorMessage = it.message ?: "Google sign in failed"
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            errorMessage = "Google sign in failed: ${e.message}"
-        }
-    }
     
     Column(
         modifier = Modifier
@@ -335,45 +297,6 @@ fun AuthScreen(
                 } else {
                     Text(if (isLogin) "Login" else "Sign Up", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Divider
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                HorizontalDivider(modifier = Modifier.weight(1f), color = ZexoSurfaceLight)
-                Text("  OR  ", color = ZexoTextSecondary, fontSize = 12.sp)
-                HorizontalDivider(modifier = Modifier.weight(1f), color = ZexoSurfaceLight)
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Google Sign-In
-            OutlinedButton(
-                onClick = {
-                    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                        .requestIdToken("809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com")
-                        .requestEmail()
-                        .build()
-                    val googleSignInClient = GoogleSignIn.getClient(navController.context, gso)
-                    googleSignInLauncher.launch(googleSignInClient.signInIntent)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = ZexoSurface,
-                    contentColor = Color.White
-                ),
-                border = ButtonDefaults.outlinedButtonBorder.copy(
-                    brush = Brush.horizontalGradient(listOf(ZexoSurfaceLight, ZexoSurfaceLight))
-                )
-            ) {
-                Text("Continue with Google", fontSize = 15.sp, fontWeight = FontWeight.Medium)
             }
             
             Spacer(modifier = Modifier.height(24.dp))

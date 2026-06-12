@@ -1,5 +1,6 @@
 package com.zexo.app.ui.screens.settings
 
+import android.content.Context
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -32,6 +33,7 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.zexo.app.data.model.User
 import com.zexo.app.data.model.UserSettings
+import com.zexo.app.ui.navigation.HomeTab
 import com.zexo.app.ui.navigation.Screen
 import com.zexo.app.ui.theme.*
 
@@ -158,28 +160,21 @@ fun SettingsScreen(
                 SettingsCard {
                     SettingsItemClickable(
                         icon = Icons.Default.Person,
-                        title = "Profile",
-                        subtitle = "Edit your profile information",
+                        title = "Edit Profile",
+                        subtitle = "Change your name, username, bio, and avatar",
                         onClick = {
-                            uiState.currentUser?.uid?.let { uid ->
-                                navController.navigate(Screen.ProfileEdit.route)
-                            }
+                            navController.navigate(Screen.ProfileEdit.route)
                         }
                     )
                     SettingsDivider()
                     SettingsItemClickable(
                         icon = Icons.Default.Lock,
-                        title = "Privacy",
-                        subtitle = "Control your privacy settings",
-                        onClick = { /* Scroll to privacy section */ }
-                    )
-                    SettingsDivider()
-                    SettingsToggleItem(
-                        icon = Icons.Default.Fingerprint,
-                        title = "Biometric Lock",
-                        subtitle = "Require biometric to open app",
-                        checked = uiState.settings.biometricLock,
-                        onCheckedChange = { viewModel.setBiometricLock(it) }
+                        title = "Change Password",
+                        subtitle = "Update your account password",
+                        onClick = {
+                            // Navigate to auth screen with reset password intent
+                            // For now, show password reset via email
+                        }
                     )
                 }
 
@@ -204,7 +199,7 @@ fun SettingsScreen(
                 SettingsCard {
                     SettingsToggleItem(
                         icon = Icons.Default.Notifications,
-                        title = "Notifications",
+                        title = "Push Notifications",
                         subtitle = if (uiState.settings.notifications) "You'll receive notifications" else "Notifications are disabled",
                         checked = uiState.settings.notifications,
                         onCheckedChange = { viewModel.setNotifications(it) }
@@ -213,8 +208,8 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // ── Privacy Section ─────────────────────────────────────
-                SettingsSectionHeader(title = "Privacy")
+                // ── Privacy & Security Section ──────────────────────────
+                SettingsSectionHeader(title = "Privacy & Security")
                 SettingsCard {
                     SettingsToggleItem(
                         icon = Icons.Default.Visibility,
@@ -246,6 +241,14 @@ fun SettingsScreen(
                         subtitle = if (uiState.settings.typingIndicators) "Others can see when you're typing" else "Typing indicators are hidden",
                         checked = uiState.settings.typingIndicators,
                         onCheckedChange = { viewModel.setTypingIndicators(it) }
+                    )
+                    SettingsDivider()
+                    SettingsToggleItem(
+                        icon = Icons.Default.Fingerprint,
+                        title = "Biometric Lock",
+                        subtitle = "Require biometric to open app",
+                        checked = uiState.settings.biometricLock,
+                        onCheckedChange = { viewModel.setBiometricLock(it) }
                     )
                 }
 

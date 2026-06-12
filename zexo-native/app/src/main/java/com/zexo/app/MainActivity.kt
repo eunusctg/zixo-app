@@ -8,10 +8,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import com.zexo.app.ui.navigation.ZexoNavHost
+import com.zexo.app.ui.screens.settings.SettingsViewModel
 import com.zexo.app.ui.theme.ZexoTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -23,7 +26,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         
         setContent {
-            ZexoTheme(darkTheme = true) {
+            val settingsViewModel: SettingsViewModel = hiltViewModel()
+            val darkTheme by settingsViewModel.darkTheme.collectAsState()
+            
+            ZexoTheme(darkTheme = darkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

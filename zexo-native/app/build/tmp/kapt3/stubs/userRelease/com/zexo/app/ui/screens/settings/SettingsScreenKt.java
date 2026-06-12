@@ -1,5 +1,6 @@
 package com.zexo.app.ui.screens.settings;
 
+import android.content.Context;
 import androidx.compose.foundation.layout.*;
 import androidx.compose.material.icons.Icons;
 import androidx.compose.material.icons.filled.*;
@@ -15,6 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow;
 import androidx.navigation.NavHostController;
 import com.zexo.app.data.model.User;
 import com.zexo.app.data.model.UserSettings;
+import com.zexo.app.ui.navigation.HomeTab;
 import com.zexo.app.ui.navigation.Screen;
 import com.zexo.app.ui.theme.*;
 

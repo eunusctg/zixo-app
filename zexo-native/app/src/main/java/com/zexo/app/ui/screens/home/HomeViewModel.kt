@@ -160,14 +160,9 @@ class HomeViewModel @Inject constructor(
 
     private fun observeCallHistory(uid: String) {
         viewModelScope.launch {
-            // Initial load
-            callRepository.getCallHistory(uid)
-                .onSuccess { _callHistory.value = it }
-
-            // Periodic refresh for real-time feel
-            callRepository.observeIncomingCalls(uid).collect { _ ->
-                callRepository.getCallHistory(uid)
-                    .onSuccess { _callHistory.value = it }
+            // Real-time Firestore listener for call history
+            callRepository.observeCallHistory(uid).collect { calls ->
+                _callHistory.value = calls
             }
         }
     }

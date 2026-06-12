@@ -8,9 +8,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,7 +42,7 @@ import com.zexo.app.ui.theme.*
 import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Main HomeScreen composable
+//  Main HomeScreen composable — Bottom Navigation layout
 // ═══════════════════════════════════════════════════════════════════════
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,23 +55,6 @@ fun HomeScreen(
     val currentUser by viewModel.currentUser.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isSearching by viewModel.isSearching.collectAsState()
-
-    val pagerState = rememberPagerState(
-        initialPage = 0,
-        pageCount = { HomeTab.entries.size }
-    )
-    val scope = rememberCoroutineScope()
-
-    // Sync pager ↔ tabs
-    LaunchedEffect(pagerState.currentPage) {
-        viewModel.selectTab(HomeTab.entries[pagerState.currentPage])
-    }
-    LaunchedEffect(selectedTab) {
-        val idx = HomeTab.entries.indexOf(selectedTab)
-        if (pagerState.currentPage != idx) {
-            pagerState.animateScrollToPage(idx)
-        }
-    }
 
     // FAB expanded state
     var fabExpanded by remember { mutableStateOf(false) }
@@ -106,38 +87,25 @@ fun HomeScreen(
                 onDismiss = { fabExpanded = false },
                 navController = navController
             )
+        },
+        bottomBar = {
+            ZexoBottomNavBar(
+                selectedTab = selectedTab,
+                onTabSelected = { viewModel.selectTab(it) }
+            )
         }
     ) { paddingValues ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .background(ZexoBackground)
         ) {
-            // Tab row
-            ZexoTabRow(
-                selectedTab = selectedTab,
-                onTabSelected = { tab ->
-                    viewModel.selectTab(tab)
-                    scope.launch {
-                        val idx = HomeTab.entries.indexOf(tab)
-                        pagerState.animateScrollToPage(idx)
-                    }
-                }
-            )
-
-            // Pager
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                beyondViewportPageCount = 3
-            ) { page ->
-                when (HomeTab.entries[page]) {
-                    HomeTab.CHATS -> ChatsTabContent(viewModel, navController)
-                    HomeTab.STATUS -> StatusTabContent(viewModel, navController)
-                    HomeTab.CALLS -> CallsTabContent(viewModel, navController)
-                    HomeTab.SETTINGS -> SettingsTabContent(viewModel, navController)
-                }
+            when (selectedTab) {
+                HomeTab.CHATS -> ChatsTabContent(viewModel, navController)
+                HomeTab.STATUS -> StatusTabContent(viewModel, navController)
+                HomeTab.CALLS -> CallsTabContent(viewModel, navController)
+                HomeTab.SETTINGS -> SettingsTabContent(viewModel, navController)
             }
         }
     }
@@ -145,6 +113,65 @@ fun HomeScreen(
     // Dismiss FAB menu on tab change
     LaunchedEffect(selectedTab) {
         fabExpanded = false
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Bottom Navigation Bar
+// ═══════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun ZexoBottomNavBar(
+    selectedTab: HomeTab,
+    onTabSelected: (HomeTab) -> Unit
+) {
+    Surface(
+        color = ZexoSurface,
+        shadowElevation = 12.dp,
+        tonalElevation = 0.dp
+    ) {
+        NavigationBar(
+            containerColor = Color.Transparent,
+            contentColor = ZexoTextPrimary,
+            tonalElevation = 0.dp,
+            modifier = Modifier.height(64.dp)
+        ) {
+            HomeTab.entries.forEach { tab ->
+                val isSelected = tab == selectedTab
+                val icon: ImageVector = when (tab) {
+                    HomeTab.CHATS -> if (isSelected) Icons.Filled.Chat else Icons.Outlined.Chat
+                    HomeTab.STATUS -> if (isSelected) Icons.Filled.CameraAlt else Icons.Outlined.CameraAlt
+                    HomeTab.CALLS -> if (isSelected) Icons.Filled.Call else Icons.Outlined.Call
+                    HomeTab.SETTINGS -> if (isSelected) Icons.Filled.Settings else Icons.Outlined.Settings
+                }
+
+                NavigationBarItem(
+                    icon = {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = tab.label,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = tab.label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    },
+                    selected = isSelected,
+                    onClick = { onTabSelected(tab) },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = ZexoPrimary,
+                        selectedTextColor = ZexoPrimary,
+                        unselectedIconColor = ZexoTextSecondary,
+                        unselectedTextColor = ZexoTextSecondary,
+                        indicatorColor = ZexoPrimary.copy(alpha = 0.12f)
+                    )
+                )
+            }
+        }
     }
 }
 
@@ -208,7 +235,7 @@ private fun HomeTopBar(
                 // Title + Zixo number
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Zexo",
+                        text = "Zixo",
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         color = ZexoTextPrimary
@@ -256,7 +283,7 @@ private fun HomeTopBar(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     placeholder = {
-                        Text("Search chats, people…", color = ZexoTextSecondary)
+                        Text("Search chats, people\u2026", color = ZexoTextSecondary)
                     },
                     leadingIcon = {
                         Icon(
@@ -301,96 +328,6 @@ private fun HomeTopBar(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Tab row
-// ═══════════════════════════════════════════════════════════════════════
-
-@Composable
-private fun ZexoTabRow(
-    selectedTab: HomeTab,
-    onTabSelected: (HomeTab) -> Unit
-) {
-    Surface(
-        color = ZexoSurface,
-        tonalElevation = 1.dp
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            HomeTab.entries.forEach { tab ->
-                val isSelected = tab == selectedTab
-                ZexoTabItem(
-                    tab = tab,
-                    selected = isSelected,
-                    onClick = { onTabSelected(tab) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ZexoTabItem(
-    tab: HomeTab,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val icon: ImageVector = when (tab) {
-        HomeTab.CHATS -> Icons.Default.Chat
-        HomeTab.STATUS -> Icons.Default.CameraAlt
-        HomeTab.CALLS -> Icons.Default.Call
-        HomeTab.SETTINGS -> Icons.Default.Settings
-    }
-    val selectedIcon: ImageVector = when (tab) {
-        HomeTab.CHATS -> Icons.Filled.Chat
-        HomeTab.STATUS -> Icons.Filled.CameraAlt
-        HomeTab.CALLS -> Icons.Filled.Call
-        HomeTab.SETTINGS -> Icons.Filled.Settings
-    }
-
-    val animatedColor by animateColorAsState(
-        targetValue = if (selected) ZexoPrimary else ZexoTextSecondary,
-        animationSpec = tween(250), label = "tabColor"
-    )
-
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .background(if (selected) ZexoPrimary.copy(alpha = 0.12f) else Color.Transparent)
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(
-            imageVector = if (selected) selectedIcon else icon,
-            contentDescription = tab.label,
-            tint = animatedColor,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = tab.label,
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = animatedColor
-        )
-        // Indicator dot
-        AnimatedVisibility(visible = selected) {
-            Box(
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .width(16.dp)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(ZexoPrimary)
-            )
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
 //  Animated FAB with dropdown menus
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -402,8 +339,8 @@ private fun AnimatedFab(
     onDismiss: () -> Unit,
     navController: NavHostController
 ) {
-    // Only show FAB on Chats and Calls tabs
-    if (selectedTab != HomeTab.CHATS && selectedTab != HomeTab.CALLS) return
+    // Only show FAB on Chats and Status tabs
+    if (selectedTab != HomeTab.CHATS && selectedTab != HomeTab.STATUS) return
 
     val rotation by animateFloatAsState(
         targetValue = if (expanded) 45f else 0f,
@@ -411,30 +348,15 @@ private fun AnimatedFab(
         label = "fabRotation"
     )
 
-    val fabIcon: ImageVector = when (selectedTab) {
-        HomeTab.CHATS -> Icons.Default.Chat
-        HomeTab.CALLS -> Icons.Default.Call
-        else -> Icons.Default.Add
-    }
-
     val fabColor = when (selectedTab) {
         HomeTab.CHATS -> ZexoPrimary
-        HomeTab.CALLS -> ZexoSecondary
+        HomeTab.STATUS -> ZexoGreen
         else -> ZexoPrimary
     }
 
     Box(
         modifier = Modifier.padding(end = 16.dp, bottom = 16.dp)
     ) {
-        // Dimming overlay
-        AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(tween(200)),
-            exit = fadeOut(tween(200))
-        ) {
-            // Invisible click-away layer – handled by onDismiss calls elsewhere
-        }
-
         // Dropdown menu items (shown above FAB)
         AnimatedVisibility(
             visible = expanded,
@@ -448,7 +370,7 @@ private fun AnimatedFab(
             ) {
                 when (selectedTab) {
                     HomeTab.CHATS -> ChatFabMenu(navController, onDismiss)
-                    HomeTab.CALLS -> CallsFabMenu(navController, onDismiss)
+                    HomeTab.STATUS -> StatusFabMenu(navController, onDismiss)
                     else -> {}
                 }
             }
@@ -517,21 +439,12 @@ private fun FabMenuItem(
 @Composable
 private fun ChatFabMenu(navController: NavHostController, onDismiss: () -> Unit) {
     FabMenuItem(
-        icon = Icons.Default.Star,
-        label = "New Status",
-        iconTint = ZexoGreen
+        icon = Icons.Default.QrCodeScanner,
+        label = "Scan QR",
+        iconTint = ZexoSecondary
     ) {
         onDismiss()
-        navController.navigate(Screen.NewStatus.route)
-    }
-    FabMenuItem(
-        icon = Icons.Default.Group,
-        label = "New Group",
-        iconTint = ZexoBlue
-    ) {
-        onDismiss()
-        // TODO: Navigate to NewGroup screen
-        navController.navigate(Screen.NewChat.route)
+        navController.navigate(Screen.QRScanner.route)
     }
     FabMenuItem(
         icon = Icons.Default.Chat,
@@ -544,39 +457,14 @@ private fun ChatFabMenu(navController: NavHostController, onDismiss: () -> Unit)
 }
 
 @Composable
-private fun CallsFabMenu(navController: NavHostController, onDismiss: () -> Unit) {
+private fun StatusFabMenu(navController: NavHostController, onDismiss: () -> Unit) {
     FabMenuItem(
-        icon = Icons.Default.QrCodeScanner,
-        label = "Scan QR",
-        iconTint = ZexoSecondary
-    ) {
-        onDismiss()
-        navController.navigate(Screen.QRScanner.route)
-    }
-    FabMenuItem(
-        icon = Icons.Default.PersonAdd,
-        label = "New Contact",
+        icon = Icons.Default.CameraAlt,
+        label = "New Status",
         iconTint = ZexoGreen
     ) {
         onDismiss()
-        // TODO: Navigate to NewContact screen
-        navController.navigate(Screen.NewChat.route)
-    }
-    FabMenuItem(
-        icon = Icons.Default.Dialpad,
-        label = "Dial Pad",
-        iconTint = ZexoOrange
-    ) {
-        onDismiss()
-        navController.navigate(Screen.DialPad.route)
-    }
-    FabMenuItem(
-        icon = Icons.Default.Call,
-        label = "New Call",
-        iconTint = ZexoPrimary
-    ) {
-        onDismiss()
-        navController.navigate(Screen.NewChat.route)
+        navController.navigate(Screen.NewStatus.route)
     }
 }
 
@@ -786,7 +674,7 @@ private fun ChatItem(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (typing) {
                     Text(
-                        text = "typing…",
+                        text = "typing\u2026",
                         fontSize = 13.sp,
                         color = ZexoPrimary,
                         fontWeight = FontWeight.Medium,
@@ -902,7 +790,6 @@ private fun StatusTabContent(
     viewModel: HomeViewModel,
     navController: NavHostController
 ) {
-    val statuses by viewModel.statuses.collectAsState()
     val groupedStatuses by viewModel.groupedStatuses.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
 
@@ -947,6 +834,7 @@ private fun StatusTabContent(
                     UserStatusItem(
                         statuses = userStatuses,
                         isOnline = viewModel.isUserOnline(userId),
+                        currentUid = currentUser?.uid ?: "",
                         onClick = {
                             userStatuses.firstOrNull()?.id?.let { sid ->
                                 navController.navigate(Screen.StatusView.createRoute(sid))
@@ -1038,11 +926,12 @@ private fun MyStatusItem(
 private fun UserStatusItem(
     statuses: List<Status>,
     isOnline: Boolean,
+    currentUid: String,
     onClick: () -> Unit,
     onAvatarClick: () -> Unit
 ) {
     val first = statuses.firstOrNull() ?: return
-    val seen = statuses.all { currentUserUid()?.let { uid -> uid in it.seenBy } == true }
+    val seen = statuses.all { currentUid in it.seenBy }
 
     Row(
         modifier = Modifier
@@ -1141,8 +1030,7 @@ private fun CallsTabContent(
             CallItem(
                 record = record,
                 onClick = {
-                    // Navigate to user profile
-                    val uid = record.callerId
+                    val uid = if (record.direction == "outgoing") record.receiverId else record.callerId
                     navController.navigate(Screen.Profile.createRoute(uid))
                 }
             )
@@ -1245,7 +1133,7 @@ private fun CallItem(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Settings Tab (placeholder)
+//  Settings Tab — Shows settings inline (no navigation needed)
 // ═══════════════════════════════════════════════════════════════════════
 
 @Composable
@@ -1254,171 +1142,237 @@ private fun SettingsTabContent(
     navController: NavHostController
 ) {
     val currentUser by viewModel.currentUser.collectAsState()
+    var showLogoutDialog by remember { mutableStateOf(false) }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = {
+                Text("Logout", fontWeight = FontWeight.SemiBold, color = ZexoTextPrimary)
+            },
+            text = {
+                Text(
+                    "Are you sure you want to logout?",
+                    color = ZexoTextSecondary,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLogoutDialog = false
+                    // Navigate to auth and clear back stack
+                    navController.navigate(Screen.Auth.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }) {
+                    Text("Logout", color = ZexoRed, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text("Cancel", color = ZexoTextSecondary)
+                }
+            },
+            containerColor = ZexoSurface
+        )
+    }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ZexoBackground),
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
         // Profile card
         item {
-            SettingsProfileCard(
-                user = currentUser,
-                onClick = {
-                    currentUser?.uid?.let { uid ->
-                        navController.navigate(Screen.Profile.createRoute(uid))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        navController.navigate(Screen.ProfileEdit.route)
                     }
-                },
-                onEditClick = {
-                    navController.navigate(Screen.ProfileEdit.route)
+                    .background(ZexoBackground)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(GradientProfileStart, GradientProfileEnd)
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (currentUser?.avatar.isNullOrBlank()) {
+                        Text(
+                            text = currentUser?.displayName?.take(1)?.uppercase() ?: "Z",
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    } else {
+                        AsyncImage(
+                            model = currentUser!!.avatar,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                 }
-            )
+                Spacer(modifier = Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = currentUser?.displayName ?: "Unknown",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ZexoTextPrimary
+                    )
+                    Text(
+                        text = currentUser?.bio ?: "",
+                        fontSize = 13.sp,
+                        color = ZexoTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    currentUser?.zixoNumber?.let {
+                        Text(
+                            text = it,
+                            fontSize = 12.sp,
+                            color = ZexoSecondary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                IconButton(onClick = { navController.navigate(Screen.ProfileEdit.route) }) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit",
+                        tint = ZexoPrimary
+                    )
+                }
+            }
         }
 
-        // Settings items
-        item { SettingsDivider() }
+        item { SettingsSectionDivider() }
 
+        // Account
         item {
-            SettingsItem(
+            SettingsSectionLabel("Account")
+        }
+        item {
+            SettingsRow(
+                icon = Icons.Default.Person,
+                label = "Edit Profile",
+                tint = ZexoPrimary
+            ) { navController.navigate(Screen.ProfileEdit.route) }
+        }
+        item {
+            SettingsRow(
+                icon = Icons.Default.Key,
+                label = "Change Password",
+                tint = ZexoOrange
+            ) { navController.navigate(Screen.Settings.route) }
+        }
+
+        item { SettingsSectionDivider() }
+
+        // Preferences
+        item {
+            SettingsSectionLabel("Preferences")
+        }
+        item {
+            SettingsRow(
+                icon = Icons.Default.Palette,
+                label = "Appearance & Theme",
+                tint = ZexoSecondary
+            ) { navController.navigate(Screen.Settings.route) }
+        }
+        item {
+            SettingsRow(
                 icon = Icons.Default.Notifications,
                 label = "Notifications",
                 tint = ZexoOrange
             ) { navController.navigate(Screen.Settings.route) }
         }
+
+        item { SettingsSectionDivider() }
+
+        // Privacy
         item {
-            SettingsItem(
+            SettingsSectionLabel("Privacy & Security")
+        }
+        item {
+            SettingsRow(
                 icon = Icons.Default.Lock,
-                label = "Privacy & Security",
+                label = "Privacy Settings",
                 tint = ZexoPrimary
             ) { navController.navigate(Screen.Settings.route) }
         }
         item {
-            SettingsItem(
-                icon = Icons.Default.Palette,
-                label = "Appearance",
-                tint = ZexoSecondary
-            ) { navController.navigate(Screen.Settings.route) }
-        }
-        item {
-            SettingsItem(
-                icon = Icons.Default.Storage,
-                label = "Data & Storage",
-                tint = ZexoBlue
-            ) { navController.navigate(Screen.Settings.route) }
-        }
-        item {
-            SettingsItem(
-                icon = Icons.Default.Language,
-                label = "Language",
+            SettingsRow(
+                icon = Icons.Default.Fingerprint,
+                label = "Biometric Lock",
                 tint = ZexoGreen
             ) { navController.navigate(Screen.Settings.route) }
         }
 
-        item { SettingsDivider() }
+        item { SettingsSectionDivider() }
 
+        // About & Logout
         item {
-            SettingsItem(
-                icon = Icons.Default.Help,
-                label = "Help & Support",
-                tint = ZexoTextSecondary
-            ) {}
+            SettingsSectionLabel("About")
         }
         item {
-            SettingsItem(
+            SettingsRow(
                 icon = Icons.Default.Info,
-                label = "About Zexo",
+                label = "About Zixo",
                 tint = ZexoTextSecondary
-            ) {}
+            ) { /* Show version info */ }
         }
 
-        item { SettingsDivider() }
+        item { SettingsSectionDivider() }
 
         item {
-            SettingsItem(
-                icon = Icons.Default.Logout,
-                label = "Log Out",
-                tint = ZexoRed
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showLogoutDialog = true }
+                    .background(ZexoBackground)
+                    .padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                navController.navigate(Screen.Auth.route) {
-                    popUpTo(0) { inclusive = true }
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(ZexoRed.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Logout,
+                        contentDescription = "Logout",
+                        tint = ZexoRed,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
+                Spacer(modifier = Modifier.width(14.dp))
+                Text(
+                    text = "Log Out",
+                    fontSize = 15.sp,
+                    color = ZexoRed,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
 }
 
 @Composable
-private fun SettingsProfileCard(
-    user: User?,
-    onClick: () -> Unit,
-    onEditClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .background(ZexoBackground)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(CircleShape)
-                .background(ZexoPrimary),
-            contentAlignment = Alignment.Center
-        ) {
-            if (user?.avatar.isNullOrBlank()) {
-                Text(
-                    text = user?.displayName?.take(1)?.uppercase() ?: "Z",
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            } else {
-                AsyncImage(
-                    model = user!!.avatar,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
-        }
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = user?.displayName ?: "Unknown",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = ZexoTextPrimary
-            )
-            Text(
-                text = user?.bio ?: "",
-                fontSize = 13.sp,
-                color = ZexoTextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            user?.zixoNumber?.let {
-                Text(
-                    text = it,
-                    fontSize = 12.sp,
-                    color = ZexoSecondary,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-        IconButton(onClick = onEditClick) {
-            Icon(
-                Icons.Default.Edit,
-                contentDescription = "Edit",
-                tint = ZexoPrimary
-            )
-        }
-    }
-}
-
-@Composable
-private fun SettingsItem(
+private fun SettingsRow(
     icon: ImageVector,
     label: String,
     tint: Color,
@@ -1463,7 +1417,19 @@ private fun SettingsItem(
 }
 
 @Composable
-private fun SettingsDivider() {
+private fun SettingsSectionLabel(label: String) {
+    Text(
+        text = label,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = ZexoPrimary,
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+    )
+}
+
+@Composable
+private fun SettingsSectionDivider() {
     HorizontalDivider(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         color = ZexoSurfaceLight,
@@ -1512,7 +1478,7 @@ private fun EmptyState(
                 text = subtitle,
                 fontSize = 13.sp,
                 color = ZexoTextSecondary,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                textAlign = TextAlign.Center
             )
         }
     }
@@ -1551,11 +1517,4 @@ private fun formatCallInfo(record: CallRecord): String {
         else -> record.direction.replaceFirstChar { it.uppercase() }
     }
     return "$direction $duration $time".trim()
-}
-
-// Helper to get current user UID inside composable context
-@Composable
-private fun currentUserUid(): String? {
-    val viewModel: HomeViewModel = hiltViewModel()
-    return viewModel.currentUser.collectAsState().value?.uid
 }

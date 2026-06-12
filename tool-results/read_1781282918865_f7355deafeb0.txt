@@ -1,0 +1,1057 @@
+     1→package com.zexo.app.ui.screens.calls
+     2→
+     3→import android.content.Context
+     4→import android.content.Intent
+     5→import android.os.Bundle
+     6→import android.view.WindowManager
+     7→import androidx.activity.ComponentActivity
+     8→import androidx.activity.compose.setContent
+     9→import androidx.activity.enableEdgeToEdge
+    10→import androidx.compose.animation.core.*
+    11→import androidx.compose.foundation.background
+    12→import androidx.compose.foundation.clickable
+    13→import androidx.compose.foundation.interaction.MutableInteractionSource
+    14→import androidx.compose.foundation.layout.*
+    15→import androidx.compose.foundation.shape.CircleShape
+    16→import androidx.compose.foundation.shape.RoundedCornerShape
+    17→import androidx.compose.material.icons.Icons
+    18→import androidx.compose.material.icons.filled.*
+    19→import androidx.compose.material3.*
+    20→import androidx.compose.runtime.*
+    21→import androidx.compose.ui.Alignment
+    22→import androidx.compose.ui.Modifier
+    23→import androidx.compose.ui.draw.alpha
+    24→import androidx.compose.ui.draw.clip
+    25→import androidx.compose.ui.graphics.Brush
+    26→import androidx.compose.ui.graphics.Color
+    27→import androidx.compose.ui.graphics.graphicsLayer
+    28→import androidx.compose.ui.layout.ContentScale
+    29→import androidx.compose.ui.platform.LocalContext
+    30→import androidx.compose.ui.text.font.FontWeight
+    31→import androidx.compose.ui.text.style.TextAlign
+    32→import androidx.compose.ui.unit.dp
+    33→import androidx.compose.ui.unit.sp
+    34→import androidx.compose.ui.viewinterop.AndroidView
+    35→import androidx.core.view.WindowCompat
+    36→import androidx.hilt.navigation.compose.hiltViewModel
+    37→import coil.compose.AsyncImage
+    38→import com.google.firebase.database.FirebaseDatabase
+    39→import com.zexo.app.data.model.CallRecord
+    40→import com.zexo.app.data.model.CallSignal
+    41→import com.zexo.app.data.model.User
+    42→import com.zexo.app.data.repository.AuthRepository
+    43→import com.zexo.app.data.repository.CallRepository
+    44→import com.zexo.app.data.repository.UserRepository
+    45→import com.zexo.app.ui.theme.*
+    46→import com.zexo.app.services.CallService
+    47→import dagger.hilt.android.AndroidEntryPoint
+    48→import kotlinx.coroutines.delay
+    49→import kotlinx.coroutines.launch
+    50→import javax.inject.Inject
+    51→
+    52→// ─────────────────────────────────────────────────────────────────────────────
+    53→// Call State
+    54→// ─────────────────────────────────────────────────────────────────────────────
+    55→
+    56→enum class CallStatus {
+    57→    RINGING, CONNECTING, CONNECTED, ENDED, DECLINED, MISSED
+    58→}
+    59→
+    60→data class CallUiState(
+    61→    val callId: String = "",
+    62→    val isCaller: Boolean = false,
+    63→    val isVideoCall: Boolean = false,
+    64→    val status: CallStatus = CallStatus.RINGING,
+    65→    val otherUser: User? = null,
+    66→    val isMuted: Boolean = false,
+    67→    val isSpeakerOn: Boolean = false,
+    68→    val isVideoEnabled: Boolean = true,
+    69→    val durationSeconds: Long = 0L
+    70→)
+    71→
+    72→// ─────────────────────────────────────────────────────────────────────────────
+    73→// Call ViewModel
+    74→// ─────────────────────────────────────────────────────────────────────────────
+    75→
+    76→@dagger.hilt.android.lifecycle.HiltViewModel
+    77→class CallViewModel @Inject constructor(
+    78→    private val callRepository: CallRepository,
+    79→    private val authRepository: AuthRepository,
+    80→    private val userRepository: UserRepository,
+    81→    private val rtdb: FirebaseDatabase
+    82→) : androidx.lifecycle.ViewModel() {
+    83→
+    84→    private val _uiState = mutableStateOf(CallUiState())
+    85→    val uiState: State<CallUiState> = _uiState
+    86→
+    87→    private var callId: String = ""
+    88→    private var isCaller: Boolean = false
+    89→    private var otherUserId: String = ""
+    90→    private var callStartTime: Long = 0L
+    91→    private var timerJob: kotlinx.coroutines.Job? = null
+    92→    private var signalListener: com.google.firebase.database.ValueEventListener? = null
+    93→
+    94→    fun initOutgoingCall(receiverId: String, isVideo: Boolean) {
+    95→        val uid = authRepository.currentUid ?: return
+    96→        isCaller = true
+    97→        otherUserId = receiverId
+    98→        _uiState.value = _uiState.value.copy(
+    99→            isCaller = true,
+   100→            isVideoCall = isVideo,
+   101→            isVideoEnabled = isVideo,
+   102→            status = CallStatus.RINGING
+   103→        )
+   104→
+   105→        // Fetch other user
+   106→        kotlinx.coroutines.MainScope().launch {
+   107→            userRepository.getUserByUid(receiverId).onSuccess { user ->
+   108→                _uiState.value = _uiState.value.copy(otherUser = user)
+   109→            }
+   110→        }
+   111→
+   112→        // Create signal in RTDB
+   113→        val userName = authRepository.currentUser?.displayName ?: "Unknown"
+   114→        val signal = CallSignal(
+   115→            callerId = uid,
+   116→            callerName = userName,
+   117→            receiverId = receiverId,
+   118→            type = if (isVideo) "video" else "audio",
+   119→            status = "ringing"
+   120→        )
+   121→
+   122→        kotlinx.coroutines.MainScope().launch {
+   123→            callRepository.createCallSignal(signal).onSuccess { id ->
+   124→                callId = id
+   125→                _uiState.value = _uiState.value.copy(callId = id)
+   126→                listenForCallResponse(id)
+   127→            }
+   128→        }
+   129→    }
+   130→
+   131→    fun initIncomingCall(existingCallId: String, callerId: String, isVideo: Boolean) {
+   132→        val uid = authRepository.currentUid ?: return
+   133→        isCaller = false
+   134→        otherUserId = callerId
+   135→        callId = existingCallId
+   136→        _uiState.value = _uiState.value.copy(
+   137→            callId = existingCallId,
+   138→            isCaller = false,
+   139→            isVideoCall = isVideo,
+   140→            isVideoEnabled = isVideo,
+   141→            status = CallStatus.RINGING
+   142→        )
+   143→
+   144→        kotlinx.coroutines.MainScope().launch {
+   145→            userRepository.getUserByUid(callerId).onSuccess { user ->
+   146→                _uiState.value = _uiState.value.copy(otherUser = user)
+   147→            }
+   148→        }
+   149→
+   150→        listenForCallCancel(existingCallId)
+   151→    }
+   152→
+   153→    private fun listenForCallResponse(cid: String) {
+   154→        val ref = rtdb.getReference("calls").child(cid).child("status")
+   155→        signalListener = ref.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+   156→            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+   157→                val status = snapshot.getValue(String::class.java)
+   158→                when (status) {
+   159→                    "connected" -> onCallConnected()
+   160→                    "declined" -> onCallDeclined()
+   161→                    "ended" -> onCallEnded()
+   162→                }
+   163→            }
+   164→            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+   165→        })
+   166→    }
+   167→
+   168→    private fun listenForCallCancel(cid: String) {
+   169→        val ref = rtdb.getReference("calls").child(cid).child("status")
+   170→        signalListener = ref.addValueEventListener(object : com.google.firebase.database.ValueEventListener {
+   171→            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+   172→                val status = snapshot.getValue(String::class.java)
+   173→                when (status) {
+   174→                    "ended" -> onCallEnded()
+   175→                }
+   176→            }
+   177→            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+   178→        })
+   179→    }
+   180→
+   181→    fun answerCall() {
+   182→        _uiState.value = _uiState.value.copy(status = CallStatus.CONNECTING)
+   183→        rtdb.getReference("calls").child(callId).child("status").setValue("connected")
+   184→        onCallConnected()
+   185→    }
+   186→
+   187→    fun declineCall() {
+   188→        rtdb.getReference("calls").child(callId).child("status").setValue("declined")
+   189→        _uiState.value = _uiState.value.copy(status = CallStatus.DECLINED)
+   190→        cleanup()
+   191→    }
+   192→
+   193→    fun endCall() {
+   194→        if (_uiState.value.status == CallStatus.CONNECTED) {
+   195→            rtdb.getReference("calls").child(callId).child("status").setValue("ended")
+   196→        } else {
+   197→            kotlinx.coroutines.MainScope().launch { callRepository.endCallSignal(callId) }
+   198→        }
+   199→        onCallEnded()
+   200→    }
+   201→
+   202→    fun toggleMute() {
+   203→        _uiState.value = _uiState.value.copy(isMuted = !_uiState.value.isMuted)
+   204→    }
+   205→
+   206→    fun toggleSpeaker() {
+   207→        _uiState.value = _uiState.value.copy(isSpeakerOn = !_uiState.value.isSpeakerOn)
+   208→    }
+   209→
+   210→    fun toggleVideo() {
+   211→        _uiState.value = _uiState.value.copy(isVideoEnabled = !_uiState.value.isVideoEnabled)
+   212→    }
+   213→
+   214→    private fun onCallConnected() {
+   215→        callStartTime = System.currentTimeMillis()
+   216→        _uiState.value = _uiState.value.copy(status = CallStatus.CONNECTED)
+   217→        startTimer()
+   218→    }
+   219→
+   220→    private fun onCallDeclined() {
+   221→        _uiState.value = _uiState.value.copy(status = CallStatus.DECLINED)
+   222→        cleanup()
+   223→    }
+   224→
+   225→    private fun onCallEnded() {
+   226→        _uiState.value = _uiState.value.copy(status = CallStatus.ENDED)
+   227→        saveCallRecord()
+   228→        cleanup()
+   229→    }
+   230→
+   231→    private fun startTimer() {
+   232→        timerJob = kotlinx.coroutines.MainScope().launch {
+   233→            while (true) {
+   234→                val elapsed = (System.currentTimeMillis() - callStartTime) / 1000
+   235→                _uiState.value = _uiState.value.copy(durationSeconds = elapsed)
+   236→                delay(1000L)
+   237→            }
+   238→        }
+   239→    }
+   240→
+   241→    private fun saveCallRecord() {
+   242→        val state = _uiState.value
+   243→        val uid = authRepository.currentUid ?: return
+   244→        val other = state.otherUser ?: return
+   245→
+   246→        val record = CallRecord(
+   247→            callerId = if (isCaller) uid else otherUserId,
+   248→            callerName = if (isCaller) (authRepository.currentUser?.displayName ?: "") else other.displayName,
+   249→            callerAvatar = if (isCaller) "" else other.avatar,
+   250→            receiverId = if (isCaller) otherUserId else uid,
+   251→            receiverName = if (isCaller) other.displayName else (authRepository.currentUser?.displayName ?: ""),
+   252→            receiverAvatar = if (isCaller) other.avatar else "",
+   253→            type = if (state.isVideoCall) "video" else "audio",
+   254→            direction = if (isCaller) "outgoing" else "incoming",
+   255→            duration = state.durationSeconds
+   256→        )
+   257→
+   258→        kotlinx.coroutines.MainScope().launch {
+   259→            callRepository.saveCallRecord(record)
+   260→        }
+   261→    }
+   262→
+   263→    private fun cleanup() {
+   264→        timerJob?.cancel()
+   265→        signalListener?.let { listener ->
+   266→            rtdb.getReference("calls").child(callId).child("status").removeEventListener(listener)
+   267→        }
+   268→    }
+   269→
+   270→    override fun onCleared() {
+   271→        super.onCleared()
+   272→        cleanup()
+   273→    }
+   274→}
+   275→
+   276→// ─────────────────────────────────────────────────────────────────────────────
+   277→// Call Activity
+   278→// ─────────────────────────────────────────────────────────────────────────────
+   279→
+   280→@AndroidEntryPoint
+   281→class CallActivity : ComponentActivity() {
+   282→
+   283→    companion object {
+   284→        const val EXTRA_RECEIVER_ID = "receiver_id"
+   285→        const val EXTRA_CALL_ID = "call_id"
+   286→        const val EXTRA_CALLER_ID = "caller_id"
+   287→        const val EXTRA_IS_VIDEO = "is_video"
+   288→        const val EXTRA_IS_INCOMING = "is_incoming"
+   289→
+   290→        fun createOutgoingIntent(
+   291→            context: Context,
+   292→            receiverId: String,
+   293→            isVideo: Boolean
+   294→        ): Intent = Intent(context, CallActivity::class.java).apply {
+   295→            putExtra(EXTRA_RECEIVER_ID, receiverId)
+   296→            putExtra(EXTRA_IS_VIDEO, isVideo)
+   297→            putExtra(EXTRA_IS_INCOMING, false)
+   298→            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+   299→        }
+   300→
+   301→        fun createIncomingIntent(
+   302→            context: Context,
+   303→            callId: String,
+   304→            callerId: String,
+   305→            isVideo: Boolean
+   306→        ): Intent = Intent(context, CallActivity::class.java).apply {
+   307→            putExtra(EXTRA_CALL_ID, callId)
+   308→            putExtra(EXTRA_CALLER_ID, callerId)
+   309→            putExtra(EXTRA_IS_VIDEO, isVideo)
+   310→            putExtra(EXTRA_IS_INCOMING, true)
+   311→            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+   312→        }
+   313→    }
+   314→
+   315→    override fun onCreate(savedInstanceState: Bundle?) {
+   316→        installSplashScreen()
+   317→        super.onCreate(savedInstanceState)
+   318→        enableEdgeToEdge()
+   319→
+   320→        // Keep screen on and show over lock screen
+   321→        window.addFlags(
+   322→            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+   323→            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+   324→            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+   325→        )
+   326→        WindowCompat.setDecorFitsSystemWindows(window, false)
+   327→
+   328→        val isIncoming = intent.getBooleanExtra(EXTRA_IS_INCOMING, false)
+   329→        val isVideo = intent.getBooleanExtra(EXTRA_IS_VIDEO, false)
+   330→
+   331→        setContent {
+   332→            ZexoTheme(darkTheme = true) {
+   333→                val viewModel: CallViewModel = hiltViewModel()
+   334→                val uiState by viewModel.uiState
+   335→
+   336→                LaunchedEffect(Unit) {
+   337→                    if (isIncoming) {
+   338→                        val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: ""
+   339→                        val callerId = intent.getStringExtra(EXTRA_CALLER_ID) ?: ""
+   340→                        viewModel.initIncomingCall(callId, callerId, isVideo)
+   341→                    } else {
+   342→                        val receiverId = intent.getStringExtra(EXTRA_RECEIVER_ID) ?: ""
+   343→                        viewModel.initOutgoingCall(receiverId, isVideo)
+   344→                    }
+   345→
+   346→                    // Start foreground service
+   347→                    val serviceIntent = Intent(this@CallActivity, CallService::class.java)
+   348→                    startForegroundService(serviceIntent)
+   349→                }
+   350→
+   351→                // Auto-finish when call ends
+   352→                val currentStatus = uiState.status
+   353→                LaunchedEffect(currentStatus) {
+   354→                    if (currentStatus == CallStatus.ENDED ||
+   355→                        currentStatus == CallStatus.DECLINED ||
+   356→                        currentStatus == CallStatus.MISSED
+   357→                    ) {
+   358→                        delay(1500L)
+   359→                        stopService(Intent(this@CallActivity, CallService::class.java))
+   360→                        finish()
+   361→                    }
+   362→                }
+   363→
+   364→                CallScreenContent(
+   365→                    uiState = uiState,
+   366→                    onAnswer = { viewModel.answerCall() },
+   367→                    onDecline = { viewModel.declineCall() },
+   368→                    onEndCall = { viewModel.endCall() },
+   369→                    onToggleMute = { viewModel.toggleMute() },
+   370→                    onToggleSpeaker = { viewModel.toggleSpeaker() },
+   371→                    onToggleVideo = { viewModel.toggleVideo() },
+   372→                    onBack = { viewModel.endCall(); finish() }
+   373→                )
+   374→            }
+   375→        }
+   376→    }
+   377→
+   378→    @Suppress("DEPRECATION")
+   379→    private fun installSplashScreen() {
+   380→        // Compatibility splash screen
+   381→    }
+   382→}
+   383→
+   384→// ─────────────────────────────────────────────────────────────────────────────
+   385→// Call Screen Composable
+   386→// ─────────────────────────────────────────────────────────────────────────────
+   387→
+   388→@Composable
+   389→fun CallScreenContent(
+   390→    uiState: CallUiState,
+   391→    onAnswer: () -> Unit,
+   392→    onDecline: () -> Unit,
+   393→    onEndCall: () -> Unit,
+   394→    onToggleMute: () -> Unit,
+   395→    onToggleSpeaker: () -> Unit,
+   396→    onToggleVideo: () -> Unit,
+   397→    onBack: () -> Unit
+   398→) {
+   399→    Box(
+   400→        modifier = Modifier
+   401→            .fillMaxSize()
+   402→            .background(
+   403→                Brush.verticalGradient(
+   404→                    colors = listOf(
+   405→                        ZexoBackground,
+   406→                        ZexoSurface,
+   407→                        ZexoBackground
+   408→                    )
+   409→                )
+   410→            )
+   411→    ) {
+   412→        if (uiState.isVideoCall && uiState.status == CallStatus.CONNECTED && uiState.isVideoEnabled) {
+   413→            VideoCallLayout(
+   414→                uiState = uiState,
+   415→                onToggleMute = onToggleMute,
+   416→                onToggleSpeaker = onToggleSpeaker,
+   417→                onToggleVideo = onToggleVideo,
+   418→                onEndCall = onEndCall
+   419→            )
+   420→        } else {
+   421→            AudioCallLayout(
+   422→                uiState = uiState,
+   423→                onAnswer = onAnswer,
+   424→                onDecline = onDecline,
+   425→                onEndCall = onEndCall,
+   426→                onToggleMute = onToggleMute,
+   427→                onToggleSpeaker = onToggleSpeaker,
+   428→                onToggleVideo = if (uiState.isVideoCall) onToggleVideo else null
+   429→            )
+   430→        }
+   431→    }
+   432→}
+   433→
+   434→// ─────────────────────────────────────────────────────────────────────────────
+   435→// Audio Call Layout
+   436→// ─────────────────────────────────────────────────────────────────────────────
+   437→
+   438→@Composable
+   439→fun AudioCallLayout(
+   440→    uiState: CallUiState,
+   441→    onAnswer: () -> Unit,
+   442→    onDecline: () -> Unit,
+   443→    onEndCall: () -> Unit,
+   444→    onToggleMute: () -> Unit,
+   445→    onToggleSpeaker: () -> Unit,
+   446→    onToggleVideo: (() -> Unit)?
+   447→) {
+   448→    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+   449→    val pulseAlpha by infiniteTransition.animateFloat(
+   450→        initialValue = 0.3f,
+   451→        targetValue = 0.8f,
+   452→        animationSpec = infiniteRepeatable(
+   453→            animation = tween(1500, easing = EaseInOutSine),
+   454→            repeatMode = RepeatMode.Reverse
+   455→        ),
+   456→        label = "pulseAlpha"
+   457→    )
+   458→
+   459→    Box(modifier = Modifier.fillMaxSize()) {
+   460→        // Background pulse ring for ringing state
+   461→        if (uiState.status == CallStatus.RINGING) {
+   462→            Box(
+   463→                modifier = Modifier
+   464→                    .align(Alignment.Center)
+   465→                    .size(260.dp)
+   466→                    .alpha(pulseAlpha * 0.15f)
+   467→                    .background(ZexoPrimary, CircleShape)
+   468→            )
+   469→        }
+   470→
+   471→        Column(
+   472→            modifier = Modifier
+   473→                .fillMaxSize()
+   474→                .padding(horizontal = 24.dp),
+   475→            horizontalAlignment = Alignment.CenterHorizontally
+   476→        ) {
+   477→            Spacer(modifier = Modifier.height(80.dp))
+   478→
+   479→            // User Avatar
+   480→            Box(
+   481→                modifier = Modifier
+   482→                    .size(140.dp)
+   483→                    .background(
+   484→                        Brush.radialGradient(
+   485→                            colors = listOf(ZexoPrimary.copy(alpha = 0.3f), Color.Transparent)
+   486→                        ),
+   487→                        CircleShape
+   488→                    ),
+   489→                contentAlignment = Alignment.Center
+   490→            ) {
+   491→                if (uiState.otherUser?.avatar?.isNotEmpty() == true) {
+   492→                    AsyncImage(
+   493→                        model = uiState.otherUser.avatar,
+   494→                        contentDescription = "Avatar",
+   495→                        modifier = Modifier
+   496→                            .size(120.dp)
+   497→                            .clip(CircleShape),
+   498→                        contentScale = ContentScale.Crop
+   499→                    )
+   500→                } else {
+   501→                    Box(
+   502→                        modifier = Modifier
+   503→                            .size(120.dp)
+   504→                            .background(ZexoPrimary, CircleShape),
+   505→                        contentAlignment = Alignment.Center
+   506→                    ) {
+   507→                        Text(
+   508→                            text = uiState.otherUser?.displayName?.take(1)?.uppercase() ?: "?",
+   509→                            color = Color.White,
+   510→                            fontSize = 48.sp,
+   511→                            fontWeight = FontWeight.Bold
+   512→                        )
+   513→                    }
+   514→                }
+   515→
+   516→                // Online indicator
+   517→                if (uiState.status == CallStatus.CONNECTED) {
+   518→                    Box(
+   519→                        modifier = Modifier
+   520→                            .align(Alignment.BottomEnd)
+   521→                            .offset(x = 4.dp, y = 4.dp)
+   522→                            .size(20.dp)
+   523→                            .background(ZexoGreen, CircleShape)
+   524→                            .padding(3.dp)
+   525→                            .background(ZexoBackground, CircleShape)
+   526→                            .padding(2.dp)
+   527→                            .background(ZexoGreen, CircleShape)
+   528→                    )
+   529→                }
+   530→            }
+   531→
+   532→            Spacer(modifier = Modifier.height(24.dp))
+   533→
+   534→            // User Name
+   535→            Text(
+   536→                text = uiState.otherUser?.displayName ?: "Unknown",
+   537→                color = ZexoTextPrimary,
+   538→                fontSize = 28.sp,
+   539→                fontWeight = FontWeight.Bold
+   540→            )
+   541→
+   542→            Spacer(modifier = Modifier.height(8.dp))
+   543→
+   544→            // Zixo Number
+   545→            if (uiState.otherUser?.zixoNumber?.isNotEmpty() == true) {
+   546→                Text(
+   547→                    text = uiState.otherUser.zixoNumber,
+   548→                    color = ZexoPrimaryLight,
+   549→                    fontSize = 14.sp,
+   550→                    fontWeight = FontWeight.Medium
+   551→                )
+   552→                Spacer(modifier = Modifier.height(4.dp))
+   553→            }
+   554→
+   555→            // Call Status
+   556→            CallStatusLabel(status = uiState.status, durationSeconds = uiState.durationSeconds)
+   557→
+   558→            Spacer(modifier = Modifier.weight(1f))
+   559→
+   560→            // Controls
+   561→            if (uiState.status == CallStatus.RINGING && !uiState.isCaller) {
+   562→                // Incoming call controls
+   563→                IncomingCallControls(onAnswer = onAnswer, onDecline = onDecline)
+   564→            } else if (uiState.status == CallStatus.RINGING && uiState.isCaller) {
+   565→                // Outgoing ringing - just end call
+   566→                OutgoingRingingControls(onEndCall = onEndCall)
+   567→            } else if (uiState.status == CallStatus.CONNECTED) {
+   568→                // Connected call controls
+   569→                ConnectedCallControls(
+   570→                    isMuted = uiState.isMuted,
+   571→                    isSpeakerOn = uiState.isSpeakerOn,
+   572→                    isVideoEnabled = uiState.isVideoEnabled,
+   573→                    isVideoCall = uiState.isVideoCall,
+   574→                    onToggleMute = onToggleMute,
+   575→                    onToggleSpeaker = onToggleSpeaker,
+   576→                    onToggleVideo = onToggleVideo,
+   577→                    onEndCall = onEndCall
+   578→                )
+   579→            } else {
+   580→                // Ended/Declined/Missed
+   581→                EndedCallControls(status = uiState.status)
+   582→            }
+   583→
+   584→            Spacer(modifier = Modifier.height(60.dp))
+   585→        }
+   586→    }
+   587→}
+   588→
+   589→// ─────────────────────────────────────────────────────────────────────────────
+   590→// Video Call Layout
+   591→// ─────────────────────────────────────────────────────────────────────────────
+   592→
+   593→@Composable
+   594→fun VideoCallLayout(
+   595→    uiState: CallUiState,
+   596→    onToggleMute: () -> Unit,
+   597→    onToggleSpeaker: () -> Unit,
+   598→    onToggleVideo: () -> Unit,
+   599→    onEndCall: () -> Unit
+   600→) {
+   601→    Box(modifier = Modifier.fillMaxSize()) {
+   602→        // Remote Video (Full Screen)
+   603→        AndroidView(
+   604→            modifier = Modifier.fillMaxSize(),
+   605→            factory = { ctx ->
+   606→                org.webrtc.SurfaceViewRenderer(ctx).apply {
+   607→                    setZOrderMediaOverlay(false)
+   608→                }
+   609→            },
+   610→            update = { view ->
+   611→                // In production, attach to WebRTC peer connection remote video track
+   612→            }
+   613→        )
+   614→
+   615→        // Dark overlay gradient at top
+   616→        Box(
+   617→            modifier = Modifier
+   618→                .align(Alignment.TopCenter)
+   619→                .fillMaxWidth()
+   620→                .height(120.dp)
+   621→                .background(
+   622→                    Brush.verticalGradient(
+   623→                        colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+   624→                    )
+   625→                )
+   626→        )
+   627→
+   628→        // User info at top
+   629→        Row(
+   630→            modifier = Modifier
+   631→                .align(Alignment.TopCenter)
+   632→                .fillMaxWidth()
+   633→                .padding(horizontal = 16.dp, vertical = 48.dp),
+   634→            verticalAlignment = Alignment.CenterVertically
+   635→        ) {
+   636→            if (uiState.otherUser?.avatar?.isNotEmpty() == true) {
+   637→                AsyncImage(
+   638→                    model = uiState.otherUser.avatar,
+   639→                    contentDescription = null,
+   640→                    modifier = Modifier
+   641→                        .size(40.dp)
+   642→                        .clip(CircleShape),
+   643→                    contentScale = ContentScale.Crop
+   644→                )
+   645→            } else {
+   646→                Box(
+   647→                    modifier = Modifier
+   648→                        .size(40.dp)
+   649→                        .background(ZexoPrimary, CircleShape),
+   650→                    contentAlignment = Alignment.Center
+   651→                ) {
+   652→                    Text(
+   653→                        text = uiState.otherUser?.displayName?.take(1)?.uppercase() ?: "?",
+   654→                        color = Color.White,
+   655→                        fontSize = 16.sp,
+   656→                        fontWeight = FontWeight.Bold
+   657→                    )
+   658→                }
+   659→            }
+   660→            Spacer(modifier = Modifier.width(12.dp))
+   661→            Column {
+   662→                Text(
+   663→                    text = uiState.otherUser?.displayName ?: "Unknown",
+   664→                    color = Color.White,
+   665→                    fontSize = 18.sp,
+   666→                    fontWeight = FontWeight.SemiBold
+   667→                )
+   668→                CallStatusLabel(
+   669→                    status = uiState.status,
+   670→                    durationSeconds = uiState.durationSeconds,
+   671→                    textColor = Color.White.copy(alpha = 0.8f),
+   672→                    fontSize = 12.sp
+   673→                )
+   674→            }
+   675→        }
+   676→
+   677→        // Local Video (PiP)
+   678→        AndroidView(
+   679→            modifier = Modifier
+   680→                .align(Alignment.TopEnd)
+   681→                .padding(top = 100.dp, end = 16.dp)
+   682→                .size(width = 120.dp, height = 170.dp)
+   683→                .clip(RoundedCornerShape(16.dp))
+   684→                .background(ZexoSurface),
+   685→            factory = { ctx ->
+   686→                org.webrtc.SurfaceViewRenderer(ctx).apply {
+   687→                    setZOrderMediaOverlay(true)
+   688→                }
+   689→            },
+   690→            update = { view ->
+   691→                // In production, attach to WebRTC peer connection local video track
+   692→            }
+   693→        )
+   694→
+   695→        // Controls at bottom
+   696→        Box(
+   697→            modifier = Modifier
+   698→                .align(Alignment.BottomCenter)
+   699→                .fillMaxWidth()
+   700→                .background(
+   701→                    Brush.verticalGradient(
+   702→                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+   703→                    )
+   704→                )
+   705→                .padding(horizontal = 24.dp, vertical = 48.dp)
+   706→        ) {
+   707→            VideoCallControls(
+   708→                isMuted = uiState.isMuted,
+   709→                isSpeakerOn = uiState.isSpeakerOn,
+   710→                isVideoEnabled = uiState.isVideoEnabled,
+   711→                onToggleMute = onToggleMute,
+   712→                onToggleSpeaker = onToggleSpeaker,
+   713→                onToggleVideo = onToggleVideo,
+   714→                onEndCall = onEndCall
+   715→            )
+   716→        }
+   717→    }
+   718→}
+   719→
+   720→// ─────────────────────────────────────────────────────────────────────────────
+   721→// Status Label
+   722→// ─────────────────────────────────────────────────────────────────────────────
+   723→
+   724→@Composable
+   725→fun CallStatusLabel(
+   726→    status: CallStatus,
+   727→    durationSeconds: Long,
+   728→    textColor: Color = ZexoTextSecondary,
+   729→    fontSize: androidx.compose.ui.unit.TextUnit = 16.sp
+   730→) {
+   731→    val statusText = when (status) {
+   732→        CallStatus.RINGING -> "Ringing..."
+   733→        CallStatus.CONNECTING -> "Connecting..."
+   734→        CallStatus.CONNECTED -> formatDuration(durationSeconds)
+   735→        CallStatus.ENDED -> "Call ended"
+   736→        CallStatus.DECLINED -> "Declined"
+   737→        CallStatus.MISSED -> "Missed call"
+   738→    }
+   739→
+   740→    val animatedColor = when (status) {
+   741→        CallStatus.RINGING -> ZexoOrange
+   742→        CallStatus.CONNECTING -> ZexoBlue
+   743→        CallStatus.CONNECTED -> ZexoGreen
+   744→        CallStatus.ENDED -> ZexoTextSecondary
+   745→        CallStatus.DECLINED -> ZexoRed
+   746→        CallStatus.MISSED -> ZexoRed
+   747→    }
+   748→
+   749→    Text(
+   750→        text = statusText,
+   751→        color = if (status == CallStatus.CONNECTED) animatedColor else textColor,
+   752→        fontSize = fontSize,
+   753→        fontWeight = if (status == CallStatus.CONNECTED) FontWeight.Medium else FontWeight.Normal
+   754→    )
+   755→}
+   756→
+   757→private fun formatDuration(seconds: Long): String {
+   758→    val mins = seconds / 60
+   759→    val secs = seconds % 60
+   760→    return String.format("%02d:%02d", mins, secs)
+   761→}
+   762→
+   763→// ─────────────────────────────────────────────────────────────────────────────
+   764→// Incoming Call Controls
+   765→// ─────────────────────────────────────────────────────────────────────────────
+   766→
+   767→@Composable
+   768→fun IncomingCallControls(onAnswer: () -> Unit, onDecline: () -> Unit) {
+   769→    Row(
+   770→        modifier = Modifier.fillMaxWidth(),
+   771→        horizontalArrangement = Arrangement.SpaceEvenly,
+   772→        verticalAlignment = Alignment.CenterVertically
+   773→    ) {
+   774→        // Decline Button
+   775→        Column(
+   776→            horizontalAlignment = Alignment.CenterHorizontally
+   777→        ) {
+   778→            FilledIconButton(
+   779→                onClick = onDecline,
+   780→                modifier = Modifier.size(64.dp),
+   781→                colors = IconButtonDefaults.filledIconButtonColors(
+   782→                    containerColor = ZexoRed
+   783→                )
+   784→            ) {
+   785→                Icon(
+   786→                    Icons.Filled.CallEnd,
+   787→                    contentDescription = "Decline",
+   788→                    modifier = Modifier.size(28.dp),
+   789→                    tint = Color.White
+   790→                )
+   791→            }
+   792→            Spacer(modifier = Modifier.height(8.dp))
+   793→            Text("Decline", color = ZexoTextSecondary, fontSize = 12.sp)
+   794→        }
+   795→
+   796→        // Answer Button
+   797→        Column(
+   798→            horizontalAlignment = Alignment.CenterHorizontally
+   799→        ) {
+   800→            FilledIconButton(
+   801→                onClick = onAnswer,
+   802→                modifier = Modifier.size(64.dp),
+   803→                colors = IconButtonDefaults.filledIconButtonColors(
+   804→                    containerColor = ZexoGreen
+   805→                )
+   806→            ) {
+   807→                Icon(
+   808→                    Icons.Filled.Call,
+   809→                    contentDescription = "Answer",
+   810→                    modifier = Modifier.size(28.dp),
+   811→                    tint = Color.White
+   812→                )
+   813→            }
+   814→            Spacer(modifier = Modifier.height(8.dp))
+   815→            Text("Answer", color = ZexoTextSecondary, fontSize = 12.sp)
+   816→        }
+   817→    }
+   818→}
+   819→
+   820→// ─────────────────────────────────────────────────────────────────────────────
+   821→// Outgoing Ringing Controls
+   822→// ─────────────────────────────────────────────────────────────────────────────
+   823→
+   824→@Composable
+   825→fun OutgoingRingingControls(onEndCall: () -> Unit) {
+   826→    Column(
+   827→        horizontalAlignment = Alignment.CenterHorizontally
+   828→    ) {
+   829→        FilledIconButton(
+   830→            onClick = onEndCall,
+   831→            modifier = Modifier.size(64.dp),
+   832→            colors = IconButtonDefaults.filledIconButtonColors(
+   833→                containerColor = ZexoRed
+   834→            )
+   835→        ) {
+   836→            Icon(
+   837→                Icons.Filled.CallEnd,
+   838→                contentDescription = "Cancel",
+   839→                modifier = Modifier.size(28.dp),
+   840→                tint = Color.White
+   841→            )
+   842→        }
+   843→        Spacer(modifier = Modifier.height(8.dp))
+   844→        Text("Cancel", color = ZexoTextSecondary, fontSize = 12.sp)
+   845→    }
+   846→}
+   847→
+   848→// ─────────────────────────────────────────────────────────────────────────────
+   849→// Connected Call Controls
+   850→// ─────────────────────────────────────────────────────────────────────────────
+   851→
+   852→@Composable
+   853→fun ConnectedCallControls(
+   854→    isMuted: Boolean,
+   855→    isSpeakerOn: Boolean,
+   856→    isVideoEnabled: Boolean,
+   857→    isVideoCall: Boolean,
+   858→    onToggleMute: () -> Unit,
+   859→    onToggleSpeaker: () -> Unit,
+   860→    onToggleVideo: (() -> Unit)?,
+   861→    onEndCall: () -> Unit
+   862→) {
+   863→    Column(
+   864→        horizontalAlignment = Alignment.CenterHorizontally
+   865→    ) {
+   866→        Row(
+   867→            modifier = Modifier.fillMaxWidth(),
+   868→            horizontalArrangement = Arrangement.SpaceEvenly,
+   869→            verticalAlignment = Alignment.CenterVertically
+   870→        ) {
+   871→            // Mute
+   872→            ControlButton(
+   873→                icon = if (isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
+   874→                label = if (isMuted) "Unmute" else "Mute",
+   875→                isActive = isMuted,
+   876→                onClick = onToggleMute
+   877→            )
+   878→
+   879→            // Speaker
+   880→            ControlButton(
+   881→                icon = if (isSpeakerOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+   882→                label = "Speaker",
+   883→                isActive = isSpeakerOn,
+   884→                onClick = onToggleSpeaker
+   885→            )
+   886→
+   887→            // Video Toggle (video calls only)
+   888→            if (isVideoCall && onToggleVideo != null) {
+   889→                ControlButton(
+   890→                    icon = if (isVideoEnabled) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+   891→                    label = "Video",
+   892→                    isActive = !isVideoEnabled,
+   893→                    onClick = onToggleVideo
+   894→                )
+   895→            }
+   896→        }
+   897→
+   898→        Spacer(modifier = Modifier.height(24.dp))
+   899→
+   900→        // End Call
+   901→        FilledIconButton(
+   902→            onClick = onEndCall,
+   903→            modifier = Modifier.size(64.dp),
+   904→            colors = IconButtonDefaults.filledIconButtonColors(
+   905→                containerColor = ZexoRed
+   906→            )
+   907→        ) {
+   908→            Icon(
+   909→                Icons.Filled.CallEnd,
+   910→                contentDescription = "End Call",
+   911→                modifier = Modifier.size(28.dp),
+   912→                tint = Color.White
+   913→            )
+   914→        }
+   915→    }
+   916→}
+   917→
+   918→// ─────────────────────────────────────────────────────────────────────────────
+   919→// Video Call Controls (bottom bar style)
+   920→// ─────────────────────────────────────────────────────────────────────────────
+   921→
+   922→@Composable
+   923→fun VideoCallControls(
+   924→    isMuted: Boolean,
+   925→    isSpeakerOn: Boolean,
+   926→    isVideoEnabled: Boolean,
+   927→    onToggleMute: () -> Unit,
+   928→    onToggleSpeaker: () -> Unit,
+   929→    onToggleVideo: () -> Unit,
+   930→    onEndCall: () -> Unit
+   931→) {
+   932→    Row(
+   933→        modifier = Modifier.fillMaxWidth(),
+   934→        horizontalArrangement = Arrangement.SpaceEvenly,
+   935→        verticalAlignment = Alignment.CenterVertically
+   936→    ) {
+   937→        ControlButton(
+   938→            icon = if (isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
+   939→            label = if (isMuted) "Unmute" else "Mute",
+   940→            isActive = isMuted,
+   941→            onClick = onToggleMute,
+   942→            activeColor = Color.White,
+   943→            inactiveColor = Color.White.copy(alpha = 0.7f)
+   944→        )
+   945→
+   946→        ControlButton(
+   947→            icon = if (isSpeakerOn) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+   948→            label = "Speaker",
+   949→            isActive = isSpeakerOn,
+   950→            onClick = onToggleSpeaker,
+   951→            activeColor = Color.White,
+   952→            inactiveColor = Color.White.copy(alpha = 0.7f)
+   953→        )
+   954→
+   955→        ControlButton(
+   956→            icon = if (isVideoEnabled) Icons.Filled.Videocam else Icons.Filled.VideocamOff,
+   957→            label = "Video",
+   958→            isActive = !isVideoEnabled,
+   959→            onClick = onToggleVideo,
+   960→            activeColor = Color.White,
+   961→            inactiveColor = Color.White.copy(alpha = 0.7f)
+   962→        )
+   963→
+   964→        // End Call
+   965→        FilledIconButton(
+   966→            onClick = onEndCall,
+   967→            modifier = Modifier.size(56.dp),
+   968→            colors = IconButtonDefaults.filledIconButtonColors(
+   969→                containerColor = ZexoRed
+   970→            )
+   971→        ) {
+   972→            Icon(
+   973→                Icons.Filled.CallEnd,
+   974→                contentDescription = "End Call",
+   975→                modifier = Modifier.size(24.dp),
+   976→                tint = Color.White
+   977→            )
+   978→        }
+   979→    }
+   980→}
+   981→
+   982→// ─────────────────────────────────────────────────────────────────────────────
+   983→// Ended Call Controls
+   984→// ─────────────────────────────────────────────────────────────────────────────
+   985→
+   986→@Composable
+   987→fun EndedCallControls(status: CallStatus) {
+   988→    val message = when (status) {
+   989→        CallStatus.ENDED -> "Call ended"
+   990→        CallStatus.DECLINED -> "Call declined"
+   991→        CallStatus.MISSED -> "Call missed"
+   992→        else -> "Call ended"
+   993→    }
+   994→
+   995→    val iconColor = when (status) {
+   996→        CallStatus.DECLINED, CallStatus.MISSED -> ZexoRed
+   997→        else -> ZexoTextSecondary
+   998→    }
+   999→
+  1000→    Column(
+  1001→        horizontalAlignment = Alignment.CenterHorizontally
+  1002→    ) {
+  1003→        Icon(
+  1004→            Icons.Filled.CallEnd,
+  1005→            contentDescription = null,
+  1006→            tint = iconColor,
+  1007→            modifier = Modifier.size(48.dp)
+  1008→        )
+  1009→        Spacer(modifier = Modifier.height(12.dp))
+  1010→        Text(
+  1011→            text = message,
+  1012→            color = ZexoTextSecondary,
+  1013→            fontSize = 16.sp
+  1014→        )
+  1015→    }
+  1016→}
+  1017→
+  1018→// ─────────────────────────────────────────────────────────────────────────────
+  1019→// Reusable Control Button
+  1020→// ─────────────────────────────────────────────────────────────────────────────
+  1021→
+  1022→@Composable
+  1023→fun ControlButton(
+  1024→    icon: androidx.compose.ui.graphics.vector.ImageVector,
+  1025→    label: String,
+  1026→    isActive: Boolean,
+  1027→    onClick: () -> Unit,
+  1028→    activeColor: Color = ZexoPrimary,
+  1029→    inactiveColor: Color = ZexoTextSecondary
+  1030→) {
+  1031→    Column(
+  1032→        horizontalAlignment = Alignment.CenterHorizontally
+  1033→    ) {
+  1034→        FilledIconButton(
+  1035→            onClick = onClick,
+  1036→            modifier = Modifier.size(56.dp),
+  1037→            colors = IconButtonDefaults.filledIconButtonColors(
+  1038→                containerColor = if (isActive) activeColor else ZexoSurfaceLight
+  1039→            )
+  1040→        ) {
+  1041→            Icon(
+  1042→                icon,
+  1043→                contentDescription = label,
+  1044→                modifier = Modifier.size(24.dp),
+  1045→                tint = if (isActive) Color.White else inactiveColor
+  1046→            )
+  1047→        }
+  1048→        Spacer(modifier = Modifier.height(6.dp))
+  1049→        Text(
+  1050→            text = label,
+  1051→            color = if (isActive) activeColor else inactiveColor,
+  1052→            fontSize = 11.sp,
+  1053→            fontWeight = FontWeight.Medium
+  1054→        )
+  1055→    }
+  1056→}
+  1057→

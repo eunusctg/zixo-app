@@ -40,6 +40,7 @@ import com.zexo.app.ui.navigation.Screen
 import com.zexo.app.ui.screens.calls.CallActivity
 import com.zexo.app.ui.theme.*
 import com.zexo.app.data.repository.AuthRepository
+import com.google.firebase.auth.FirebaseAuth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,7 +148,7 @@ fun ChatScreen(
                         ) { message ->
                             MessageBubble(
                                 message = message,
-                                isFromMe = message.senderId != uiState.otherUser?.uid
+                                isFromMe = message.senderId == FirebaseAuth.getInstance().currentUser?.uid
                             )
                         }
                     }

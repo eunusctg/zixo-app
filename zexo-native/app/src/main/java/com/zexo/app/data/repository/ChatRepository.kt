@@ -21,6 +21,7 @@ class ChatRepository @Inject constructor(
 
     fun observeChats(uid: String): Flow<List<Chat>> = callbackFlow {
         var subscription: ListenerRegistration? = null
+        var fallbackSubscription: ListenerRegistration? = null
         try {
             val query = firestore.collection("chats")
                 .whereArrayContains("participants", uid)
@@ -28,14 +29,21 @@ class ChatRepository @Inject constructor(
             
             subscription = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.w(TAG, "Chat listener error, trying fallback", error)
-                    // Fallback without orderBy
+                    Log.w(TAG, "Chat listener with orderBy failed, trying fallback", error)
+                    // Remove the failing subscription
+                    subscription?.remove()
+                    subscription = null
+                    // Fallback without orderBy — requires no composite index
                     val fallbackQuery = firestore.collection("chats")
                         .whereArrayContains("participants", uid)
-                    fallbackQuery.addSnapshotListener { fallbackSnap, _ ->
+                    fallbackSubscription = fallbackQuery.addSnapshotListener { fallbackSnap, fallbackErr ->
+                        if (fallbackErr != null) {
+                            Log.e(TAG, "Fallback chat listener also failed", fallbackErr)
+                            return@addSnapshotListener
+                        }
                         if (fallbackSnap != null) {
                             val chats = fallbackSnap.documents.mapNotNull { doc -> parseChat(doc) }
-                                .sortedByDescending { it.updatedAt ?: 0L }
+                                .sortedByDescending { it.updatedAt ?: it.createdAt ?: 0L }
                             trySend(chats)
                         }
                     }
@@ -49,11 +57,15 @@ class ChatRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to observe chats", e)
         }
-        awaitClose { subscription?.remove() }
+        awaitClose {
+            subscription?.remove()
+            fallbackSubscription?.remove()
+        }
     }
 
     fun observeMessages(chatId: String, limit: Long = 100): Flow<List<Message>> = callbackFlow {
         var subscription: ListenerRegistration? = null
+        var fallbackSubscription: ListenerRegistration? = null
         try {
             val query = firestore.collection("chats").document(chatId)
                 .collection("messages")
@@ -62,7 +74,24 @@ class ChatRepository @Inject constructor(
             
             subscription = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.w(TAG, "Messages listener error", error)
+                    Log.w(TAG, "Messages listener with orderBy failed, trying fallback", error)
+                    subscription?.remove()
+                    subscription = null
+                    // Fallback without orderBy
+                    val fallbackQuery = firestore.collection("chats").document(chatId)
+                        .collection("messages")
+                        .limit(limit)
+                    fallbackSubscription = fallbackQuery.addSnapshotListener { fallbackSnap, fallbackErr ->
+                        if (fallbackErr != null) {
+                            Log.e(TAG, "Fallback messages listener also failed", fallbackErr)
+                            return@addSnapshotListener
+                        }
+                        if (fallbackSnap != null) {
+                            val messages = fallbackSnap.documents.mapNotNull { doc -> parseMessage(doc) }
+                                .sortedBy { it.timestamp ?: 0L }
+                            trySend(messages)
+                        }
+                    }
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
@@ -73,7 +102,10 @@ class ChatRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to observe messages", e)
         }
-        awaitClose { subscription?.remove() }
+        awaitClose {
+            subscription?.remove()
+            fallbackSubscription?.remove()
+        }
     }
 
     suspend fun createOrGetChat(uid1: String, uid2: String): Result<String> {
