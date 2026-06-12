@@ -29,7 +29,9 @@ object AppModule {
     @Singleton
     fun provideRtdb(): FirebaseDatabase = FirebaseDatabase.getInstance(
         "https://zixo-call-default-rtdb.firebaseio.com/"
-    )
+    ).apply {
+        setPersistenceEnabled(true)
+    }
 
     @Provides
     @Singleton

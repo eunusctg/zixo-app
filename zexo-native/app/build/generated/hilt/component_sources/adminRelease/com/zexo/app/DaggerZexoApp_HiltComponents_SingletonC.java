@@ -716,7 +716,7 @@ public final class DaggerZexoApp_HiltComponents_SingletonC {
     }
 
     @Override
-    public void injectZexoApp(ZexoApp arg0) {
+    public void injectZexoApp(ZexoApp zexoApp) {
     }
 
     @Override

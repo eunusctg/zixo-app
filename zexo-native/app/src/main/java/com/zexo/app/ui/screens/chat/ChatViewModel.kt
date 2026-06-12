@@ -1,5 +1,6 @@
 package com.zexo.app.ui.screens.chat
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zexo.app.data.model.Message
@@ -12,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 
 data class ChatUiState(
@@ -21,7 +23,9 @@ data class ChatUiState(
     val otherUserLastSeen: Long = 0L,
     val isOtherUserTyping: Boolean = false,
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val chatId: String = "",
+    val otherUserId: String = ""
 )
 
 @HiltViewModel
@@ -31,24 +35,76 @@ class ChatViewModel @Inject constructor(
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
+    companion object {
+        private const val TAG = "ChatViewModel"
+    }
+
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private val currentUid: String? get() = authRepository.currentUid
     private var typingJob: Job? = null
+    private var initialized = false
 
     fun initChat(chatId: String, otherUserId: String) {
-        loadOtherUserProfile(otherUserId)
-        observeMessages(chatId)
-        observeTyping(chatId)
-        observePresence(otherUserId)
-        markChatRead(chatId)
+        if (initialized) return
+        initialized = true
+
+        _uiState.update { it.copy(chatId = chatId, otherUserId = otherUserId) }
+
+        if (otherUserId.isNotBlank()) {
+            // otherUserId provided directly
+            loadOtherUserProfile(otherUserId)
+            observeMessages(chatId)
+            observeTyping(chatId)
+            observePresence(otherUserId)
+            markChatRead(chatId)
+        } else {
+            // otherUserId not provided — try to resolve it from chat participants
+            resolveOtherUserAndInit(chatId)
+        }
+    }
+
+    private fun resolveOtherUserAndInit(chatId: String) {
+        val myUid = currentUid ?: run {
+            Log.e(TAG, "No current user UID, cannot resolve other user")
+            _uiState.update { it.copy(isLoading = false, error = "Not authenticated") }
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            // Try to get the chat document to find participants
+            try {
+                val chatDoc = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    .collection("chats").document(chatId).get().await()
+
+                if (chatDoc.exists()) {
+                    val participants = chatDoc.get("participants") as? List<String> ?: emptyList()
+                    val otherUid = participants.firstOrNull { it != myUid } ?: ""
+
+                    if (otherUid.isNotBlank()) {
+                        _uiState.update { it.copy(otherUserId = otherUid) }
+                        loadOtherUserProfile(otherUid)
+                        observePresence(otherUid)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to resolve other user from chat doc", e)
+            }
+
+            // Always observe messages and typing regardless
+            observeMessages(chatId)
+            observeTyping(chatId)
+            markChatRead(chatId)
+        }
     }
 
     private fun loadOtherUserProfile(uid: String) {
         viewModelScope.launch(Dispatchers.IO) {
             userRepository.getUserByUid(uid).onSuccess { user ->
                 _uiState.update { it.copy(otherUser = user) }
+            }.onFailure {
+                Log.e(TAG, "Failed to load other user profile", it)
             }
         }
     }

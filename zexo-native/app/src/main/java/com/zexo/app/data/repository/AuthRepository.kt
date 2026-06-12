@@ -78,9 +78,16 @@ class AuthRepository @Inject constructor(
             
             Log.d(TAG, "Sign in successful for: $email")
             Result.success(user)
+        } catch (e: FirebaseAuthInvalidCredentialsException) {
+            Log.e(TAG, "Invalid credentials", e)
+            Result.failure(Exception("Incorrect email or password. Please check your credentials and try again."))
+        } catch (e: FirebaseAuthInvalidUserException) {
+            Log.e(TAG, "Invalid user", e)
+            Result.failure(Exception("No account found with this email. Please sign up first."))
         } catch (e: Exception) {
             Log.e(TAG, "Sign in failed", e)
-            Result.failure(e)
+            val msg = e.message ?: "Sign in failed"
+            Result.failure(Exception(msg))
         }
     }
 

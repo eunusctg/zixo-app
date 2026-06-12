@@ -39,7 +39,8 @@ fun NewChatScreen(
     // Navigate to chat when created
     LaunchedEffect(uiState.createdChatId) {
         uiState.createdChatId?.let { chatId ->
-            navController.navigate(Screen.Chat.createRoute(chatId)) {
+            val otherUserId = uiState.createdChatOtherUserId ?: ""
+            navController.navigate(Screen.Chat.createRoute(chatId, otherUserId)) {
                 popUpTo(Screen.NewChat.route) { inclusive = true }
             }
             viewModel.clearCreatedChatId()

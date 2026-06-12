@@ -4,8 +4,8 @@ sealed class Screen(val route: String) {
     data object Splash : Screen("splash")
     data object Auth : Screen("auth")
     data object Home : Screen("home")
-    data object Chat : Screen("chat/{chatId}") {
-        fun createRoute(chatId: String) = "chat/$chatId"
+    data object Chat : Screen("chat/{chatId}?otherUserId={otherUserId}") {
+        fun createRoute(chatId: String, otherUserId: String = "") = "chat/$chatId?otherUserId=$otherUserId"
     }
     data object Profile : Screen("profile/{uid}") {
         fun createRoute(uid: String) = "profile/$uid"

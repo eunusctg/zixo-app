@@ -45,10 +45,18 @@ fun ZexoNavHost(
         }
         composable(
             route = Screen.Chat.route,
-            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+            arguments = listOf(
+                navArgument("chatId") { type = NavType.StringType },
+                navArgument("otherUserId") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                    nullable = true
+                }
+            )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
-            ChatScreen(navController = navController, chatId = chatId)
+            val otherUserId = backStackEntry.arguments?.getString("otherUserId") ?: ""
+            ChatScreen(navController = navController, chatId = chatId, otherUserId = otherUserId)
         }
         composable(
             route = Screen.Profile.route,

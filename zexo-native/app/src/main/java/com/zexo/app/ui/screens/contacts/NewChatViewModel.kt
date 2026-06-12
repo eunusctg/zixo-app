@@ -29,6 +29,7 @@ data class NewChatUiState(
     val isLoadingAll: Boolean = true,
     val presenceMap: Map<String, Pair<Boolean, Long>> = emptyMap(),
     val createdChatId: String? = null,
+    val createdChatOtherUserId: String? = null,
     val isCreatingChat: Boolean = false,
     val error: String? = null
 )
@@ -146,7 +147,7 @@ class NewChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             chatRepository.createOrGetChat(uid, otherUserId)
                 .onSuccess { chatId ->
-                    _uiState.update { it.copy(isCreatingChat = false, createdChatId = chatId) }
+                    _uiState.update { it.copy(isCreatingChat = false, createdChatId = chatId, createdChatOtherUserId = otherUserId) }
                 }
                 .onFailure { e ->
                     Log.e(TAG, "Failed to create/get chat", e)
@@ -156,7 +157,7 @@ class NewChatViewModel @Inject constructor(
     }
 
     fun clearCreatedChatId() {
-        _uiState.update { it.copy(createdChatId = null) }
+        _uiState.update { it.copy(createdChatId = null, createdChatOtherUserId = null) }
     }
 
     fun clearError() {

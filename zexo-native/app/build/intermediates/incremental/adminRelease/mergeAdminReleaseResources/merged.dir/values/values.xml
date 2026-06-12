@@ -438,9 +438,9 @@
     <string name="generic_error_no_device_credential">No PIN, pattern, or password set.</string>
     <string name="generic_error_no_keyguard">This device does not support PIN, pattern, or password.</string>
     <string name="generic_error_user_canceled">Authentication canceled by user.</string>
-    <string name="google_api_key" translatable="false">AIzaSyBgNhIaIG5jcRkQ7frreFjo1Cz8F3_JfPk</string>
+    <string name="google_api_key" translatable="false">AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA</string>
     <string name="google_app_id" translatable="false">1:809372450511:android:zexo_admin_app_id</string>
-    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyBgNhIaIG5jcRkQ7frreFjo1Cz8F3_JfPk</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA</string>
     <string name="google_storage_bucket" translatable="false">zixo-call.firebasestorage.app</string>
     <string name="in_progress">In progress</string>
     <string name="indeterminate">Partially checked</string>

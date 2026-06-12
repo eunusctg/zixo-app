@@ -663,7 +663,9 @@ private fun ChatsTabContent(
                 chat = chat,
                 viewModel = viewModel,
                 onClick = {
-                    navController.navigate(Screen.Chat.createRoute(chat.id))
+                    val otherUser = viewModel.getOtherUser(chat)
+                    val otherUserId = otherUser?.uid ?: chat.participants.firstOrNull { it != viewModel.currentUser.value?.uid } ?: ""
+                    navController.navigate(Screen.Chat.createRoute(chat.id, otherUserId))
                 },
                 onAvatarClick = {
                     val otherUser = viewModel.getOtherUser(chat)

@@ -1,5 +1,6 @@
 package com.zexo.app.ui.screens.chat
 
+import android.content.Intent
 import android.text.format.DateUtils
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -16,7 +17,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -33,7 +37,9 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.zexo.app.data.model.Message
 import com.zexo.app.ui.navigation.Screen
+import com.zexo.app.ui.screens.calls.CallActivity
 import com.zexo.app.ui.theme.*
+import com.zexo.app.data.repository.AuthRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,12 +52,11 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
 
     // Initialize chat once
     LaunchedEffect(chatId, otherUserId) {
-        if (otherUserId.isNotBlank()) {
-            viewModel.initChat(chatId, otherUserId)
-        }
+        viewModel.initChat(chatId, otherUserId)
     }
 
     // Auto-scroll to bottom when new messages arrive
@@ -81,6 +86,28 @@ fun ChatScreen(
                 onAvatarClick = {
                     uiState.otherUser?.uid?.let { uid ->
                         navController.navigate(Screen.Profile.createRoute(uid))
+                    }
+                },
+                onAudioCallClick = {
+                    val otherUser = uiState.otherUser
+                    if (otherUser != null) {
+                        val intent = CallActivity.createOutgoingIntent(
+                            context = context,
+                            receiverId = uiState.otherUserId.ifBlank { otherUser.uid },
+                            isVideo = false
+                        )
+                        context.startActivity(intent)
+                    }
+                },
+                onVideoCallClick = {
+                    val otherUser = uiState.otherUser
+                    if (otherUser != null) {
+                        val intent = CallActivity.createOutgoingIntent(
+                            context = context,
+                            receiverId = uiState.otherUserId.ifBlank { otherUser.uid },
+                            isVideo = true
+                        )
+                        context.startActivity(intent)
                     }
                 }
             )
@@ -156,7 +183,9 @@ private fun ChatTopBar(
     isTyping: Boolean,
     lastSeen: Long,
     onBackClick: () -> Unit,
-    onAvatarClick: () -> Unit
+    onAvatarClick: () -> Unit,
+    onAudioCallClick: () -> Unit,
+    onVideoCallClick: () -> Unit
 ) {
     TopAppBar(
         title = {
@@ -200,6 +229,22 @@ private fun ChatTopBar(
             }
         },
         actions = {
+            // Audio call button
+            IconButton(onClick = onAudioCallClick) {
+                Icon(
+                    Icons.Default.Call,
+                    contentDescription = "Audio Call",
+                    tint = ZexoTextPrimary
+                )
+            }
+            // Video call button
+            IconButton(onClick = onVideoCallClick) {
+                Icon(
+                    Icons.Default.Videocam,
+                    contentDescription = "Video Call",
+                    tint = ZexoTextPrimary
+                )
+            }
             // Avatar in top bar
             Box(
                 modifier = Modifier
