@@ -13,7 +13,8 @@ import javax.inject.Singleton
 class AuthRepository @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
-    private val rtdb: FirebaseDatabase
+    private val rtdb: FirebaseDatabase,
+    private val restApi: FirebaseAuthRestApi
 ) {
     companion object {
         private const val TAG = "AuthRepository"
@@ -23,8 +24,9 @@ class AuthRepository @Inject constructor(
     val currentUid: String? get() = auth.currentUser?.uid
 
     suspend fun signUpWithEmail(email: String, password: String, displayName: String): Result<User> {
+        // Try Firebase SDK first
         return try {
-            Log.d(TAG, "Signing up with email: $email")
+            Log.d(TAG, "Signing up with email (SDK): $email")
             val result = auth.createUserWithEmailAndPassword(email, password).await()
             val firebaseUser = result.user ?: throw Exception("User creation failed")
             
@@ -33,9 +35,6 @@ class AuthRepository @Inject constructor(
                 .setDisplayName(displayName)
                 .build()
             firebaseUser.updateProfile(profileUpdates).await()
-            
-            // Send email verification
-            firebaseUser.sendEmailVerification().await()
             
             // Create user profile
             val username = "@${displayName.lowercase().replace("""\s+""".toRegex(), "")}${(0..999).random()}"
@@ -55,39 +54,144 @@ class AuthRepository @Inject constructor(
             firestore.collection("users").document(firebaseUser.uid).set(user.toMap()).await()
             firestore.collection("usernames").document(username).set(mapOf("uid" to firebaseUser.uid)).await()
             
-            // Set online presence
             setupPresence(firebaseUser.uid)
             
             Log.d(TAG, "Sign up successful for: $email")
             Result.success(user)
-        } catch (e: Exception) {
-            Log.e(TAG, "Sign up failed", e)
-            Result.failure(e)
+        } catch (sdkError: Exception) {
+            Log.w(TAG, "SDK sign-up failed, trying REST API fallback", sdkError)
+            
+            // Fallback: Use REST API directly
+            try {
+                val restResult = restApi.signUpWithEmail(email, password)
+                if (!restResult.success) {
+                    return Result.failure(Exception(restResult.error))
+                }
+                
+                // Now sign in via SDK with the created credentials to get full SDK integration
+                try {
+                    val sdkResult = auth.signInWithEmailAndPassword(email, password).await()
+                    val firebaseUser = sdkResult.user
+                    
+                    if (firebaseUser != null) {
+                        // Update display name
+                        val profileUpdates = UserProfileChangeRequest.Builder()
+                            .setDisplayName(displayName)
+                            .build()
+                        firebaseUser.updateProfile(profileUpdates).await()
+                        
+                        val username = "@${displayName.lowercase().replace("""\s+""".toRegex(), "")}${(0..999).random()}"
+                        val user = User(
+                            uid = firebaseUser.uid,
+                            displayName = displayName,
+                            email = email,
+                            username = username,
+                            bio = "Living free, connecting freely",
+                            zixoNumber = generateZixoNumber(),
+                            online = true,
+                            lastSeen = System.currentTimeMillis(),
+                            createdAt = System.currentTimeMillis(),
+                            role = if (email == "eunus527@gmail.com") "admin" else "user"
+                        )
+                        
+                        firestore.collection("users").document(firebaseUser.uid).set(user.toMap()).await()
+                        firestore.collection("usernames").document(username).set(mapOf("uid" to firebaseUser.uid)).await()
+                        setupPresence(firebaseUser.uid)
+                        
+                        Log.d(TAG, "Sign up (REST+SDK) successful for: $email")
+                        return Result.success(user)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "SDK sign-in after REST sign-up also failed", e)
+                }
+                
+                // If SDK sign-in also failed, return the REST API result
+                // The user is created but SDK integration might be limited
+                val username = "@${displayName.lowercase().replace("""\s+""".toRegex(), "")}${(0..999).random()}"
+                val user = User(
+                    uid = restResult.uid,
+                    displayName = displayName,
+                    email = email,
+                    username = username,
+                    bio = "Living free, connecting freely",
+                    zixoNumber = generateZixoNumber(),
+                    online = true,
+                    lastSeen = System.currentTimeMillis(),
+                    createdAt = System.currentTimeMillis(),
+                    role = if (email == "eunus527@gmail.com") "admin" else "user"
+                )
+                
+                // Try to create Firestore profile (might fail without SDK auth)
+                try {
+                    firestore.collection("users").document(restResult.uid).set(user.toMap()).await()
+                    firestore.collection("usernames").document(username).set(mapOf("uid" to restResult.uid)).await()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Firestore profile creation failed", e)
+                }
+                
+                Result.failure(Exception("Account created but sign-in requires app update. Please contact support."))
+            } catch (e: Exception) {
+                Log.e(TAG, "Sign up failed completely", e)
+                Result.failure(e)
+            }
         }
     }
 
     suspend fun signInWithEmail(email: String, password: String): Result<User> {
+        // Try Firebase SDK first
         return try {
-            Log.d(TAG, "Signing in with email: $email")
+            Log.d(TAG, "Signing in with email (SDK): $email")
             val result = auth.signInWithEmailAndPassword(email, password).await()
             val firebaseUser = result.user ?: throw Exception("Sign in failed")
             val user = getUserProfile(firebaseUser.uid).getOrDefault(User())
             
-            // Update online status
             setupPresence(firebaseUser.uid)
             
             Log.d(TAG, "Sign in successful for: $email")
             Result.success(user)
-        } catch (e: FirebaseAuthInvalidCredentialsException) {
-            Log.e(TAG, "Invalid credentials", e)
+        } catch (sdkError: FirebaseAuthInvalidCredentialsException) {
+            Log.e(TAG, "Invalid credentials", sdkError)
             Result.failure(Exception("Incorrect email or password. Please check your credentials and try again."))
-        } catch (e: FirebaseAuthInvalidUserException) {
-            Log.e(TAG, "Invalid user", e)
+        } catch (sdkError: FirebaseAuthInvalidUserException) {
+            Log.e(TAG, "Invalid user", sdkError)
             Result.failure(Exception("No account found with this email. Please sign up first."))
-        } catch (e: Exception) {
-            Log.e(TAG, "Sign in failed", e)
-            val msg = e.message ?: "Sign in failed"
-            Result.failure(Exception(msg))
+        } catch (sdkError: Exception) {
+            Log.w(TAG, "SDK sign-in failed, trying REST API fallback", sdkError)
+            
+            // Fallback: Use REST API directly
+            try {
+                val restResult = restApi.signInWithEmail(email, password)
+                if (!restResult.success) {
+                    return Result.failure(Exception(restResult.error))
+                }
+                
+                // Now try to sign in via SDK to get full integration
+                try {
+                    val sdkResult = auth.signInWithEmailAndPassword(email, password).await()
+                    val firebaseUser = sdkResult.user
+                    
+                    if (firebaseUser != null) {
+                        val user = getUserProfile(firebaseUser.uid).getOrDefault(User())
+                        setupPresence(firebaseUser.uid)
+                        Log.d(TAG, "Sign in (REST+SDK) successful for: $email")
+                        return Result.success(user)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "SDK sign-in after REST also failed", e)
+                }
+                
+                // REST API auth succeeded but SDK integration failed
+                // This likely means the Android app isn't registered in Firebase Console
+                Result.failure(Exception(
+                    "Authentication succeeded but the app needs to be updated. " +
+                    "Please update Zixo to the latest version or contact support. " +
+                    "(Error: Android app not registered in Firebase)"
+                ))
+            } catch (e: Exception) {
+                Log.e(TAG, "Sign in failed completely", e)
+                val msg = e.message ?: "Sign in failed"
+                Result.failure(Exception(msg))
+            }
         }
     }
 
@@ -101,7 +205,6 @@ class AuthRepository @Inject constructor(
             var user = getUserProfile(firebaseUser.uid).getOrDefault(null)
             
             if (user == null) {
-                // First time Google sign-in, create profile
                 val displayName = firebaseUser.displayName ?: firebaseUser.email?.split("@")?.first() ?: "User"
                 val username = "@${displayName.lowercase().replace("""\s+""".toRegex(), "")}${(0..999).random()}"
                 user = User(
@@ -120,7 +223,6 @@ class AuthRepository @Inject constructor(
                 firestore.collection("users").document(firebaseUser.uid).set(user.toMap()).await()
                 firestore.collection("usernames").document(username).set(mapOf("uid" to firebaseUser.uid)).await()
             } else {
-                // Update online status for existing user
                 firestore.collection("users").document(firebaseUser.uid)
                     .update(mapOf("online" to true, "lastSeen" to System.currentTimeMillis())).await()
             }
@@ -181,7 +283,13 @@ class AuthRepository @Inject constructor(
             auth.sendPasswordResetEmail(email).await()
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(e)
+            // Fallback to REST API
+            val restResult = restApi.sendPasswordReset(email)
+            if (restResult.success) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(restResult.error))
+            }
         }
     }
 

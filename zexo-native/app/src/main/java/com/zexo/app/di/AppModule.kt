@@ -39,11 +39,16 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideAuthRestApi(): FirebaseAuthRestApi = FirebaseAuthRestApi()
+
+    @Provides
+    @Singleton
     fun provideAuthRepository(
         auth: FirebaseAuth,
         firestore: FirebaseFirestore,
-        rtdb: FirebaseDatabase
-    ): AuthRepository = AuthRepository(auth, firestore, rtdb)
+        rtdb: FirebaseDatabase,
+        restApi: FirebaseAuthRestApi
+    ): AuthRepository = AuthRepository(auth, firestore, rtdb, restApi)
 
     @Provides
     @Singleton
