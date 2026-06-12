@@ -1,37 +1,29 @@
 ---
 Task ID: 1
-Agent: Main
-Task: Complete rebuild of Zixo native Android app with all features
+Agent: Main Agent
+Task: Fix Zixo Android app (Kotlin/Jetpack) - Auth, Chats, and Audio/Video Calls
 
 Work Log:
-- Discovered previous zexo-native project didn't exist; previous APKs were from unknown source
-- Installed Android SDK (platforms/android-35, build-tools/35.0.0)
-- Created complete Kotlin/Jetpack Compose project from scratch at /home/z/my-project/zexo-native/
-- Created 44 Kotlin source files covering all features
-- Downloaded and configured full JDK 21 (with jlink) at /home/z/jdk21full
-- Created release keystore at /home/z/my-project/zixo-release-key.jks
-- Fixed all compilation errors (Icons references, Hilt annotations, coroutines, escape sequences)
-- Built both user (zexo.apk) and admin (zexoadmin.apk) APKs successfully
-- Uploaded both APKs to GitHub release v1.5.0-android (ID: 337937872)
+- Found Kotlin/Jetpack Android app source at /home/z/my-project/zexo-native/
+- Identified root cause of auth failure: old Firebase API key in google-services.json
+- Identified root cause of chats not working: otherUserId not passed in navigation, ChatViewModel.initChat() never called
+- Identified root cause of audio/video calls missing: no call buttons in ChatScreen top bar
+- Updated google-services.json with new API key (AIzaSyDHz9_Cw10zmF5qJvezSqUUBTTaxhq5epA)
+- Fixed Screen.Chat route to include otherUserId query parameter
+- Fixed ZexoNavHost to accept and pass otherUserId argument
+- Fixed HomeScreen to pass otherUserId when navigating to chat
+- Rewrote ChatViewModel with robust initChat that resolves otherUser from chat participants
+- Added audio and video call buttons to ChatScreen top bar using CallActivity.createOutgoingIntent
+- Fixed NewChatScreen/ViewModel to pass otherUserId on navigation
+- Improved AuthRepository error handling with specific exceptions
+- Enabled RTDB persistence in AppModule
+- Bumped version to 1.4.0 (versionCode 4)
+- Installed Android SDK and full JDK, built both user and admin APKs
+- Uploaded APKs to GitHub releases (v1.4.0)
+- Committed and pushed all changes to main branch
 
 Stage Summary:
-- zexo.apk (82MB) - User app with com.zexo.app package
-- zexoadmin.apk (82MB) - Admin app with com.zexo.admin package
-- Both APKs uploaded to GitHub: https://github.com/eunusctg/zixo-app/releases/tag/v1.5.0-android
-- Key features implemented:
-  - Google Sign-In with web client ID
-  - Email/password authentication
-  - Contact search via email, Zixo number, QR code, username, phone
-  - Status system (24h expiring stories)
-  - Animated FAB menus per tab (Chats: New Chat/Group/Status; Calls: New Call/Dial Pad/Contact+QR)
-  - Dark/Light theme with DataStore persistence
-  - Real-time chat with Firestore listeners
-  - Audio/Video call with RTDB signaling
-  - Dial pad for Zixo number calling
-  - QR scanner for adding contacts
-  - Profile with gradient cover
-  - Admin dashboard, user management, app settings, landing page controls
-  - No hardcoded admin credentials
-  - Biometric lock support in settings
-  - FCM push notifications
-  - App icon generated from PWA logo design
+- zixo.apk (79MB) → /home/z/my-project/download/zixo.apk
+- zexoadmin.apk (79MB) → /home/z/my-project/download/zexoadmin.apk
+- GitHub Release: https://github.com/eunusctg/zixo-app/releases/tag/v1.4.0
+- All fixes: auth (API key), chats (navigation + ViewModel), calls (buttons in chat screen)
