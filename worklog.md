@@ -51,3 +51,33 @@ Stage Summary:
 - Release SHA-1: AE:A1:F9:F8:83:0C:80:B2:BA:89:2C:9E:F5:CA:30:8D:A3:27:41:D8
 - APK is properly signed and uploaded: https://github.com/eunusctg/zixo-app/releases/download/v2.0.1/zixo-v2.0.1-release.apk
 - Error messages now suggest using Email Sign-In as fallback when Google Sign-In fails
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Build complete Settings Core Engine with sub-menu screens for Zixo Android app
+
+Work Log:
+- Read all existing codebase files (13+ files) to understand current architecture
+- Expanded AppSettingsState.kt with full settings models: VisibilityOption, StatusPrivacyOption, VibrationOption, MediaType, UploadQuality enums
+- Rewrote PreferencesDataStore with 25+ setting keys covering all sub-pages
+- Rewrote SettingsRepository interface with full method signatures for all settings
+- Rewrote SettingsRepositoryImpl with complete DataStore + Firestore sync implementation
+- Rewrote SettingsViewModel with 30+ update methods for all settings + deleteAccount + delete confirmation
+- Rewrote SettingsScreen as root dashboard with profile header (gradient, QR code, bio), navigation items to all 5 sub-pages
+- Created AccountSecurityScreen: security notifications toggle, passkeys/biometric row, two-step verification with PIN+email, request account info, delete account with AlertDialog
+- Created PrivacyCenterScreen: last seen/profile/about visibility radio groups, status privacy, read receipts, ephemeral timer, app lock, IP protection, link previews
+- Created ChatConfigScreen: theme selector segmented buttons, wallpaper picker, Enter-is-Send, media visibility, font size slider
+- Created NotificationManagerScreen: conversation tones, 4 sound profile items, vibration pattern picker
+- Created StorageDataHubScreen: network metrics dashboard, storage bar, clear large files, auto-download checkboxes for mobile/WiFi, upload quality selector
+- Updated Navigation.kt with 5 new routes (account_security, privacy_center, chat_config, notification_manager, storage_data_hub)
+- Fixed ChatConfigScreen missing import (androidx.compose.ui.draw.clip)
+- Built signed release APK v2.1.0 (46MB, v2 signature verified)
+- Created GitHub release v2.1.0 and uploaded APK
+- Committed and pushed all changes to GitHub
+
+Stage Summary:
+- 13 files changed, 1786 insertions, 281 deletions
+- 5 new sub-page screens created in SubPages directory
+- All settings bound to DataStore (local) + Firestore (cloud sync)
+- APK: https://github.com/eunusctg/zixo-app/releases/download/v2.1.0/zixo-v2.1.0-release.apk
