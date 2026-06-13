@@ -14,6 +14,17 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "10mb",
     },
   },
+  // Rewrite /.well-known/assetlinks.json to the API route
+  // This ensures it works on Cloudflare Pages where the .well-known path
+  // with dots may not route correctly through the Next.js file-based router
+  async rewrites() {
+    return [
+      {
+        source: "/.well-known/assetlinks.json",
+        destination: "/api/assetlinks",
+      },
+    ];
+  },
 };
 
 export default nextConfig;
