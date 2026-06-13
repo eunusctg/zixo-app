@@ -1,0 +1,707 @@
+     1→package com.zixo.app.data.repository
+     2→
+     3→import android.util.Log
+     4→import com.google.firebase.auth.FirebaseAuth
+     5→import com.google.firebase.firestore.FieldValue
+     6→import com.google.firebase.firestore.FirebaseFirestore
+     7→import com.google.firebase.firestore.ListenerRegistration
+     8→import com.google.firebase.firestore.Query
+     9→import com.google.firebase.storage.FirebaseStorage
+    10→import com.zixo.app.domain.model.CallRecord
+    11→import com.zixo.app.domain.model.Chat
+    12→import com.zixo.app.domain.model.ContactVerification
+    13→import com.zixo.app.domain.model.Message
+    14→import com.zixo.app.domain.repository.ChatRepository
+    15→import kotlinx.coroutines.CoroutineScope
+    16→import kotlinx.coroutines.Dispatchers
+    17→import kotlinx.coroutines.SupervisorJob
+    18→import kotlinx.coroutines.flow.MutableStateFlow
+    19→import kotlinx.coroutines.flow.StateFlow
+    20→import kotlinx.coroutines.flow.asStateFlow
+    21→import kotlinx.coroutines.launch
+    22→import kotlinx.coroutines.tasks.await
+    23→import java.util.UUID
+    24→
+    25→class ChatRepositoryImpl(
+    26→    private val contactRepository: com.zixo.app.domain.repository.ContactRepository? = null
+    27→) : ChatRepository {
+    28→
+    29→    private val auth = FirebaseAuth.getInstance()
+    30→    private val firestore = FirebaseFirestore.getInstance()
+    31→    private val storage = FirebaseStorage.getInstance()
+    32→    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    33→
+    34→    private val _chats = MutableStateFlow<List<Chat>>(emptyList())
+    35→    override val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
+    36→
+    37→    private val _callHistory = MutableStateFlow<List<CallRecord>>(emptyList())
+    38→    override val callHistory: StateFlow<List<CallRecord>> = _callHistory.asStateFlow()
+    39→
+    40→    private val messagesFlows = mutableMapOf<String, MutableStateFlow<List<Message>>>()
+    41→    private val messagesListeners = mutableMapOf<String, ListenerRegistration>()
+    42→
+    43→    private var chatsListener: ListenerRegistration? = null
+    44→    private var callsListener: ListenerRegistration? = null
+    45→
+    46→    private val TAG = "ChatRepo"
+    47→
+    48→    // ── 1:1 Chat Operations (Contact-Gated) ──
+    49→
+    50→    override suspend fun getOrCreateChat(otherUserId: String): Result<String> {
+    51→        return try {
+    52→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+    53→            if (uid == otherUserId) return Result.failure(Exception("Cannot chat with yourself"))
+    54→
+    55→            // ── Zero-Trust Contact Gate ──
+    56→            if (contactRepository != null) {
+    57→                val verification = contactRepository.verifyContactGate(otherUserId)
+    58→                if (verification !is ContactVerification.MutualContact) {
+    59→                    return Result.failure(Exception("Cannot message — not a mutual contact. Add this user first."))
+    60→                }
+    61→            }
+    62→
+    63→            // Check if chat already exists
+    64→            val existing = firestore.collection("chats")
+    65→                .whereArrayContains("participants", uid)
+    66→                .get().await()
+    67→
+    68→            for (doc in existing.documents) {
+    69→                try {
+    70→                    val participants = doc.get("participants") as? List<String> ?: continue
+    71→                    if (participants.contains(otherUserId) && !doc.getBoolean("isGroup")) {
+    72→                        return Result.success(doc.id)
+    73→                    }
+    74→                } catch (_: Exception) { continue }
+    75→            }
+    76→
+    77→            // Fetch profiles for chat metadata
+    78→            val otherProfile = fetchUserProfile(otherUserId)
+    79→            val myProfile = fetchUserProfile(uid)
+    80→
+    81→            // Create new chat
+    82→            val chatId = UUID.randomUUID().toString()
+    83→            val chat = Chat(
+    84→                id = chatId,
+    85→                participants = listOf(uid, otherUserId),
+    86→                participantNames = mapOf(uid to myProfile.first, otherUserId to otherProfile.first),
+    87→                participantAvatars = mapOf(uid to myProfile.second, otherUserId to otherProfile.second),
+    88→                createdAt = System.currentTimeMillis()
+    89→            )
+    90→            firestore.collection("chats").document(chatId)
+    91→                .set(chat.toMap())
+    92→                .await()
+    93→
+    94→            Result.success(chatId)
+    95→        } catch (e: Exception) {
+    96→            Log.e(TAG, "Failed to get/create chat", e)
+    97→            Result.failure(e)
+    98→        }
+    99→    }
+   100→
+   101→    // ── Group Chat Operations ──
+   102→
+   103→    override suspend fun createGroupChat(groupName: String, participantUids: List<String>): Result<String> {
+   104→        return try {
+   105→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   106→            if (groupName.isBlank()) return Result.failure(Exception("Group name cannot be empty"))
+   107→            if (participantUids.isEmpty()) return Result.failure(Exception("Group must have at least one participant"))
+   108→
+   109→            // ── Contact Gate: Verify all participants are mutual contacts ──
+   110→            if (contactRepository != null) {
+   111→                for (participantUid in participantUids) {
+   112→                    val verification = contactRepository.verifyContactGate(participantUid)
+   113→                    if (verification !is ContactVerification.MutualContact) {
+   114→                        return Result.failure(Exception("Cannot add user — not a mutual contact"))
+   115→                    }
+   116→                }
+   117→            }
+   118→
+   119→            val allParticipants = listOf(uid) + participantUids
+   120→            val chatId = UUID.randomUUID().toString()
+   121→
+   122→            // Fetch all participant profiles
+   123→            val participantNames = mutableMapOf<String, String>()
+   124→            val participantAvatars = mutableMapOf<String, String>()
+   125→            for (participantUid in allParticipants) {
+   126→                val profile = fetchUserProfile(participantUid)
+   127→                participantNames[participantUid] = profile.first
+   128→                participantAvatars[participantUid] = profile.second
+   129→            }
+   130→
+   131→            val chat = Chat(
+   132→                id = chatId,
+   133→                participants = allParticipants,
+   134→                participantNames = participantNames,
+   135→                participantAvatars = participantAvatars,
+   136→                createdAt = System.currentTimeMillis(),
+   137→                isGroup = true,
+   138→                groupName = groupName
+   139→            )
+   140→            firestore.collection("chats").document(chatId)
+   141→                .set(chat.toMap())
+   142→                .await()
+   143→
+   144→            Result.success(chatId)
+   145→        } catch (e: Exception) {
+   146→            Log.e(TAG, "Failed to create group chat", e)
+   147→            Result.failure(e)
+   148→        }
+   149→    }
+   150→
+   151→    override suspend fun addGroupParticipant(chatId: String, newParticipantUid: String): Result<Unit> {
+   152→        return try {
+   153→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   154→
+   155→            // Contact gate
+   156→            if (contactRepository != null) {
+   157→                val verification = contactRepository.verifyContactGate(newParticipantUid)
+   158→                if (verification !is ContactVerification.MutualContact) {
+   159→                    return Result.failure(Exception("Cannot add — not a mutual contact"))
+   160→                }
+   161→            }
+   162→
+   163→            val profile = fetchUserProfile(newParticipantUid)
+   164→            firestore.collection("chats").document(chatId)
+   165→                .update(mapOf(
+   166→                    "participants" to FieldValue.arrayUnion(newParticipantUid),
+   167→                    "participantNames.$newParticipantUid" to profile.first,
+   168→                    "participantAvatars.$newParticipantUid" to profile.second
+   169→                ))
+   170→                .await()
+   171→
+   172→            Result.success(Unit)
+   173→        } catch (e: Exception) {
+   174→            Log.e(TAG, "Failed to add group participant", e)
+   175→            Result.failure(e)
+   176→        }
+   177→    }
+   178→
+   179→    override suspend fun removeGroupParticipant(chatId: String, participantUid: String): Result<Unit> {
+   180→        return try {
+   181→            firestore.collection("chats").document(chatId)
+   182→                .update("participants", FieldValue.arrayRemove(participantUid))
+   183→                .await()
+   184→            Result.success(Unit)
+   185→        } catch (e: Exception) {
+   186→            Log.e(TAG, "Failed to remove group participant", e)
+   187→            Result.failure(e)
+   188→        }
+   189→    }
+   190→
+   191→    override suspend fun updateGroupInfo(chatId: String, groupName: String, groupAvatar: String): Result<Unit> {
+   192→        return try {
+   193→            val updates = mutableMapOf<String, Any>("groupName" to groupName)
+   194→            if (groupAvatar.isNotBlank()) updates["groupAvatar"] = groupAvatar
+   195→            firestore.collection("chats").document(chatId).update(updates).await()
+   196→            Result.success(Unit)
+   197→        } catch (e: Exception) {
+   198→            Log.e(TAG, "Failed to update group info", e)
+   199→            Result.failure(e)
+   200→        }
+   201→    }
+   202→
+   203→    // ── Message Operations ──
+   204→
+   205→    override fun getMessagesFlow(chatId: String): StateFlow<List<Message>> {
+   206→        return messagesFlows.getOrPut(chatId) { MutableStateFlow(emptyList()) }
+   207→    }
+   208→
+   209→    override suspend fun sendMessage(chatId: String, text: String, replyToId: String): Result<Message> {
+   210→        return try {
+   211→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   212→            val msgId = UUID.randomUUID().toString()
+   213→
+   214→            // If replying, fetch the replied-to message for metadata
+   215→            var replyToText = ""
+   216→            var replyToSender = ""
+   217→            if (replyToId.isNotBlank()) {
+   218→                try {
+   219→                    val replyDoc = firestore.collection("chats").document(chatId)
+   220→                        .collection("messages").document(replyToId).get().await()
+   221→                    replyToText = replyDoc.getString("text") ?: ""
+   222→                    replyToSender = replyDoc.getString("senderId") ?: ""
+   223→                } catch (_: Exception) {}
+   224→            }
+   225→
+   226→            val message = Message(
+   227→                id = msgId,
+   228→                chatId = chatId,
+   229→                senderId = uid,
+   230→                text = text,
+   231→                timestamp = System.currentTimeMillis(),
+   232→                replyToId = replyToId,
+   233→                replyToText = replyToText,
+   234→                replyToSender = replyToSender
+   235→            )
+   236→
+   237→            val batch = firestore.batch()
+   238→            batch.set(firestore.collection("chats").document(chatId)
+   239→                .collection("messages").document(msgId), message.toMap())
+   240→            batch.update(firestore.collection("chats").document(chatId), mapOf(
+   241→                "lastMessage" to text,
+   242→                "lastMessageSenderId" to uid,
+   243→                "lastMessageTimestamp" to message.timestamp
+   244→            ))
+   245→            batch.commit().await()
+   246→
+   247→            Result.success(message)
+   248→        } catch (e: Exception) {
+   249→            Log.e(TAG, "Failed to send message", e)
+   250→            Result.failure(e)
+   251→        }
+   252→    }
+   253→
+   254→    override suspend fun sendImageMessage(chatId: String, imageBytes: ByteArray, caption: String): Result<Message> {
+   255→        return try {
+   256→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   257→            val msgId = UUID.randomUUID().toString()
+   258→            val ref = storage.reference.child("chat_images/$chatId/$msgId.jpg")
+   259→            ref.putBytes(imageBytes).await()
+   260→            val imageUrl = ref.downloadUrl.await().toString()
+   261→
+   262→            val message = Message(
+   263→                id = msgId,
+   264→                chatId = chatId,
+   265→                senderId = uid,
+   266→                text = caption,
+   267→                imageUrl = imageUrl,
+   268→                timestamp = System.currentTimeMillis()
+   269→            )
+   270→            firestore.collection("chats").document(chatId)
+   271→                .collection("messages").document(msgId)
+   272→                .set(message.toMap())
+   273→                .await()
+   274→
+   275→            Result.success(message)
+   276→        } catch (e: Exception) {
+   277→            Log.e(TAG, "Failed to send image message", e)
+   278→            Result.failure(e)
+   279→        }
+   280→    }
+   281→
+   282→    override suspend fun deleteMessageForMe(chatId: String, messageId: String): Result<Unit> {
+   283→        return try {
+   284→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   285→            firestore.collection("chats").document(chatId)
+   286→                .collection("messages").document(messageId)
+   287→                .update("deletedForUsers", FieldValue.arrayUnion(uid))
+   288→                .await()
+   289→            Result.success(Unit)
+   290→        } catch (e: Exception) {
+   291→            Log.e(TAG, "Failed to delete message for me", e)
+   292→            Result.failure(e)
+   293→        }
+   294→    }
+   295→
+   296→    override suspend fun deleteMessageForEveryone(chatId: String, messageId: String): Result<Unit> {
+   297→        return try {
+   298→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   299→            firestore.collection("chats").document(chatId)
+   300→                .collection("messages").document(messageId)
+   301→                .update(mapOf(
+   302→                    "isDeletedForEveryone" to true,
+   303→                    "text" to "This message was deleted.",
+   304→                    "imageUrl" to ""
+   305→                ))
+   306→                .await()
+   307→            Result.success(Unit)
+   308→        } catch (e: Exception) {
+   309→            Log.e(TAG, "Failed to delete message for everyone", e)
+   310→            Result.failure(e)
+   311→        }
+   312→    }
+   313→
+   314→    override suspend fun addReaction(chatId: String, messageId: String, emoji: String): Result<Unit> {
+   315→        return try {
+   316→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   317→            firestore.collection("chats").document(chatId)
+   318→                .collection("messages").document(messageId)
+   319→                .update("reactions.$uid", emoji)
+   320→                .await()
+   321→            Result.success(Unit)
+   322→        } catch (e: Exception) {
+   323→            Log.e(TAG, "Failed to add reaction", e)
+   324→            Result.failure(e)
+   325→        }
+   326→    }
+   327→
+   328→    override suspend fun removeReaction(chatId: String, messageId: String): Result<Unit> {
+   329→        return try {
+   330→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   331→            firestore.collection("chats").document(chatId)
+   332→                .collection("messages").document(messageId)
+   333→                .update("reactions.$uid", FieldValue.delete())
+   334→                .await()
+   335→            Result.success(Unit)
+   336→        } catch (e: Exception) {
+   337→            Log.e(TAG, "Failed to remove reaction", e)
+   338→            Result.failure(e)
+   339→        }
+   340→    }
+   341→
+   342→    override suspend fun markAsRead(chatId: String): Result<Unit> {
+   343→        return try {
+   344→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   345→            firestore.collection("chats").document(chatId)
+   346→                .update("unreadCount.$uid", 0)
+   347→                .await()
+   348→            Result.success(Unit)
+   349→        } catch (e: Exception) {
+   350→            Log.w(TAG, "Failed to mark as read", e)
+   351→            Result.failure(e)
+   352→        }
+   353→    }
+   354→
+   355→    override suspend fun forwardMessage(chatId: String, message: Message): Result<Message> {
+   356→        return try {
+   357→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   358→            val msgId = UUID.randomUUID().toString()
+   359→            val forwarded = Message(
+   360→                id = msgId,
+   361→                chatId = chatId,
+   362→                senderId = uid,
+   363→                text = message.text,
+   364→                imageUrl = message.imageUrl,
+   365→                timestamp = System.currentTimeMillis()
+   366→            )
+   367→            firestore.collection("chats").document(chatId)
+   368→                .collection("messages").document(msgId)
+   369→                .set(forwarded.toMap())
+   370→                .await()
+   371→            Result.success(forwarded)
+   372→        } catch (e: Exception) {
+   373→            Log.e(TAG, "Failed to forward message", e)
+   374→            Result.failure(e)
+   375→        }
+   376→    }
+   377→
+   378→    // ── Call Operations (kept for backward compatibility) ──
+   379→
+   380→    override suspend fun initiateCall(receiverId: String, type: String): Result<CallRecord> {
+   381→        return try {
+   382→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   383→
+   384→            // Contact gate
+   385→            if (contactRepository != null) {
+   386→                val verification = contactRepository.verifyContactGate(receiverId)
+   387→                if (verification !is ContactVerification.MutualContact) {
+   388→                    return Result.failure(Exception("Cannot call — not a mutual contact"))
+   389→                }
+   390→            }
+   391→
+   392→            val callId = UUID.randomUUID().toString()
+   393→            val callerProfile = fetchUserProfile(uid)
+   394→            val receiverProfile = fetchUserProfile(receiverId)
+   395→
+   396→            val call = CallRecord(
+   397→                id = callId,
+   398→                callerId = uid,
+   399→                callerName = callerProfile.first,
+   400→                callerAvatar = callerProfile.second,
+   401→                receiverId = receiverId,
+   402→                receiverName = receiverProfile.first,
+   403→                receiverAvatar = receiverProfile.second,
+   404→                timestamp = System.currentTimeMillis(),
+   405→                type = type,
+   406→                status = "ringing",
+   407→                isOutgoing = true
+   408→            )
+   409→            firestore.collection("calls").document(callId)
+   410→                .set(call.toMap() + ("participants" to listOf(uid, receiverId)))
+   411→                .await()
+   412→            Result.success(call)
+   413→        } catch (e: Exception) {
+   414→            Log.e(TAG, "Failed to initiate call", e)
+   415→            Result.failure(e)
+   416→        }
+   417→    }
+   418→
+   419→    override suspend fun endCall(callId: String, duration: Long): Result<Unit> {
+   420→        return try {
+   421→            firestore.collection("calls").document(callId)
+   422→                .update(mapOf("duration" to duration, "status" to "ended"))
+   423→                .await()
+   424→            Result.success(Unit)
+   425→        } catch (e: Exception) {
+   426→            Log.e(TAG, "Failed to end call", e)
+   427→            Result.failure(e)
+   428→        }
+   429→    }
+   430→
+   431→    override suspend fun getLiveKitToken(roomName: String): Result<String> {
+   432→        return Result.failure(Exception("LiveKit token endpoint not configured"))
+   433→    }
+   434→
+   435→    // ── Realtime Listeners ──
+   436→
+   437→    override fun startListening() {
+   438→        startChatsListener()
+   439→        startCallsListener()
+   440→    }
+   441→
+   442→    override fun stopListening() {
+   443→        chatsListener?.remove()
+   444→        chatsListener = null
+   445→        callsListener?.remove()
+   446→        callsListener = null
+   447→        messagesListeners.values.forEach { it.remove() }
+   448→        messagesListeners.clear()
+   449→    }
+   450→
+   451→    override fun startMessagesListening(chatId: String) {
+   452→        if (messagesListeners.containsKey(chatId)) return
+   453→
+   454→        val flow = messagesFlows.getOrPut(chatId) { MutableStateFlow(emptyList()) }
+   455→
+   456→        val listener = firestore.collection("chats").document(chatId)
+   457→            .collection("messages")
+   458→            .orderBy("timestamp", Query.Direction.ASCENDING)
+   459→            .addSnapshotListener { snapshot, error ->
+   460→                if (error != null) {
+   461→                    Log.w(TAG, "Messages listener error for $chatId", error)
+   462→                    return@addSnapshotListener
+   463→                }
+   464→                if (snapshot == null) return@addSnapshotListener
+   465→
+   466→                try {
+   467→                    val uid = auth.currentUser?.uid ?: ""
+   468→                    val messages = snapshot.documents.mapNotNull { doc ->
+   469→                        try { documentToMessage(doc, uid) } catch (_: Exception) { null }
+   470→                    }
+   471→                    flow.value = messages
+   472→                } catch (e: Exception) {
+   473→                    Log.e(TAG, "Failed to process messages snapshot", e)
+   474→                }
+   475→            }
+   476→
+   477→        messagesListeners[chatId] = listener
+   478→    }
+   479→
+   480→    override fun stopMessagesListening(chatId: String) {
+   481→        messagesListeners.remove(chatId)?.remove()
+   482→    }
+   483→
+   484→    private fun startChatsListener() {
+   485→        val uid = auth.currentUser?.uid ?: return
+   486→        chatsListener = firestore.collection("chats")
+   487→            .whereArrayContains("participants", uid)
+   488→            .addSnapshotListener { snapshot, error ->
+   489→                if (error != null) {
+   490→                    Log.w(TAG, "Chats listener error", error)
+   491→                    return@addSnapshotListener
+   492→                }
+   493→                if (snapshot == null) return@addSnapshotListener
+   494→
+   495→                try {
+   496→                    val chats = snapshot.documents.mapNotNull { doc ->
+   497→                        try { documentToChat(doc) } catch (_: Exception) { null }
+   498→                    }.sortedByDescending { it.lastMessageTimestamp }
+   499→                    _chats.value = chats
+   500→                } catch (e: Exception) {
+   501→                    Log.e(TAG, "Failed to process chats snapshot", e)
+   502→                }
+   503→            }
+   504→    }
+   505→
+   506→    private fun startCallsListener() {
+   507→        val uid = auth.currentUser?.uid ?: return
+   508→
+   509→        callsListener = firestore.collection("calls")
+   510→            .whereArrayContains("participants", uid)
+   511→            .addSnapshotListener { snapshot, error ->
+   512→                if (error != null) {
+   513→                    Log.w(TAG, "Calls listener error, trying fallback", error)
+   514→                    startCallsListenerFallback(uid)
+   515→                    return@addSnapshotListener
+   516→                }
+   517→                if (snapshot == null) return@addSnapshotListener
+   518→
+   519→                try {
+   520→                    val calls = snapshot.documents.mapNotNull { doc ->
+   521→                        try { documentToCallRecord(doc) } catch (_: Exception) { null }
+   522→                    }.sortedByDescending { it.timestamp }
+   523→                    _callHistory.value = calls
+   524→                } catch (e: Exception) {
+   525→                    Log.e(TAG, "Failed to process calls snapshot", e)
+   526→                    _callHistory.value = emptyList()
+   527→                }
+   528→            }
+   529→    }
+   530→
+   531→    private fun startCallsListenerFallback(uid: String) {
+   532→        callsListener?.remove()
+   533→        callsListener = firestore.collection("calls")
+   534→            .whereEqualTo("callerId", uid)
+   535→            .limit(50)
+   536→            .addSnapshotListener { snapshot, error ->
+   537→                if (error != null) {
+   538→                    Log.w(TAG, "Calls fallback listener error", error)
+   539→                    startCallsListenerLastResort(uid)
+   540→                    return@addSnapshotListener
+   541→                }
+   542→                if (snapshot == null) return@addSnapshotListener
+   543→
+   544→                try {
+   545→                    val callsAsCaller = snapshot.documents.mapNotNull { doc ->
+   546→                        try { documentToCallRecord(doc) } catch (_: Exception) { null }
+   547→                    }
+   548→
+   549→                    firestore.collection("calls")
+   550→                        .whereEqualTo("receiverId", uid)
+   551→                        .limit(50)
+   552→                        .get()
+   553→                        .addOnSuccessListener { receiverSnapshot ->
+   554→                            val callsAsReceiver = receiverSnapshot.documents.mapNotNull { doc ->
+   555→                                try { documentToCallRecord(doc) } catch (_: Exception) { null }
+   556→                            }
+   557→                            val allCalls = (callsAsCaller + callsAsReceiver)
+   558→                                .distinctBy { it.id }
+   559→                                .sortedByDescending { it.timestamp }
+   560→                            _callHistory.value = allCalls
+   561→                        }
+   562→                        .addOnFailureListener { e ->
+   563→                            Log.w(TAG, "Failed to fetch receiver calls", e)
+   564→                            _callHistory.value = callsAsCaller.sortedByDescending { it.timestamp }
+   565→                        }
+   566→                } catch (e: Exception) {
+   567→                    Log.e(TAG, "Failed to process calls fallback snapshot", e)
+   568→                    _callHistory.value = emptyList()
+   569→                }
+   570→            }
+   571→    }
+   572→
+   573→    private fun startCallsListenerLastResort(uid: String) {
+   574→        callsListener?.remove()
+   575→        scope.launch {
+   576→            try {
+   577→                val snapshot = firestore.collection("calls")
+   578→                    .limit(100)
+   579→                    .get()
+   580→                    .await()
+   581→
+   582→                val calls = snapshot.documents.mapNotNull { doc ->
+   583→                    try { documentToCallRecord(doc) } catch (_: Exception) { null }
+   584→                }.filter { it.callerId == uid || it.receiverId == uid }
+   585→                    .sortedByDescending { it.timestamp }
+   586→
+   587→                _callHistory.value = calls
+   588→            } catch (e: Exception) {
+   589→                Log.e(TAG, "Last resort calls fetch failed", e)
+   590→                _callHistory.value = emptyList()
+   591→            }
+   592→        }
+   593→    }
+   594→
+   595→    // ── Document Mappers ──
+   596→
+   597→    private fun documentToMessage(doc: com.google.firebase.firestore.DocumentSnapshot, currentUserId: String): Message {
+   598→        return Message(
+   599→            id = doc.id,
+   600→            chatId = doc.getString("chatId") ?: "",
+   601→            senderId = doc.getString("senderId") ?: "",
+   602→            text = doc.getString("text") ?: "",
+   603→            imageUrl = doc.getString("imageUrl") ?: "",
+   604→            timestamp = doc.getLong("timestamp") ?: 0L,
+   605→            isRead = doc.getBoolean("isRead") ?: false,
+   606→            replyToId = doc.getString("replyToId") ?: "",
+   607→            replyToText = doc.getString("replyToText") ?: "",
+   608→            replyToSender = doc.getString("replyToSender") ?: "",
+   609→            deletedForUsers = (doc.get("deletedForUsers") as? List<String>) ?: emptyList(),
+   610→            isDeletedForEveryone = doc.getBoolean("isDeletedForEveryone") ?: false,
+   611→            reactions = (doc.get("reactions") as? Map<String, String>) ?: emptyMap()
+   612→        )
+   613→    }
+   614→
+   615→    private fun documentToChat(doc: com.google.firebase.firestore.DocumentSnapshot): Chat {
+   616→        return Chat(
+   617→            id = doc.id,
+   618→            participants = (doc.get("participants") as? List<String>) ?: emptyList(),
+   619→            participantNames = (doc.get("participantNames") as? Map<String, String>) ?: emptyMap(),
+   620→            participantAvatars = (doc.get("participantAvatars") as? Map<String, String>) ?: emptyMap(),
+   621→            lastMessage = doc.getString("lastMessage") ?: "",
+   622→            lastMessageSenderId = doc.getString("lastMessageSenderId") ?: "",
+   623→            lastMessageTimestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
+   624→            unreadCount = (doc.get("unreadCount") as? Map<String, Long>)?.mapValues { it.value.toInt() } ?: emptyMap(),
+   625→            createdAt = doc.getLong("createdAt") ?: 0L,
+   626→            isGroup = doc.getBoolean("isGroup") ?: false,
+   627→            groupName = doc.getString("groupName") ?: "",
+   628→            groupAvatar = doc.getString("groupAvatar") ?: ""
+   629→        )
+   630→    }
+   631→
+   632→    private fun documentToCallRecord(doc: com.google.firebase.firestore.DocumentSnapshot): CallRecord {
+   633→        return CallRecord(
+   634→            id = doc.id,
+   635→            callerId = doc.getString("callerId") ?: "",
+   636→            callerName = doc.getString("callerName") ?: "",
+   637→            callerAvatar = doc.getString("callerAvatar") ?: "",
+   638→            receiverId = doc.getString("receiverId") ?: "",
+   639→            receiverName = doc.getString("receiverName") ?: "",
+   640→            receiverAvatar = doc.getString("receiverAvatar") ?: "",
+   641→            timestamp = doc.getLong("timestamp") ?: 0L,
+   642→            duration = doc.getLong("duration") ?: 0L,
+   643→            type = doc.getString("type") ?: "audio",
+   644→            status = doc.getString("status") ?: "missed",
+   645→            isOutgoing = doc.getBoolean("isOutgoing") ?: false
+   646→        )
+   647→    }
+   648→
+   649→    private suspend fun fetchUserProfile(uid: String): Pair<String, String> {
+   650→        return try {
+   651→            val doc = firestore.collection("users").document(uid).get().await()
+   652→            Pair(doc.getString("displayName") ?: "", doc.getString("avatarUrl") ?: "")
+   653→        } catch (_: Exception) {
+   654→            Pair("", "")
+   655→        }
+   656→    }
+   657→
+   658→    // ── Model to Map converters ──
+   659→
+   660→    private fun Message.toMap(): Map<String, Any?> = mapOf(
+   661→        "id" to id,
+   662→        "chatId" to chatId,
+   663→        "senderId" to senderId,
+   664→        "text" to text,
+   665→        "imageUrl" to imageUrl,
+   666→        "timestamp" to timestamp,
+   667→        "isRead" to isRead,
+   668→        "replyToId" to replyToId,
+   669→        "replyToText" to replyToText,
+   670→        "replyToSender" to replyToSender,
+   671→        "deletedForUsers" to deletedForUsers,
+   672→        "isDeletedForEveryone" to isDeletedForEveryone,
+   673→        "reactions" to reactions
+   674→    )
+   675→
+   676→    private fun Chat.toMap(): Map<String, Any?> = mapOf(
+   677→        "id" to id,
+   678→        "participants" to participants,
+   679→        "participantNames" to participantNames,
+   680→        "participantAvatars" to participantAvatars,
+   681→        "lastMessage" to lastMessage,
+   682→        "lastMessageSenderId" to lastMessageSenderId,
+   683→        "lastMessageTimestamp" to lastMessageTimestamp,
+   684→        "unreadCount" to unreadCount,
+   685→        "createdAt" to createdAt,
+   686→        "isGroup" to isGroup,
+   687→        "groupName" to groupName,
+   688→        "groupAvatar" to groupAvatar
+   689→    )
+   690→
+   691→    private fun CallRecord.toMap(): Map<String, Any?> = mapOf(
+   692→        "id" to id,
+   693→        "callerId" to callerId,
+   694→        "callerName" to callerName,
+   695→        "callerAvatar" to callerAvatar,
+   696→        "receiverId" to receiverId,
+   697→        "receiverName" to receiverName,
+   698→        "receiverAvatar" to receiverAvatar,
+   699→        "timestamp" to timestamp,
+   700→        "duration" to duration,
+   701→        "type" to type,
+   702→        "status" to status,
+   703→        "isOutgoing" to isOutgoing,
+   704→        "participants" to listOf(callerId, receiverId)
+   705→    )
+   706→}
+   707→
