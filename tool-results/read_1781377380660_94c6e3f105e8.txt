@@ -1,0 +1,641 @@
+     1→package com.zixo.app.ui.settings.SubPages
+     2→
+     3→import android.content.Context
+     4→import android.util.Log
+     5→import androidx.compose.animation.AnimatedVisibility
+     6→import androidx.compose.animation.fadeIn
+     7→import androidx.compose.animation.fadeOut
+     8→import androidx.compose.foundation.background
+     9→import androidx.compose.foundation.clickable
+    10→import androidx.compose.foundation.layout.*
+    11→import androidx.compose.foundation.rememberScrollState
+    12→import androidx.compose.foundation.shape.RoundedCornerShape
+    13→import androidx.compose.foundation.verticalScroll
+    14→import androidx.compose.material.icons.Icons
+    15→import androidx.compose.material.icons.filled.*
+    16→import androidx.compose.material3.*
+    17→import androidx.compose.runtime.*
+    18→import androidx.compose.ui.Alignment
+    19→import androidx.compose.ui.Modifier
+    20→import androidx.compose.ui.draw.clip
+    21→import androidx.compose.ui.graphics.Color
+    22→import androidx.compose.ui.platform.LocalContext
+    23→import androidx.compose.ui.text.font.FontWeight
+    24→import androidx.compose.ui.unit.dp
+    25→import androidx.compose.ui.unit.sp
+    26→import androidx.credentials.CreatePublicKeyCredentialRequest
+    27→import androidx.credentials.CredentialManager
+    28→import androidx.credentials.exceptions.CreateCredentialCancellationException
+    29→import androidx.credentials.exceptions.CreateCredentialCustomException
+    30→import androidx.credentials.exceptions.CreateCredentialException
+    31→import androidx.credentials.exceptions.CreateCredentialInterruptedException
+    32→import androidx.credentials.exceptions.CreateCredentialProviderConfigurationException
+    33→import androidx.credentials.exceptions.publickeycredential.CreatePublicKeyCredentialDomException
+    34→import com.zixo.app.data.repository.AuthRepositoryImpl
+    35→import com.zixo.app.ui.settings.SettingsViewModel
+    36→import com.zixo.app.ui.components.LiquidGlassCard
+    37→import com.zixo.app.ui.components.LiquidGlassPill
+    38→import com.zixo.app.ui.theme.*
+    39→import kotlinx.coroutines.Dispatchers
+    40→import kotlinx.coroutines.launch
+    41→import kotlinx.coroutines.withContext
+    42→import org.json.JSONObject
+    43→
+    44→/**
+    45→ * Account Security Screen — Passkey Enrollment Engine
+    46→ *
+    47→ * Implements the full passkey creation workflow with defensive domain validation:
+    48→ *
+    49→ * ARCHITECTURE FLOW:
+    50→ * 1. Fetch WebAuthn challenge from AuthRepository (Cloudflare Edge Worker or local fallback)
+    51→ * 2. DEFENSIVE: Validate and enforce rp.id = "zixo.pages.dev" in the JSON payload
+    52→ * 3. Create CreatePublicKeyCredentialRequest with preferImmediatelyAvailableCredentials = false
+    53→ * 4. Invoke CredentialManager.createCredential() on IO thread
+    54→ * 5. Parse CreatePublicKeyCredentialResponse — extract credential ID
+    55→ * 6. Register credential with backend + save to Firestore
+    56→ *
+    57→ * ERROR HANDLING:
+    58→ * - CreateCredentialCancellationException → "Registration cancelled or domain mismatch"
+    59→ * - CreatePublicKeyCredentialDomException → DOM-level WebAuthn validation error with detailed code
+    60→ * - CreateCredentialCustomException → assetlinks.json configuration issue
+    61→ * - All others → Generic WebAuthn error with diagnostic message
+    62→ */
+    63→@OptIn(ExperimentalMaterial3Api::class)
+    64→@Composable
+    65→fun AccountSecurityScreen(
+    66→    settingsViewModel: SettingsViewModel,
+    67→    authRepository: AuthRepositoryImpl? = null,
+    68→    onBack: () -> Unit
+    69→) {
+    70→    val settings by settingsViewModel.settings.collectAsState()
+    71→    val showDeleteConfirm by settingsViewModel.showDeleteConfirm.collectAsState()
+    72→    val context = LocalContext.current
+    73→    val scope = rememberCoroutineScope()
+    74→
+    75→    // ── Passkey State ──
+    76→    var isPasskeyRegistered by remember { mutableStateOf(false) }
+    77→    var isCreatingPasskey by remember { mutableStateOf(false) }
+    78→    var passkeyError by remember { mutableStateOf<String?>(null) }
+    79→    var passkeySuccess by remember { mutableStateOf(false) }
+    80→
+    81→    // Check passkey status on load
+    82→    LaunchedEffect(Unit) {
+    83→        if (authRepository != null) {
+    84→            isPasskeyRegistered = authRepository.hasPasskeyRegistered()
+    85→        }
+    86→    }
+    87→
+    88→    Box(
+    89→        modifier = Modifier
+    90→            .fillMaxSize()
+    91→            .background(ZixoBackground)
+    92→    ) {
+    93→        Column(
+    94→            modifier = Modifier
+    95→                .fillMaxSize()
+    96→                .imePadding()
+    97→        ) {
+    98→            TopAppBar(
+    99→                title = { Text("Account Security", color = ZixoTextPrimary, fontWeight = FontWeight.Bold) },
+   100→                navigationIcon = {
+   101→                    IconButton(onClick = onBack) {
+   102→                        Icon(Icons.Filled.ArrowBack, "Back", tint = ZixoTextPrimary)
+   103→                    }
+   104→                },
+   105→                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+   106→            )
+   107→
+   108→            Column(
+   109→                modifier = Modifier
+   110→                    .fillMaxSize()
+   111→                    .padding(16.dp)
+   112→                    .verticalScroll(rememberScrollState())
+   113→            ) {
+   114→                // ════════════════════════════════════════════════
+   115→                // PASSKEY & BIOMETRICS SECTION
+   116→                // ════════════════════════════════════════════════
+   117→                LiquidGlassCard {
+   118→                    Column(modifier = Modifier.padding(16.dp)) {
+   119→                        // Section header
+   120→                        Row(
+   121→                            verticalAlignment = Alignment.CenterVertically,
+   122→                            modifier = Modifier.fillMaxWidth()
+   123→                        ) {
+   124→                            Icon(
+   125→                                Icons.Filled.Fingerprint,
+   126→                                contentDescription = null,
+   127→                                tint = ZixoAccent,
+   128→                                modifier = Modifier.size(24.dp)
+   129→                            )
+   130→                            Spacer(modifier = Modifier.width(10.dp))
+   131→                            Text(
+   132→                                "Passkeys & Biometrics",
+   133→                                color = ZixoTextPrimary,
+   134→                                fontWeight = FontWeight.Bold,
+   135→                                fontSize = 17.sp
+   136→                            )
+   137→                        }
+   138→
+   139→                        Spacer(modifier = Modifier.height(8.dp))
+   140→                        Text(
+   141→                            "Use your face, fingerprint, or screen lock to sign in securely without passwords. Passkeys are stored on your device and can never be phished.",
+   142→                            color = ZixoTextTertiary,
+   143→                            fontSize = 12.sp,
+   144→                            lineHeight = 17.sp
+   145→                        )
+   146→
+   147→                        Spacer(modifier = Modifier.height(16.dp))
+   148→
+   149→                        // Passkey status indicator
+   150→                        if (isPasskeyRegistered) {
+   151→                            LiquidGlassPill {
+   152→                                Icon(
+   153→                                    Icons.Filled.CheckCircle,
+   154→                                    contentDescription = null,
+   155→                                    tint = ZixoAccent,
+   156→                                    modifier = Modifier.size(16.dp)
+   157→                                )
+   158→                                Spacer(modifier = Modifier.width(6.dp))
+   159→                                Text(
+   160→                                    "Passkey registered",
+   161→                                    color = ZixoAccent,
+   162→                                    fontSize = 13.sp,
+   163→                                    fontWeight = FontWeight.Medium
+   164→                                )
+   165→                            }
+   166→                        } else {
+   167→                            LiquidGlassPill {
+   168→                                Icon(
+   169→                                    Icons.Filled.Info,
+   170→                                    contentDescription = null,
+   171→                                    tint = ZixoTextTertiary,
+   172→                                    modifier = Modifier.size(16.dp)
+   173→                                )
+   174→                                Spacer(modifier = Modifier.width(6.dp))
+   175→                                Text(
+   176→                                    "No passkey registered",
+   177→                                    color = ZixoTextSecondary,
+   178→                                    fontSize = 13.sp,
+   179→                                    fontWeight = FontWeight.Medium
+   180→                                )
+   181→                            }
+   182→                        }
+   183→
+   184→                        Spacer(modifier = Modifier.height(16.dp))
+   185→
+   186→                        // ════════════════════════════════════════════════
+   187→                        // CREATE PASSKEY BUTTON — Defensive CredentialManager Flow
+   188→                        // ════════════════════════════════════════════════
+   189→                        Button(
+   190→                            onClick = {
+   191→                                if (authRepository != null) {
+   192→                                    scope.launch {
+   193→                                        isCreatingPasskey = true
+   194→                                        passkeyError = null
+   195→                                        passkeySuccess = false
+   196→
+   197→                                        try {
+   198→                                            // ── STEP 1: Fetch WebAuthn challenge from backend ──
+   199→                                            val challengeResult = authRepository.getPasskeyRegistrationChallenge()
+   200→                                            if (challengeResult.isFailure) {
+   201→                                                passkeyError = challengeResult.exceptionOrNull()?.message
+   202→                                                    ?: "Failed to get challenge from server"
+   203→                                                isCreatingPasskey = false
+   204→                                                return@launch
+   205→                                            }
+   206→
+   207→                                            val serverJson = challengeResult.getOrNull() ?: ""
+   208→
+   209→                                            // ── STEP 2: DEFENSIVE — Force rp.id compliance ──
+   210→                                            // Even though AuthRepositoryImpl already validates,
+   211→                                            // we double-check here as a safety net before passing
+   212→                                            // to the platform CredentialManager
+   213→                                            val validatedJson = enforceRpIdOnClient(serverJson)
+   214→
+   215→                                            Log.d("Passkey", "Challenge JSON validated, rp.id enforced to ${AuthRepositoryImpl.RP_ID}")
+   216→
+   217→                                            // ── STEP 3: Create the CredentialManager request ──
+   218→                                            val credentialManager = CredentialManager.create(context)
+   219→                                            val createRequest = CreatePublicKeyCredentialRequest(
+   220→                                                requestJson = validatedJson,
+   221→                                                preferImmediatelyAvailableCredentials = false
+   222→                                            )
+   223→
+   224→                                            // ── STEP 4: Invoke CredentialManager on IO thread ──
+   225→                                            val response = withContext(Dispatchers.IO) {
+   226→                                                credentialManager.createCredential(
+   227→                                                    context,
+   228→                                                    createRequest
+   229→                                                )
+   230→                                            }
+   231→
+   232→                                            // ── STEP 5: Extract credential data from response ──
+   233→                                            val responseJson = response.data.getString("androidx.credentials.BUNDLE_KEY_PUBLIC_KEY_CREDENTIAL")
+   234→                                                ?: response.data.getString("androidx.credentials.BUNDLE_KEY_CREDENTIAL_ID")
+   235→                                                ?: ""
+   236→
+   237→                                            // ── STEP 6: Parse credential ID from the response ──
+   238→                                            var credentialId = "passkey_${System.currentTimeMillis()}"
+   239→                                            if (responseJson.isNotEmpty()) {
+   240→                                                try {
+   241→                                                    val responseObj = JSONObject(responseJson)
+   242→                                                    credentialId = responseObj.optString("id", credentialId)
+   243→                                                } catch (_: Exception) {
+   244→                                                    // Response format may vary across Android versions
+   245→                                                }
+   246→                                            }
+   247→
+   248→                                            // ── STEP 7: Register with backend and save to Firestore ──
+   249→                                            val registrationResult = authRepository.registerPasskey(
+   250→                                                responseJson.ifBlank { validatedJson }
+   251→                                            )
+   252→                                            if (registrationResult.isSuccess) {
+   253→                                                authRepository.savePasskeyCredential(credentialId)
+   254→
+   255→                                                withContext(Dispatchers.Main) {
+   256→                                                    isPasskeyRegistered = true
+   257→                                                    passkeySuccess = true
+   258→                                                }
+   259→                                            } else {
+   260→                                                withContext(Dispatchers.Main) {
+   261→                                                    passkeyError = registrationResult.exceptionOrNull()?.message
+   262→                                                        ?: "Backend registration failed"
+   263→                                                }
+   264→                                            }
+   265→                                        } catch (e: CreateCredentialCancellationException) {
+   266→                                            Log.e("Passkey", "Credential creation cancelled", e)
+   267→                                            withContext(Dispatchers.Main) {
+   268→                                                passkeyError = "Registration cancelled by user or domain validation mismatch. Ensure zixo.pages.dev is properly linked via assetlinks.json."
+   269→                                            }
+   270→                                        } catch (e: CreatePublicKeyCredentialDomException) {
+   271→                                            Log.e("Passkey", "DOM WebAuthn error: ${e.domError}", e)
+   272→                                            withContext(Dispatchers.Main) {
+   273→                                                passkeyError = "WebAuthn validation error: ${e.domError}. The RP ID '${AuthRepositoryImpl.RP_ID}' must match your app's verified domain. Check assetlinks.json hosting."
+   274→                                            }
+   275→                                        } catch (e: CreateCredentialCustomException) {
+   276→                                            Log.e("Passkey", "Custom credential error", e)
+   277→                                            withContext(Dispatchers.Main) {
+   278→                                                passkeyError = "Custom validation hook failure. Verify that https://zixo.pages.dev/.well-known/assetlinks.json is accessible and correctly configured."
+   279→                                            }
+   280→                                        } catch (e: CreateCredentialInterruptedException) {
+   281→                                            Log.e("Passkey", "Credential creation interrupted", e)
+   282→                                            withContext(Dispatchers.Main) {
+   283→                                                passkeyError = "Passkey creation was interrupted. Please try again."
+   284→                                            }
+   285→                                        } catch (e: CreateCredentialProviderConfigurationException) {
+   286→                                            Log.e("Passkey", "Provider not configured", e)
+   287→                                            withContext(Dispatchers.Main) {
+   288→                                                passkeyError = "Credential provider not available. Ensure Google Play Services is updated."
+   289→                                            }
+   290→                                        } catch (e: CreateCredentialException) {
+   291→                                            Log.e("Passkey", "Generic credential error", e)
+   292→                                            withContext(Dispatchers.Main) {
+   293→                                                val msg = e.message ?: "Unknown credential error"
+   294→                                                if (msg.contains("rp id", ignoreCase = true) ||
+   295→                                                    msg.contains("cannot be validated", ignoreCase = true)) {
+   296→                                                    passkeyError = "WebAuthn RP ID Configuration error: The domain 'zixo.pages.dev' could not be verified. " +
+   297→                                                        "Ensure: (1) assetlinks.json is hosted at https://zixo.pages.dev/.well-known/assetlinks.json, " +
+   298→                                                        "(2) SHA-256 fingerprint matches your signing certificate, " +
+   299→                                                        "(3) Digital Asset Links verification is enabled in Firebase."
+   300→                                                } else {
+   301→                                                    passkeyError = "Passkey creation failed: $msg"
+   302→                                                }
+   303→                                            }
+   304→                                        } catch (e: Exception) {
+   305→                                            Log.e("Passkey", "Unexpected passkey error", e)
+   306→                                            withContext(Dispatchers.Main) {
+   307→                                                passkeyError = e.message ?: "Passkey registration failed unexpectedly"
+   308→                                            }
+   309→                                        } finally {
+   310→                                            withContext(Dispatchers.Main) {
+   311→                                                isCreatingPasskey = false
+   312→                                            }
+   313→                                        }
+   314→                                    }
+   315→                                }
+   316→                            },
+   317→                            modifier = Modifier
+   318→                                .fillMaxWidth()
+   319→                                .height(50.dp),
+   320→                            shape = RoundedCornerShape(14.dp),
+   321→                            colors = ButtonDefaults.buttonColors(
+   322→                                containerColor = ZixoAccent,
+   323→                                disabledContainerColor = ZixoAccent.copy(alpha = 0.4f)
+   324→                            ),
+   325→                            enabled = !isCreatingPasskey
+   326→                        ) {
+   327→                            if (isCreatingPasskey) {
+   328→                                CircularProgressIndicator(
+   329→                                    modifier = Modifier.size(20.dp),
+   330→                                    color = Color.Black,
+   331→                                    strokeWidth = 2.dp
+   332→                                )
+   333→                                Spacer(modifier = Modifier.width(8.dp))
+   334→                                Text("Creating...", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+   335→                            } else {
+   336→                                Icon(Icons.Filled.Fingerprint, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+   337→                                Spacer(modifier = Modifier.width(8.dp))
+   338→                                Text(
+   339→                                    if (isPasskeyRegistered) "Create Another Passkey" else "Create Passkey",
+   340→                                    color = Color.Black,
+   341→                                    fontWeight = FontWeight.Bold,
+   342→                                    fontSize = 14.sp
+   343→                                )
+   344→                            }
+   345→                        }
+   346→
+   347→                        // Success message
+   348→                        AnimatedVisibility(
+   349→                            visible = passkeySuccess,
+   350→                            enter = fadeIn(),
+   351→                            exit = fadeOut()
+   352→                        ) {
+   353→                            Spacer(modifier = Modifier.height(12.dp))
+   354→                            Card(
+   355→                                colors = CardDefaults.cardColors(containerColor = ZixoAccent.copy(alpha = 0.1f)),
+   356→                                shape = RoundedCornerShape(12.dp)
+   357→                            ) {
+   358→                                Row(
+   359→                                    modifier = Modifier.padding(12.dp),
+   360→                                    verticalAlignment = Alignment.CenterVertically
+   361→                                ) {
+   362→                                    Icon(Icons.Filled.CheckCircle, null, tint = ZixoAccent, modifier = Modifier.size(18.dp))
+   363→                                    Spacer(modifier = Modifier.width(8.dp))
+   364→                                    Text("Passkey created successfully!", color = ZixoAccent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+   365→                                }
+   366→                            }
+   367→                        }
+   368→
+   369→                        // Error message with diagnostic details
+   370→                        AnimatedVisibility(
+   371→                            visible = passkeyError != null,
+   372→                            enter = fadeIn(),
+   373→                            exit = fadeOut()
+   374→                        ) {
+   375→                            if (passkeyError != null) {
+   376→                                Spacer(modifier = Modifier.height(12.dp))
+   377→                                Card(
+   378→                                    colors = CardDefaults.cardColors(containerColor = ZixoErrorBackground),
+   379→                                    shape = RoundedCornerShape(12.dp)
+   380→                                ) {
+   381→                                    Column(modifier = Modifier.padding(12.dp)) {
+   382→                                        Row(verticalAlignment = Alignment.CenterVertically) {
+   383→                                            Icon(Icons.Filled.Error, null, tint = ZixoError, modifier = Modifier.size(18.dp))
+   384→                                            Spacer(modifier = Modifier.width(8.dp))
+   385→                                            Text("Passkey Error", color = ZixoError, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+   386→                                        }
+   387→                                        Spacer(modifier = Modifier.height(6.dp))
+   388→                                        Text(passkeyError ?: "", color = ZixoError.copy(alpha = 0.85f), fontSize = 11.sp, lineHeight = 15.sp)
+   389→                                    }
+   390→                                }
+   391→                            }
+   392→                        }
+   393→
+   394→                        Spacer(modifier = Modifier.height(12.dp))
+   395→                        Text(
+   396→                            "Passkeys use hardware-backed security and work across all your Android devices signed into the same Google Account.",
+   397→                            color = ZixoTextTertiary,
+   398→                            fontSize = 11.sp,
+   399→                            lineHeight = 15.sp
+   400→                        )
+   401→                    }
+   402→                }
+   403→
+   404→                Spacer(modifier = Modifier.height(16.dp))
+   405→
+   406→                // ── Security Notifications ──
+   407→                LiquidGlassCard {
+   408→                    Row(
+   409→                        modifier = Modifier.fillMaxWidth(),
+   410→                        horizontalArrangement = Arrangement.SpaceBetween,
+   411→                        verticalAlignment = Alignment.CenterVertically
+   412→                    ) {
+   413→                        Column(modifier = Modifier.weight(1f)) {
+   414→                            Text("Security Notifications", color = ZixoTextPrimary, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+   415→                            Spacer(modifier = Modifier.height(4.dp))
+   416→                            Text("Get notified if a contact's security code changes", color = ZixoTextTertiary, fontSize = 12.sp)
+   417→                        }
+   418→                        Switch(
+   419→                            checked = settings.isSecurityNotificationsEnabled,
+   420→                            onCheckedChange = { settingsViewModel.updateSecurityNotificationsEnabled(it) },
+   421→                            colors = SwitchDefaults.colors(
+   422→                                checkedTrackColor = ZixoAccent,
+   423→                                checkedThumbColor = Color.Black,
+   424→                                uncheckedTrackColor = ZixoSurface,
+   425→                                uncheckedThumbColor = ZixoTextSecondary
+   426→                            )
+   427→                        )
+   428→                    }
+   429→                }
+   430→
+   431→                Spacer(modifier = Modifier.height(16.dp))
+   432→
+   433→                // ── Two-Step Verification ──
+   434→                LiquidGlassCard {
+   435→                    Column {
+   436→                        Row(
+   437→                            modifier = Modifier.fillMaxWidth(),
+   438→                            horizontalArrangement = Arrangement.SpaceBetween,
+   439→                            verticalAlignment = Alignment.CenterVertically
+   440→                        ) {
+   441→                            Column(modifier = Modifier.weight(1f)) {
+   442→                                Row(verticalAlignment = Alignment.CenterVertically) {
+   443→                                    Icon(Icons.Filled.Lock, null, tint = ZixoAccent, modifier = Modifier.size(18.dp))
+   444→                                    Spacer(modifier = Modifier.width(8.dp))
+   445→                                    Text("Two-Step Verification", color = ZixoTextPrimary, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+   446→                                }
+   447→                                Spacer(modifier = Modifier.height(4.dp))
+   448→                                Text("Add a 6-digit PIN for extra security", color = ZixoTextTertiary, fontSize = 12.sp)
+   449→                            }
+   450→                            Switch(
+   451→                                checked = settings.isTwoStepEnabled,
+   452→                                onCheckedChange = { settingsViewModel.updateTwoStepEnabled(it) },
+   453→                                colors = SwitchDefaults.colors(
+   454→                                    checkedTrackColor = ZixoAccent,
+   455→                                    checkedThumbColor = Color.Black,
+   456→                                    uncheckedTrackColor = ZixoSurface,
+   457→                                    uncheckedThumbColor = ZixoTextSecondary
+   458→                                )
+   459→                            )
+   460→                        }
+   461→
+   462→                        if (settings.isTwoStepEnabled) {
+   463→                            Spacer(modifier = Modifier.height(12.dp))
+   464→                            var pin by remember { mutableStateOf("") }
+   465→                            var email by remember { mutableStateOf("") }
+   466→                            OutlinedTextField(
+   467→                                value = pin,
+   468→                                onValueChange = { if (it.length <= 6 && it.all { c -> c.isDigit() }) pin = it },
+   469→                                label = { Text("6-Digit PIN") },
+   470→                                modifier = Modifier.fillMaxWidth(),
+   471→                                colors = OutlinedTextFieldDefaults.colors(
+   472→                                    focusedBorderColor = ZixoAccent,
+   473→                                    unfocusedBorderColor = GlassBorder,
+   474→                                    cursorColor = ZixoAccent,
+   475→                                    focusedTextColor = ZixoTextPrimary,
+   476→                                    unfocusedTextColor = ZixoTextPrimary,
+   477→                                    focusedLabelColor = ZixoAccent,
+   478→                                    unfocusedLabelColor = ZixoTextSecondary
+   479→                                ),
+   480→                                shape = RoundedCornerShape(12.dp),
+   481→                                singleLine = true
+   482→                            )
+   483→                            Spacer(modifier = Modifier.height(8.dp))
+   484→                            OutlinedTextField(
+   485→                                value = email,
+   486→                                onValueChange = { email = it },
+   487→                                label = { Text("Backup Email") },
+   488→                                modifier = Modifier.fillMaxWidth(),
+   489→                                colors = OutlinedTextFieldDefaults.colors(
+   490→                                    focusedBorderColor = ZixoAccent,
+   491→                                    unfocusedBorderColor = GlassBorder,
+   492→                                    cursorColor = ZixoAccent,
+   493→                                    focusedTextColor = ZixoTextPrimary,
+   494→                                    unfocusedTextColor = ZixoTextPrimary,
+   495→                                    focusedLabelColor = ZixoAccent,
+   496→                                    unfocusedLabelColor = ZixoTextSecondary
+   497→                                ),
+   498→                                shape = RoundedCornerShape(12.dp),
+   499→                                singleLine = true
+   500→                            )
+   501→                        }
+   502→                    }
+   503→                }
+   504→
+   505→                Spacer(modifier = Modifier.height(16.dp))
+   506→
+   507→                // ── Request Account Info ──
+   508→                LiquidGlassCard {
+   509→                    Row(
+   510→                        modifier = Modifier
+   511→                            .fillMaxWidth()
+   512→                            .clickable { /* Trigger account info export */ }
+   513→                            .padding(vertical = 12.dp),
+   514→                        verticalAlignment = Alignment.CenterVertically
+   515→                    ) {
+   516→                        Icon(Icons.Filled.Description, null, tint = ZixoTextPrimary, modifier = Modifier.size(22.dp))
+   517→                        Spacer(modifier = Modifier.width(12.dp))
+   518→                        Column(modifier = Modifier.weight(1f)) {
+   519→                            Text("Request Account Info", color = ZixoTextPrimary, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+   520→                            Text("Get a report of your account data", color = ZixoTextTertiary, fontSize = 12.sp)
+   521→                        }
+   522→                        Icon(Icons.Filled.ChevronRight, null, tint = ZixoTextTertiary, modifier = Modifier.size(20.dp))
+   523→                    }
+   524→                }
+   525→
+   526→                Spacer(modifier = Modifier.height(24.dp))
+   527→
+   528→                // ── Delete Account ── Destructive section
+   529→                LiquidGlassCard {
+   530→                    Row(
+   531→                        modifier = Modifier
+   532→                            .fillMaxWidth()
+   533→                            .clickable { settingsViewModel.showDeleteConfirm() }
+   534→                            .padding(vertical = 12.dp),
+   535→                        verticalAlignment = Alignment.CenterVertically
+   536→                    ) {
+   537→                        Icon(Icons.Filled.DeleteForever, null, tint = ZixoError, modifier = Modifier.size(22.dp))
+   538→                        Spacer(modifier = Modifier.width(12.dp))
+   539→                        Column(modifier = Modifier.weight(1f)) {
+   540→                            Text("Delete My Account", color = ZixoError, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+   541→                            Text("Permanently delete your account and data", color = ZixoTextTertiary, fontSize = 12.sp)
+   542→                        }
+   543→                    }
+   544→                }
+   545→            }
+   546→        }
+   547→
+   548→        // ── Delete Confirmation Dialog ──
+   549→        if (showDeleteConfirm) {
+   550→            AlertDialog(
+   551→                onDismissRequest = { settingsViewModel.dismissDeleteConfirm() },
+   552→                title = { Text("Delete Account?", color = ZixoTextPrimary) },
+   553→                text = {
+   554→                    Text(
+   555→                        "This action is irreversible. All your data, messages, and profile will be permanently deleted. Are you absolutely sure?",
+   556→                        color = ZixoTextSecondary
+   557→                    )
+   558→                },
+   559→                confirmButton = {
+   560→                    TextButton(
+   561→                        onClick = {
+   562→                            settingsViewModel.dismissDeleteConfirm()
+   563→                            settingsViewModel.deleteAccount()
+   564→                        }
+   565→                    ) {
+   566→                        Text("DELETE", color = ZixoError, fontWeight = FontWeight.Bold)
+   567→                    }
+   568→                },
+   569→                dismissButton = {
+   570→                    TextButton(onClick = { settingsViewModel.dismissDeleteConfirm() }) {
+   571→                        Text("Cancel", color = ZixoTextSecondary)
+   572→                    }
+   573→                },
+   574→                containerColor = ZixoSurface,
+   575→                shape = RoundedCornerShape(20.dp)
+   576→            )
+   577→        }
+   578→    }
+   579→}
+   580→
+   581→/**
+   582→ * CLIENT-SIDE DEFENSIVE RP ID ENFORCEMENT
+   583→ *
+   584→ * This function acts as a final safety net before the challenge JSON
+   585→ * is passed to Android's CredentialManager. It ensures that:
+   586→ *
+   587→ * 1. The "rp.id" field is exactly "zixo.pages.dev"
+   588→ * 2. The "rp.name" field is "Zixo"
+   589→ * 3. The "user.id" field is properly Base64Url encoded
+   590→ * 4. The "challenge" field is properly Base64Url encoded
+   591→ *
+   592→ * This prevents the "rp id cannot be validated" error that occurs
+   593→ * when a backend returns an incorrect or malformed rp.id value.
+   594→ */
+   595→private fun enforceRpIdOnClient(challengeJson: String): String {
+   596→    return try {
+   597→        val json = JSONObject(challengeJson)
+   598→
+   599→        // ── Force rp.id compliance ──
+   600→        val rp = json.optJSONObject("rp") ?: JSONObject()
+   601→        rp.put("id", AuthRepositoryImpl.RP_ID)
+   602→        rp.put("name", AuthRepositoryImpl.RP_NAME)
+   603→        json.put("rp", rp)
+   604→
+   605→        // ── Ensure user.id is Base64Url encoded ──
+   606→        val user = json.optJSONObject("user")
+   607→        if (user != null) {
+   608→            val userId = user.optString("id", "")
+   609→            if (userId.isNotEmpty()) {
+   610→                // Check if it looks like a raw UUID/string (contains hyphens or isn't Base64Url)
+   611→                val isRawString = userId.contains("-") || !userId.all { it.isLetterOrDigit() || it == '_' || it == '-' }
+   612→                if (isRawString) {
+   613→                    val encoded = android.util.Base64.encodeToString(
+   614→                        userId.toByteArray(Charsets.UTF_8),
+   615→                        android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP
+   616→                    )
+   617→                    user.put("id", encoded)
+   618→                }
+   619→            }
+   620→        }
+   621→
+   622→        // ── Ensure challenge is Base64Url encoded ──
+   623→        val challenge = json.optString("challenge", "")
+   624→        if (challenge.isNotEmpty()) {
+   625→            val isNotBase64Url = challenge.contains("+") || challenge.contains("/") || challenge.contains("=")
+   626→            if (isNotBase64Url) {
+   627→                val encoded = challenge
+   628→                    .replace("+", "-")
+   629→                    .replace("/", "_")
+   630→                    .replace("=+$".toRegex(), "")
+   631→                json.put("challenge", encoded)
+   632→            }
+   633→        }
+   634→
+   635→        json.toString()
+   636→    } catch (e: Exception) {
+   637→        Log.e("Passkey", "Client-side RP ID enforcement failed, using original JSON", e)
+   638→        challengeJson
+   639→    }
+   640→}
+   641→

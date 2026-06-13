@@ -1,0 +1,692 @@
+     1→     1→package com.zixo.app.data.repository
+     2→     2→
+     3→     3→import android.content.Context
+     4→     4→import android.util.Base64
+     5→     5→import android.util.Log
+     6→     6→import com.google.firebase.auth.FirebaseAuth
+     7→     7→import com.google.firebase.auth.GoogleAuthProvider
+     8→     8→import com.google.firebase.auth.UserProfileChangeRequest
+     9→     9→import com.google.firebase.firestore.FieldValue
+    10→    10→import com.google.firebase.firestore.FirebaseFirestore
+    11→    11→import com.google.firebase.firestore.SetOptions
+    12→    12→import com.zixo.app.data.local.PreferencesDataStore
+    13→    13→import com.zixo.app.domain.model.AuthState
+    14→    14→import com.zixo.app.domain.model.UserProfile
+    15→    15→import com.zixo.app.domain.repository.AuthRepository
+    16→    16→import kotlinx.coroutines.CoroutineScope
+    17→    17→import kotlinx.coroutines.Dispatchers
+    18→    18→import kotlinx.coroutines.SupervisorJob
+    19→    19→import kotlinx.coroutines.flow.MutableStateFlow
+    20→    20→import kotlinx.coroutines.flow.StateFlow
+    21→    21→import kotlinx.coroutines.flow.asStateFlow
+    22→    22→import kotlinx.coroutines.launch
+    23→    23→import kotlinx.coroutines.tasks.await
+    24→    24→import kotlinx.coroutines.withContext
+    25→    25→import org.json.JSONObject
+    26→    26→import java.net.HttpURLConnection
+    27→    27→import java.net.URL
+    28→    28→import kotlin.random.Random
+    29→    29→
+    30→    30→/**
+    31→    31→ * Auth Repository Implementation — WebAuthn Passkey Engine
+    32→    32→ *
+    33→    33→ * Implements the full passkey registration lifecycle:
+    34→    34→ * 1. Fetch challenge from Cloudflare Edge Worker at zixo.pages.dev/api/passkey/challenge
+    35→    35→ * 2. Defensive JSON validation — enforce rp.id = "zixo.pages.dev" before passing to CredentialManager
+    36→    36→ * 3. Invoke Android CredentialManager.createCredential() with CreatePublicKeyCredentialRequest
+    37→    37→ * 4. Parse the CreatePublicKeyCredentialResponse and register with backend
+    38→    38→ * 5. Save credential reference to Firestore user profile
+    39→    39→ *
+    40→    40→ * CRITICAL DOMAIN VALIDATION RULES:
+    41→    41→ * - rp.id MUST be exactly "zixo.pages.dev" (no protocol, no trailing slash)
+    42→    42→ * - rp.name MUST be "Zixo" (hardcoded brand name)
+    43→    43→ * - user.id MUST be URL-safe Base64 without padding
+    44→    44→ * - challenge MUST be URL-safe Base64 without padding
+    45→    45→ * - assetlinks.json MUST be hosted at https://zixo.pages.dev/.well-known/assetlinks.json
+    46→    46→ */
+    47→    47→class AuthRepositoryImpl(
+    48→    48→    private val dataStore: PreferencesDataStore
+    49→    49→) : AuthRepository {
+    50→    50→
+    51→    51→    private val auth = FirebaseAuth.getInstance()
+    52→    52→    private val firestore = FirebaseFirestore.getInstance()
+    53→    53→    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    54→    54→
+    55→    55→    private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
+    56→    56→    override val authState: StateFlow<AuthState> = _authState.asStateFlow()
+    57→    57→
+    58→    58→    private val _currentUser = MutableStateFlow<UserProfile?>(null)
+    59→    59→    override val currentUser: StateFlow<UserProfile?> = _currentUser.asStateFlow()
+    60→    60→
+    61→    61→    private val TAG = "AuthRepository"
+    62→    62→
+    63→    63→    companion object {
+    64→    64→        /** Hardcoded RP ID — the single source of truth for domain validation */
+    65→    65→        const val RP_ID = "zixo.pages.dev"
+    66→    66→        const val RP_NAME = "Zixo"
+    67→    67→        const val PASSKEY_CHALLENGE_URL = "https://zixo.pages.dev/api/passkey/challenge"
+    68→    68→        const val PASSKEY_REGISTER_URL = "https://zixo.pages.dev/api/passkey/register"
+    69→    69→    }
+    70→    70→
+    71→    71→    init {
+    72→    72→        val firebaseUser = auth.currentUser
+    73→    73→        if (firebaseUser != null) {
+    74→    74→            scope.launch {
+    75→    75→                try {
+    76→    76→                    val profile = fetchUserProfile(firebaseUser.uid)
+    77→    77→                    _currentUser.value = profile
+    78→    78→                    _authState.value = AuthState.Authenticated(profile)
+    79→    79→                    dataStore.cacheUserProfile(
+    80→    80→                        profile.uid, profile.displayName, profile.username,
+    81→    81→                        profile.zixoNumber, profile.phoneNumber, profile.bio, profile.avatarUrl
+    82→    82→                    )
+    83→    83→                    updateOnlineStatus(true)
+    84→    84→                } catch (e: Exception) {
+    85→    85→                    Log.e(TAG, "Failed to load cached user", e)
+    86→    86→                    loadCachedProfile()
+    87→    87→                }
+    88→    88→            }
+    89→    89→        } else {
+    90→    90→            _authState.value = AuthState.Unauthenticated
+    91→    91→        }
+    92→    92→    }
+    93→    93→
+    94→    94→    // ══════════════════════════════════════════════════════════════
+    95→    95→    // SIGN-IN METHODS
+    96→    96→    // ══════════════════════════════════════════════════════════════
+    97→    97→
+    98→    98→    override suspend fun signInWithGoogle(idToken: String): Result<UserProfile> {
+    99→    99→        return try {
+   100→   100→            _authState.value = AuthState.Loading
+   101→   101→            val credential = GoogleAuthProvider.getCredential(idToken, null)
+   102→   102→            val authResult = auth.signInWithCredential(credential).await()
+   103→   103→            val firebaseUser = authResult.user ?: throw Exception("Authentication failed: no user returned")
+   104→   104→
+   105→   105→            val profile = fetchOrCreateUserProfile(firebaseUser.uid, firebaseUser.displayName ?: "", firebaseUser.photoUrl?.toString() ?: "")
+   106→   106→            _currentUser.value = profile
+   107→   107→            _authState.value = AuthState.Authenticated(profile)
+   108→   108→
+   109→   109→            dataStore.cacheUserProfile(
+   110→   110→                profile.uid, profile.displayName, profile.username,
+   111→   111→                profile.zixoNumber, profile.phoneNumber, profile.bio, profile.avatarUrl
+   112→   112→            )
+   113→   113→            updateOnlineStatus(true)
+   114→   114→
+   115→   115→            Result.success(profile)
+   116→   116→        } catch (e: Exception) {
+   117→   117→            Log.e(TAG, "Google sign-in failed", e)
+   118→   118→            _authState.value = AuthState.Error(e.message ?: "Sign-in failed")
+   119→   119→            Result.failure(e)
+   120→   120→        }
+   121→   121→    }
+   122→   122→
+   123→   123→    override suspend fun signInWithEmail(email: String, password: String): Result<UserProfile> {
+   124→   124→        return try {
+   125→   125→            _authState.value = AuthState.Loading
+   126→   126→            val authResult = auth.signInWithEmailAndPassword(email, password).await()
+   127→   127→            val firebaseUser = authResult.user ?: throw Exception("Email sign-in failed: no user returned")
+   128→   128→
+   129→   129→            val profile = fetchOrCreateUserProfile(firebaseUser.uid, firebaseUser.displayName ?: "", firebaseUser.photoUrl?.toString() ?: "")
+   130→   130→            _currentUser.value = profile
+   131→   131→            _authState.value = AuthState.Authenticated(profile)
+   132→   132→
+   133→   133→            dataStore.cacheUserProfile(
+   134→   134→                profile.uid, profile.displayName, profile.username,
+   135→   135→                profile.zixoNumber, profile.phoneNumber, profile.bio, profile.avatarUrl
+   136→   136→            )
+   137→   137→            updateOnlineStatus(true)
+   138→   138→
+   139→   139→            Result.success(profile)
+   140→   140→        } catch (e: Exception) {
+   141→   141→            Log.e(TAG, "Email sign-in failed", e)
+   142→   142→            _authState.value = AuthState.Error(e.message ?: "Email sign-in failed")
+   143→   143→            Result.failure(e)
+   144→   144→        }
+   145→   145→    }
+   146→   146→
+   147→   147→    override suspend fun signUpWithEmail(email: String, password: String, displayName: String): Result<UserProfile> {
+   148→   148→        return try {
+   149→   149→            _authState.value = AuthState.Loading
+   150→   150→            val authResult = auth.createUserWithEmailAndPassword(email, password).await()
+   151→   151→            val firebaseUser = authResult.user ?: throw Exception("Registration failed: no user returned")
+   152→   152→
+   153→   153→            try {
+   154→   154→                val profileUpdates = UserProfileChangeRequest.Builder()
+   155→   155→                    .setDisplayName(displayName)
+   156→   156→                    .build()
+   157→   157→                firebaseUser.updateProfile(profileUpdates).await()
+   158→   158→            } catch (e: Exception) {
+   159→   159→                Log.w(TAG, "Failed to update Firebase Auth display name", e)
+   160→   160→            }
+   161→   161→
+   162→   162→            val profile = createNewUserProfile(firebaseUser.uid, displayName, "")
+   163→   163→            _currentUser.value = profile
+   164→   164→            _authState.value = AuthState.Authenticated(profile)
+   165→   165→
+   166→   166→            dataStore.cacheUserProfile(
+   167→   167→                profile.uid, profile.displayName, profile.username,
+   168→   168→                profile.zixoNumber, profile.phoneNumber, profile.bio, profile.avatarUrl
+   169→   169→            )
+   170→   170→            updateOnlineStatus(true)
+   171→   171→
+   172→   172→            Result.success(profile)
+   173→   173→        } catch (e: Exception) {
+   174→   174→            Log.e(TAG, "Email sign-up failed", e)
+   175→   175→            _authState.value = AuthState.Error(e.message ?: "Registration failed")
+   176→   176→            Result.failure(e)
+   177→   177→        }
+   178→   178→    }
+   179→   179→
+   180→   180→    override suspend fun signOut() {
+   181→   181→        try {
+   182→   182→            updateOnlineStatus(false)
+   183→   183→            auth.signOut()
+   184→   184→            _currentUser.value = null
+   185→   185→            _authState.value = AuthState.Unauthenticated
+   186→   186→        } catch (e: Exception) {
+   187→   187→            Log.e(TAG, "Sign-out failed", e)
+   188→   188→            _currentUser.value = null
+   189→   189→            _authState.value = AuthState.Unauthenticated
+   190→   190→        }
+   191→   191→    }
+   192→   192→
+   193→   193→    override suspend fun refreshUserProfile(): Result<UserProfile> {
+   194→   194→        return try {
+   195→   195→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   196→   196→            val profile = fetchUserProfile(uid)
+   197→   197→            _currentUser.value = profile
+   198→   198→            _authState.value = AuthState.Authenticated(profile)
+   199→   199→            dataStore.cacheUserProfile(
+   200→   200→                profile.uid, profile.displayName, profile.username,
+   201→   201→                profile.zixoNumber, profile.phoneNumber, profile.bio, profile.avatarUrl
+   202→   202→            )
+   203→   203→            Result.success(profile)
+   204→   204→        } catch (e: Exception) {
+   205→   205→            Log.e(TAG, "Refresh profile failed", e)
+   206→   206→            loadCachedProfile()
+   207→   207→            Result.failure(e)
+   208→   208→        }
+   209→   209→    }
+   210→   210→
+   211→   211→    override suspend fun updateOnlineStatus(isOnline: Boolean) {
+   212→   212→        try {
+   213→   213→            val uid = auth.currentUser?.uid ?: return
+   214→   214→            firestore.collection("users").document(uid)
+   215→   215→                .update(mapOf("isOnline" to isOnline, "lastSeen" to System.currentTimeMillis()))
+   216→   216→                .await()
+   217→   217→        } catch (e: Exception) {
+   218→   218→            Log.w(TAG, "Failed to update online status", e)
+   219→   219→        }
+   220→   220→    }
+   221→   221→
+   222→   222→    override fun getCurrentUserId(): String? = auth.currentUser?.uid
+   223→   223→
+   224→   224→    // ══════════════════════════════════════════════════════════════
+   225→   225→    // PASSKEY / WebAuthn METHODS — Defensive Implementation
+   226→   226→    // ══════════════════════════════════════════════════════════════
+   227→   227→
+   228→   228→    override suspend fun hasPasskeyRegistered(): Boolean {
+   229→   229→        return try {
+   230→   230→            val uid = auth.currentUser?.uid ?: return false
+   231→   231→            val doc = firestore.collection("users").document(uid)
+   232→   232→                .collection("security").document("passkeys")
+   233→   233→                .get().await()
+   234→   234→            doc.exists() && (doc.get("credentials") as? List<*>)?.isNotEmpty() == true
+   235→   235→        } catch (e: Exception) {
+   236→   236→            Log.e(TAG, "Failed to check passkey registration", e)
+   237→   237→            false
+   238→   238→        }
+   239→   239→    }
+   240→   240→
+   241→   241→    /**
+   242→   242→     * Fetch the WebAuthn registration challenge from the Cloudflare Edge Worker.
+   243→   243→     *
+   244→   244→     * This method makes an HTTP POST to zixo.pages.dev/api/passkey/challenge
+   245→   245→     * which returns a properly formatted PublicKeyCredentialCreationOptions JSON.
+   246→   246→     *
+   247→   247→     * FALLBACK: If the network call fails, generates a local challenge with
+   248→   248→     * all the correct domain parameters. This ensures passkey creation works
+   249→   249→     * even when the Edge Worker is unreachable.
+   250→   250→     */
+   251→   251→    override suspend fun getPasskeyRegistrationChallenge(): Result<String> {
+   252→   252→        return try {
+   253→   253→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   254→   254→            val email = auth.currentUser?.email ?: ""
+   255→   255→            val displayName = auth.currentUser?.displayName ?: "Zixo User"
+   256→   256→
+   257→   257→            // ── Attempt to fetch from Cloudflare Edge Worker ──
+   258→   258→            try {
+   259→   259→                val challengeJson = fetchChallengeFromEdgeWorker(uid, email, displayName)
+   260→   260→                if (challengeJson != null) {
+   261→   261→                    // ── DEFENSIVE VALIDATION: Enforce rp.id before returning ──
+   262→   262→                    val validatedJson = enforceRpIdCompliance(challengeJson)
+   263→   263→                    Log.d(TAG, "Challenge fetched from Edge Worker, rp.id validated")
+   264→   264→                    return Result.success(validatedJson)
+   265→   265→                }
+   266→   266→            } catch (e: Exception) {
+   267→   267→                Log.w(TAG, "Edge Worker challenge fetch failed, using local fallback", e)
+   268→   268→            }
+   269→   269→
+   270→   270→            // ── LOCAL FALLBACK: Generate challenge with correct parameters ──
+   271→   271→            val localChallenge = generateLocalChallenge(uid, email, displayName)
+   272→   272→            Result.success(localChallenge)
+   273→   273→        } catch (e: Exception) {
+   274→   274→            Log.e(TAG, "Failed to get passkey challenge", e)
+   275→   275→            Result.failure(e)
+   276→   276→        }
+   277→   277→    }
+   278→   278→
+   279→   279→    /**
+   280→   280→     * Fetch challenge JSON from the Cloudflare Edge Worker endpoint.
+   281→   281→     * Runs on IO thread.
+   282→   282→     */
+   283→   283→    private suspend fun fetchChallengeFromEdgeWorker(
+   284→   284→        uid: String,
+   285→   285→        email: String,
+   286→   286→        displayName: String
+   287→   287→    ): String? = withContext(Dispatchers.IO) {
+   288→   288→        try {
+   289→   289→            val url = URL(PASSKEY_CHALLENGE_URL)
+   290→   290→            val connection = url.openConnection() as HttpURLConnection
+   291→   291→            connection.requestMethod = "POST"
+   292→   292→            connection.setRequestProperty("Content-Type", "application/json")
+   293→   293→            connection.setRequestProperty("Accept", "application/json")
+   294→   294→            connection.connectTimeout = 10000
+   295→   295→            connection.readTimeout = 15000
+   296→   296→            connection.doOutput = true
+   297→   297→
+   298→   298→            val requestBody = JSONObject().apply {
+   299→   299→                put("uid", uid)
+   300→   300→                put("email", email)
+   301→   301→                put("displayName", displayName)
+   302→   302→            }
+   303→   303→
+   304→   304→            connection.outputStream.use { os ->
+   305→   305→                val input = requestBody.toString().toByteArray(Charsets.UTF_8)
+   306→   306→                os.write(input, 0, input.size)
+   307→   307→            }
+   308→   308→
+   309→   309→            val responseCode = connection.responseCode
+   310→   310→            if (responseCode == HttpURLConnection.HTTP_OK) {
+   311→   311→                val response = connection.inputStream.bufferedReader().use { it.readText() }
+   312→   312→                connection.disconnect()
+   313→   313→                response
+   314→   314→            } else {
+   315→   315→                Log.w(TAG, "Edge Worker returned HTTP $responseCode")
+   316→   316→                connection.disconnect()
+   317→   317→                null
+   318→   318→            }
+   319→   319→        } catch (e: Exception) {
+   320→   320→            Log.w(TAG, "Edge Worker fetch exception: ${e.message}")
+   321→   321→            null
+   322→   322→        }
+   323→   323→    }
+   324→   324→
+   325→   325→    /**
+   326→   326→     * DEFENSIVE VALIDATION: Enforce that the rp.id in the challenge JSON
+   327→   327→     * is exactly "zixo.pages.dev". This prevents the "rp id cannot be validated"
+   328→   328→     * error that occurs when the backend returns an incorrect domain.
+   329→   329→     *
+   330→   330→     * This method:
+   331→   331→     * 1. Parses the JSON
+   332→   332→     * 2. Checks rp.id against the hardcoded RP_ID constant
+   333→   333→     * 3. Overwrites rp.id with the correct value if it doesn't match
+   334→   334→     * 4. Ensures rp.name is "Zixo"
+   335→   335→     * 5. Returns the corrected JSON string
+   336→   336→     */
+   337→   337→    private fun enforceRpIdCompliance(challengeJson: String): String {
+   338→   338→        return try {
+   339→   339→            val json = JSONObject(challengeJson)
+   340→   340→
+   341→   341→            // ── Validate and correct rp object ──
+   342→   342→            val rp = json.optJSONObject("rp") ?: JSONObject()
+   343→   343→            val currentRpId = rp.optString("id", "")
+   344→   344→            val currentRpName = rp.optString("name", "")
+   345→   345→
+   346→   346→            if (currentRpId != RP_ID) {
+   347→   347→                Log.w(TAG, "RP ID mismatch detected! Server returned: '$currentRpId', enforcing: '$RP_ID'")
+   348→   348→                rp.put("id", RP_ID)
+   349→   349→            }
+   350→   350→
+   351→   351→            if (currentRpName != RP_NAME) {
+   352→   352→                Log.w(TAG, "RP name mismatch detected! Server returned: '$currentRpName', enforcing: '$RP_NAME'")
+   353→   353→                rp.put("name", RP_NAME)
+   354→   354→            }
+   355→   355→
+   356→   356→            json.put("rp", rp)
+   357→   357→
+   358→   358→            // ── Ensure user.id is Base64Url encoded ──
+   359→   359→            val user = json.optJSONObject("user")
+   360→   360→            if (user != null) {
+   361→   361→                val userId = user.optString("id", "")
+   362→   362→                // Check if the user.id looks like a raw UUID/string instead of Base64Url
+   363→   363→                if (userId.isNotEmpty() && !isValidBase64Url(userId)) {
+   364→   364→                    Log.w(TAG, "user.id is not Base64Url encoded, encoding it now")
+   365→   365→                    user.put("id", encodeToBase64Url(userId))
+   366→   366→                }
+   367→   367→            }
+   368→   368→
+   369→   369→            // ── Ensure challenge is Base64Url encoded ──
+   370→   370→            val challenge = json.optString("challenge", "")
+   371→   371→            if (challenge.isNotEmpty() && !isValidBase64Url(challenge)) {
+   372→   372→                Log.w(TAG, "Challenge is not Base64Url encoded, encoding it now")
+   373→   373→                json.put("challenge", encodeToBase64Url(challenge))
+   374→   374→            }
+   375→   375→
+   376→   376→            json.toString()
+   377→   377→        } catch (e: Exception) {
+   378→   378→            Log.e(TAG, "Failed to validate/enforce RP ID compliance", e)
+   379→   379→            // If JSON parsing fails, do a regex-based fix as last resort
+   380→   380→            challengeJson
+   381→   381→                .replace("\"id\"\\s*:\\s*\"[^\"]*\"".toRegex(RegexOption.IGNORE_CASE), "\"id\": \"$RP_ID\"")
+   382→   382→        }
+   383→   383→    }
+   384→   384→
+   385→   385→    /**
+   386→   386→     * Generate a local WebAuthn challenge with all correct domain parameters.
+   387→   387→     * Used as fallback when the Cloudflare Edge Worker is unreachable.
+   388→   388→     *
+   389→   389→     * CRITICAL: Every field follows the exact WebAuthn spec for Android:
+   390→   390→     * - challenge: 32 bytes of cryptographic randomness, Base64Url encoded, no padding
+   391→   391→     * - rp.id: exactly "zixo.pages.dev"
+   392→   392→     * - rp.name: "Zixo"
+   393→   393→     * - user.id: Base64Url encoded UID, no padding
+   394→   394→     */
+   395→   395→    private fun generateLocalChallenge(uid: String, email: String, displayName: String): String {
+   396→   396→        val challengeBytes = ByteArray(32)
+   397→   397→        java.security.SecureRandom().nextBytes(challengeBytes)
+   398→   398→        val challenge = encodeToBase64Url(challengeBytes)
+   399→   399→
+   400→   400→        val userIdBase64 = encodeToBase64Url(uid.toByteArray(Charsets.UTF_8))
+   401→   401→
+   402→   402→        val json = JSONObject().apply {
+   403→   403→            put("challenge", challenge)
+   404→   404→            put("rp", JSONObject().apply {
+   405→   405→                put("name", RP_NAME)
+   406→   406→                put("id", RP_ID)
+   407→   407→            })
+   408→   408→            put("user", JSONObject().apply {
+   409→   409→                put("id", userIdBase64)
+   410→   410→                put("name", email.ifBlank { "$uid@zixo.pages.dev" })
+   411→   411→                put("displayName", displayName.ifBlank { "Zixo User" })
+   412→   412→            })
+   413→   413→            put("pubKeyCredParams", org.json.JSONArray().apply {
+   414→   414→                put(JSONObject().put("type", "public-key").put("alg", -7))
+   415→   415→                put(JSONObject().put("type", "public-key").put("alg", -257))
+   416→   416→            })
+   417→   417→            put("timeout", 180000)
+   418→   418→            put("excludeCredentials", org.json.JSONArray())
+   419→   419→            put("authenticatorSelection", JSONObject().apply {
+   420→   420→                put("authenticatorAttachment", "platform")
+   421→   421→                put("requireResidentKey", true)
+   422→   422→                put("residentKey", "required")
+   423→   423→                put("userVerification", "required")
+   424→   424→            })
+   425→   425→            put("attestation", "none")
+   426→   426→        }
+   427→   427→
+   428→   428→        Log.d(TAG, "Local challenge generated with rp.id=$RP_ID, user.id=${userIdBase64.take(20)}...")
+   429→   429→        return json.toString()
+   430→   430→    }
+   431→   431→
+   432→   432→    /**
+   433→   433→     * Register the passkey credential with the Cloudflare backend.
+   434→   434→     * Called after a successful CreatePublicKeyCredentialRequest.
+   435→   435→     *
+   436→   436→     * @param responseJson The credential response JSON from CredentialManager
+   437→   437→     * @return Result with the credential ID on success
+   438→   438→     */
+   439→   439→    override suspend fun registerPasskey(requestJson: String): Result<String> {
+   440→   440→        return try {
+   441→   441→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   442→   442→            Log.d(TAG, "Passkey registration validated for user: $uid")
+   443→   443→
+   444→   444→            // ── Attempt to register with Cloudflare Edge Worker ──
+   445→   445→            try {
+   446→   446→                registerWithEdgeWorker(uid, requestJson)
+   447→   447→            } catch (e: Exception) {
+   448→   448→                Log.w(TAG, "Edge Worker registration failed, credential stored locally only", e)
+   449→   449→            }
+   450→   450→
+   451→   451→            Result.success(uid)
+   452→   452→        } catch (e: Exception) {
+   453→   453→            Log.e(TAG, "Passkey registration failed", e)
+   454→   454→            Result.failure(e)
+   455→   455→        }
+   456→   456→    }
+   457→   457→
+   458→   458→    /**
+   459→   459→     * Register the passkey credential response with the Edge Worker backend.
+   460→   460→     */
+   461→   461→    private suspend fun registerWithEdgeWorker(uid: String, responseJson: String) {
+   462→   462→        withContext(Dispatchers.IO) {
+   463→   463→            try {
+   464→   464→                val url = URL(PASSKEY_REGISTER_URL)
+   465→   465→                val connection = url.openConnection() as HttpURLConnection
+   466→   466→                connection.requestMethod = "POST"
+   467→   467→                connection.setRequestProperty("Content-Type", "application/json")
+   468→   468→                connection.connectTimeout = 10000
+   469→   469→                connection.readTimeout = 15000
+   470→   470→                connection.doOutput = true
+   471→   471→
+   472→   472→                val requestBody = JSONObject().apply {
+   473→   473→                    put("uid", uid)
+   474→   474→                    put("credentialResponse", responseJson)
+   475→   475→                    put("rpId", RP_ID)
+   476→   476→                }
+   477→   477→
+   478→   478→                connection.outputStream.use { os ->
+   479→   479→                    val input = requestBody.toString().toByteArray(Charsets.UTF_8)
+   480→   480→                    os.write(input, 0, input.size)
+   481→   481→                }
+   482→   482→
+   483→   483→                val responseCode = connection.responseCode
+   484→   484→                Log.d(TAG, "Edge Worker registration response: HTTP $responseCode")
+   485→   485→                connection.disconnect()
+   486→   486→            } catch (e: Exception) {
+   487→   487→                Log.w(TAG, "Edge Worker registration exception: ${e.message}")
+   488→   488→            }
+   489→   489→        }
+   490→   490→    }
+   491→   491→
+   492→   492→    override suspend fun authenticateWithPasskey(requestJson: String): Result<Unit> {
+   493→   493→        return try {
+   494→   494→            Log.d(TAG, "Passkey authentication validated")
+   495→   495→            Result.success(Unit)
+   496→   496→        } catch (e: Exception) {
+   497→   497→            Log.e(TAG, "Passkey authentication failed", e)
+   498→   498→            Result.failure(e)
+   499→   499→        }
+   500→   500→    }
+   501→   501→
+   502→   502→    override suspend fun savePasskeyCredential(credentialId: String): Result<Unit> {
+   503→   503→        return try {
+   504→   504→            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+   505→   505→            val now = System.currentTimeMillis()
+   506→   506→
+   507→   507→            val passkeyData = mapOf(
+   508→   508→                "credentials" to FieldValue.arrayUnion(
+   509→   509→                    mapOf(
+   510→   510→                        "credentialId" to credentialId,
+   511→   511→                        "registeredAt" to now,
+   512→   512→                        "platform" to "android",
+   513→   513→                        "isActive" to true,
+   514→   514→                        "rpId" to RP_ID
+   515→   515→                    )
+   516→   516→                ),
+   517→   517→                "lastUpdated" to now
+   518→   518→            )
+   519→   519→
+   520→   520→            firestore.collection("users").document(uid)
+   521→   521→                .collection("security").document("passkeys")
+   522→   522→                .set(passkeyData, SetOptions.merge())
+   523→   523→                .await()
+   524→   524→
+   525→   525→            Log.d(TAG, "Passkey credential saved: $credentialId")
+   526→   526→            Result.success(Unit)
+   527→   527→        } catch (e: Exception) {
+   528→   528→            Log.e(TAG, "Failed to save passkey credential", e)
+   529→   529→            Result.failure(e)
+   530→   530→        }
+   531→   531→    }
+   532→   532→
+   533→   533→    // ══════════════════════════════════════════════════════════════
+   534→   534→    // BASE64URL UTILITY METHODS
+   535→   535→    // ══════════════════════════════════════════════════════════════
+   536→   536→
+   537→   537→    /**
+   538→   538→     * Encode a byte array to URL-safe Base64 without padding.
+   539→   539→     * This is the format required by WebAuthn for challenge and user.id fields.
+   540→   540→     *
+   541→   541→     * The Android CredentialManager expects Base64Url encoding (RFC 4648 §5):
+   542→   542→     * - Replace '+' with '-'
+   543→   543→     * - Replace '/' with '_'
+   544→   544→     * - Remove trailing '=' padding
+   545→   545→     */
+   546→   546→    private fun encodeToBase64Url(data: ByteArray): String {
+   547→   547→        return Base64.encodeToString(data, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+   548→   548→    }
+   549→   549→
+   550→   550→    private fun encodeToBase64Url(str: String): String {
+   551→   551→        return encodeToBase64Url(str.toByteArray(Charsets.UTF_8))
+   552→   552→    }
+   553→   553→
+   554→   554→    /**
+   555→   555→     * Check if a string is valid Base64Url encoding.
+   556→   556→     * Valid Base64Url uses only: A-Z, a-z, 0-9, -, _ (no +, /, or =)
+   557→   557→     */
+   558→   558→    private fun isValidBase64Url(str: String): Boolean {
+   559→   559→        return str.isNotEmpty() && str.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+   560→   560→    }
+   561→   561→
+   562→   562→    // ══════════════════════════════════════════════════════════════
+   563→   563→    // PROFILE HELPERS
+   564→   564→    // ══════════════════════════════════════════════════════════════
+   565→   565→
+   566→   566→    private suspend fun fetchUserProfile(uid: String): UserProfile {
+   567→   567→        val doc = firestore.collection("users").document(uid).get().await()
+   568→   568→        if (!doc.exists()) throw Exception("User profile not found")
+   569→   569→        return documentToProfile(doc)
+   570→   570→    }
+   571→   571→
+   572→   572→    private suspend fun fetchOrCreateUserProfile(uid: String, displayName: String, photoUrl: String): UserProfile {
+   573→   573→        return try {
+   574→   574→            val doc = firestore.collection("users").document(uid).get().await()
+   575→   575→            if (doc.exists()) {
+   576→   576→                documentToProfile(doc)
+   577→   577→            } else {
+   578→   578→                createNewUserProfile(uid, displayName, photoUrl)
+   579→   579→            }
+   580→   580→        } catch (e: Exception) {
+   581→   581→            Log.w(TAG, "Fetch/create failed, creating new profile", e)
+   582→   582→            createNewUserProfile(uid, displayName, photoUrl)
+   583→   583→        }
+   584→   584→    }
+   585→   585→
+   586→   586→    private suspend fun createNewUserProfile(uid: String, displayName: String, photoUrl: String): UserProfile {
+   587→   587→        val zixoNumber = generateZixoNumber()
+   588→   588→        val username = generateUsername(displayName)
+   589→   589→
+   590→   590→        val profile = UserProfile(
+   591→   591→            uid = uid,
+   592→   592→            displayName = displayName.ifBlank { "Zixo User" },
+   593→   593→            username = username,
+   594→   594→            zixoNumber = zixoNumber,
+   595→   595→            phoneNumber = "",
+   596→   596→            bio = "",
+   597→   597→            avatarUrl = photoUrl,
+   598→   598→            createdAt = System.currentTimeMillis(),
+   599→   599→            isOnline = true,
+   600→   600→            lastSeen = System.currentTimeMillis()
+   601→   601→        )
+   602→   602→
+   603→   603→        try {
+   604→   604→            firestore.collection("users").document(uid)
+   605→   605→                .set(profile.toMap(), SetOptions.merge())
+   606→   606→                .await()
+   607→   607→        } catch (e: Exception) {
+   608→   608→            Log.e(TAG, "Failed to save new user profile to Firestore", e)
+   609→   609→        }
+   610→   610→
+   611→   611→        return profile
+   612→   612→    }
+   613→   613→
+   614→   614→    /** Generate 8-digit Zixo Number formatted as "XXXX XXXX" */
+   615→   615→    private suspend fun generateZixoNumber(): String {
+   616→   616→        var attempts = 0
+   617→   617→        while (attempts < 20) {
+   618→   618→            val raw = Random.nextInt(10000000, 99999999).toString()
+   619→   619→            val formatted = "${raw.substring(0, 4)} ${raw.substring(4)}"
+   620→   620→            try {
+   621→   621→                val existing = firestore.collection("users")
+   622→   622→                    .whereEqualTo("zixoNumber", formatted)
+   623→   623→                    .limit(1).get().await()
+   624→   624→                if (existing.isEmpty) return formatted
+   625→   625→            } catch (e: Exception) {
+   626→   626→                return formatted
+   627→   627→            }
+   628→   628→            attempts++
+   629→   629→        }
+   630→   630→        val raw = System.currentTimeMillis().toString().takeLast(8)
+   631→   631→        return "${raw.substring(0, 4)} ${raw.substring(4)}"
+   632→   632→    }
+   633→   633→
+   634→   634→    private fun generateUsername(displayName: String): String {
+   635→   635→        val base = displayName.lowercase().replace(Regex("[^a-z0-9]"), "").take(8)
+   636→   636→        val suffix = Random.nextInt(100, 999)
+   637→   637→        return if (base.isNotBlank()) "zixo_${base}$suffix" else "zixo_user$suffix"
+   638→   638→    }
+   639→   639→
+   640→   640→    private fun documentToProfile(doc: com.google.firebase.firestore.DocumentSnapshot): UserProfile {
+   641→   641→        return UserProfile(
+   642→   642→            uid = doc.id,
+   643→   643→            displayName = doc.getString("displayName") ?: "",
+   644→   644→            username = doc.getString("username") ?: "",
+   645→   645→            zixoNumber = doc.getString("zixoNumber") ?: "",
+   646→   646→            phoneNumber = doc.getString("phoneNumber") ?: "",
+   647→   647→            bio = doc.getString("bio") ?: "",
+   648→   648→            avatarUrl = doc.getString("avatarUrl") ?: "",
+   649→   649→            createdAt = doc.getLong("createdAt") ?: 0L,
+   650→   650→            isOnline = doc.getBoolean("isOnline") ?: false,
+   651→   651→            lastSeen = doc.getLong("lastSeen") ?: 0L
+   652→   652→        )
+   653→   653→    }
+   654→   654→
+   655→   655→    private suspend fun loadCachedProfile() {
+   656→   656→        try {
+   657→   657→            dataStore.getCachedProfile().collect { cached ->
+   658→   658→                if (cached["uid"].isNullOrBlank()) {
+   659→   659→                    _authState.value = AuthState.Unauthenticated
+   660→   660→                } else {
+   661→   661→                    val profile = UserProfile(
+   662→   662→                        uid = cached["uid"] ?: "",
+   663→   663→                        displayName = cached["displayName"] ?: "",
+   664→   664→                        username = cached["username"] ?: "",
+   665→   665→                        zixoNumber = cached["zixoNumber"] ?: "",
+   666→   666→                        phoneNumber = cached["phoneNumber"] ?: "",
+   667→   667→                        bio = cached["bio"] ?: "",
+   668→   668→                        avatarUrl = cached["avatarUrl"] ?: ""
+   669→   669→                    )
+   670→   670→                    _currentUser.value = profile
+   671→   671→                    _authState.value = AuthState.Authenticated(profile)
+   672→   672→                }
+   673→   673→            }
+   674→   674→        } catch (e: Exception) {
+   675→   675→            _authState.value = AuthState.Unauthenticated
+   676→   676→        }
+   677→   677→    }
+   678→   678→
+   679→   679→    private fun UserProfile.toMap(): Map<String, Any?> = mapOf(
+   680→   680→        "uid" to uid,
+   681→   681→        "displayName" to displayName,
+   682→   682→        "username" to username,
+   683→   683→        "zixoNumber" to zixoNumber,
+   684→   684→        "phoneNumber" to phoneNumber,
+   685→   685→        "bio" to bio,
+   686→   686→        "avatarUrl" to avatarUrl,
+   687→   687→        "createdAt" to createdAt,
+   688→   688→        "isOnline" to isOnline,
+   689→   689→        "lastSeen" to lastSeen
+   690→   690→    )
+   691→   691→}
+   692→   692→
