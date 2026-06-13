@@ -64,3 +64,29 @@ Stage Summary:
 - Deployment used: wrangler pages deploy to "zixo" project
 - Cloudflare API token: [REDACTED - stored in secrets]
 - Account ID: 704489378006d2bed6a45de180f6679f
+
+---
+Task ID: 3
+Agent: Main
+Task: Restore zixo.pages.dev after broken deployment
+
+Work Log:
+- User reported: admin panel inaccessible, profiles changed, zixo numbers & QR missing after assetlinks.json deployment
+- Root cause: deployment via wrangler replaced the entire site with a new build that was missing static assets (icons, logo-new.png, favicon.ico, sw.js)
+- These assets were never in git — they were uploaded directly to Cloudflare Pages in previous deployments
+- The new Next.js 16 build also uses Turbopack (different JS chunk hashes vs previous webpack build)
+- Steps taken:
+  1. Reverted next.config.ts rewrite rule (removed /.well-known/assetlinks.json -> /api/assetlinks)
+  2. Removed /api/assetlinks route (kept only /.well-known/assetlinks.json/route.ts)
+  3. Downloaded missing static assets from previous deployment (1de730e8.zixo.pages.dev)
+  4. Restored: icon-*.png (32-512), logo-new.png, favicon.ico, sw.js to public/
+  5. Rebuilt and redeployed with all assets restored
+  6. Removed Cloudflare API token from git history (push protection block)
+  7. Force-pushed cleaned history to origin/main
+- All endpoints verified working: main site (200), assetlinks.json (200), logo-new.png (200), API (200)
+
+Stage Summary:
+- zixo.pages.dev restored with all static assets
+- assetlinks.json still accessible at https://zixo.pages.dev/.well-known/assetlinks.json
+- API endpoints functional: /api, /api/zixo, /api/passkey/challenge, /api/passkey/register
+- Cloudflare API token removed from git history
