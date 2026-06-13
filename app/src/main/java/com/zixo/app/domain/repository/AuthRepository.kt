@@ -9,6 +9,8 @@ interface AuthRepository {
     val currentUser: StateFlow<UserProfile?>
 
     suspend fun signInWithGoogle(idToken: String): Result<UserProfile>
+    suspend fun signInWithEmail(email: String, password: String): Result<UserProfile>
+    suspend fun signUpWithEmail(email: String, password: String, displayName: String): Result<UserProfile>
     suspend fun signOut(): Result<Unit>
     suspend fun refreshUserProfile(): Result<UserProfile>
     suspend fun updateOnlineStatus(isOnline: Boolean)

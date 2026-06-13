@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,7 +30,8 @@ import com.zixo.app.ui.theme.*
 @Composable
 fun LoginScreen(
     authViewModel: AuthViewModel,
-    onAuthComplete: () -> Unit
+    onAuthComplete: () -> Unit,
+    onEmailSignIn: () -> Unit
 ) {
     val authState by authViewModel.authState.collectAsState()
     val isLoading by authViewModel.isLoading.collectAsState()
@@ -206,6 +208,66 @@ fun LoginScreen(
                 }
                 Text(
                     text = if (isLoading) "Signing in..." else "Continue with Google",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Divider with "OR"
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = GlassBorder,
+                    thickness = 1.dp
+                )
+                Text(
+                    text = "OR",
+                    color = ZixoTextTertiary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = GlassBorder,
+                    thickness = 1.dp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Sign in with Email Button
+            OutlinedButton(
+                onClick = {
+                    if (!isLoading) {
+                        authViewModel.clearError()
+                        onEmailSignIn()
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = ZixoAccent
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, ZixoAccent),
+                enabled = !isLoading
+            ) {
+                Icon(
+                    Icons.Filled.Email,
+                    contentDescription = "Email",
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Sign in with Email",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )

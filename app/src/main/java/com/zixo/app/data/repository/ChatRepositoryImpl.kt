@@ -363,14 +363,16 @@ class ChatRepositoryImpl : ChatRepository {
 
     private fun startCallsListener() {
         val uid = auth.currentUser?.uid ?: return
-        // Use single-field query to avoid composite index requirement
-        // Query by timestamp and filter by callerId/receiverId in memory
+
+        // Strategy: Try whereArrayContains("participants") first (requires participants array field).
+        // If that fails (e.g. old documents missing the field, or index not ready),
+        // fall back to a simple unordered query and filter in memory.
         callsListener = firestore.collection("calls")
             .whereArrayContains("participants", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.w(TAG, "Calls listener error", error)
-                    // Fallback: try simple query
+                    Log.w(TAG, "Calls listener error with participants query, trying fallback", error)
+                    // Fallback to simple query without composite index
                     startCallsListenerFallback(uid)
                     return@addSnapshotListener
                 }
@@ -388,30 +390,82 @@ class ChatRepositoryImpl : ChatRepository {
             }
     }
 
-    /** Fallback calls listener using simpler query */
+    /**
+     * Fallback calls listener — uses a simple unordered query by callerId
+     * and filters by both callerId and receiverId in memory.
+     * This avoids ANY composite index requirement.
+     */
     private fun startCallsListenerFallback(uid: String) {
         callsListener?.remove()
+
+        // Try querying by callerId (single field, no composite index needed)
         callsListener = firestore.collection("calls")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .whereEqualTo("callerId", uid)
             .limit(50)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Calls fallback listener error", error)
-                    _callHistory.value = emptyList()
+                    // Last resort: try receiverId query
+                    startCallsListenerLastResort(uid)
                     return@addSnapshotListener
                 }
                 if (snapshot == null) return@addSnapshotListener
 
                 try {
-                    val calls = snapshot.documents.mapNotNull { doc ->
+                    val callsAsCaller = snapshot.documents.mapNotNull { doc ->
                         try { documentToCallRecord(doc) } catch (_: Exception) { null }
-                    }.filter { it.callerId == uid || it.receiverId == uid }
-                    _callHistory.value = calls
+                    }
+
+                    // Also get calls where user is receiver
+                    firestore.collection("calls")
+                        .whereEqualTo("receiverId", uid)
+                        .limit(50)
+                        .get()
+                        .addOnSuccessListener { receiverSnapshot ->
+                            val callsAsReceiver = receiverSnapshot.documents.mapNotNull { doc ->
+                                try { documentToCallRecord(doc) } catch (_: Exception) { null }
+                            }
+                            val allCalls = (callsAsCaller + callsAsReceiver)
+                                .distinctBy { it.id }
+                                .sortedByDescending { it.timestamp }
+                            _callHistory.value = allCalls
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(TAG, "Failed to fetch receiver calls", e)
+                            _callHistory.value = callsAsCaller.sortedByDescending { it.timestamp }
+                        }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to process calls fallback snapshot", e)
                     _callHistory.value = emptyList()
                 }
             }
+    }
+
+    /**
+     * Last resort — fetch all recent calls and filter in memory.
+     * This only uses the __name__ auto-index and requires no composite index.
+     */
+    private fun startCallsListenerLastResort(uid: String) {
+        callsListener?.remove()
+
+        scope.launch {
+            try {
+                val snapshot = firestore.collection("calls")
+                    .limit(100)
+                    .get()
+                    .await()
+
+                val calls = snapshot.documents.mapNotNull { doc ->
+                    try { documentToCallRecord(doc) } catch (_: Exception) { null }
+                }.filter { it.callerId == uid || it.receiverId == uid }
+                    .sortedByDescending { it.timestamp }
+
+                _callHistory.value = calls
+            } catch (e: Exception) {
+                Log.e(TAG, "Last resort calls fetch failed", e)
+                _callHistory.value = emptyList()
+            }
+        }
     }
 
     // ── Document Mappers ──

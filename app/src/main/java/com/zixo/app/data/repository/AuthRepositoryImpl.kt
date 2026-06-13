@@ -3,6 +3,7 @@ package com.zixo.app.data.repository
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.zixo.app.data.local.PreferencesDataStore
@@ -80,6 +81,64 @@ class AuthRepositoryImpl(
         } catch (e: Exception) {
             Log.e(TAG, "Google sign-in failed", e)
             _authState.value = AuthState.Error(e.message ?: "Sign-in failed")
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun signInWithEmail(email: String, password: String): Result<UserProfile> {
+        return try {
+            _authState.value = AuthState.Loading
+            val authResult = auth.signInWithEmailAndPassword(email, password).await()
+            val firebaseUser = authResult.user ?: throw Exception("Email sign-in failed: no user returned")
+
+            val profile = fetchOrCreateUserProfile(firebaseUser.uid, firebaseUser.displayName ?: "", firebaseUser.photoUrl?.toString() ?: "")
+            _currentUser.value = profile
+            _authState.value = AuthState.Authenticated(profile)
+
+            dataStore.cacheUserProfile(
+                profile.uid, profile.displayName, profile.username,
+                profile.zixoNumber, profile.phoneNumber, profile.bio, profile.avatarUrl
+            )
+            updateOnlineStatus(true)
+
+            Result.success(profile)
+        } catch (e: Exception) {
+            Log.e(TAG, "Email sign-in failed", e)
+            _authState.value = AuthState.Error(e.message ?: "Email sign-in failed")
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun signUpWithEmail(email: String, password: String, displayName: String): Result<UserProfile> {
+        return try {
+            _authState.value = AuthState.Loading
+            val authResult = auth.createUserWithEmailAndPassword(email, password).await()
+            val firebaseUser = authResult.user ?: throw Exception("Registration failed: no user returned")
+
+            // Update display name in Firebase Auth profile
+            try {
+                val profileUpdates = UserProfileChangeRequest.Builder()
+                    .setDisplayName(displayName)
+                    .build()
+                firebaseUser.updateProfile(profileUpdates).await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to update Firebase Auth display name", e)
+            }
+
+            val profile = createNewUserProfile(firebaseUser.uid, displayName, "")
+            _currentUser.value = profile
+            _authState.value = AuthState.Authenticated(profile)
+
+            dataStore.cacheUserProfile(
+                profile.uid, profile.displayName, profile.username,
+                profile.zixoNumber, profile.phoneNumber, profile.bio, profile.avatarUrl
+            )
+            updateOnlineStatus(true)
+
+            Result.success(profile)
+        } catch (e: Exception) {
+            Log.e(TAG, "Email sign-up failed", e)
+            _authState.value = AuthState.Error(e.message ?: "Registration failed")
             Result.failure(e)
         }
     }

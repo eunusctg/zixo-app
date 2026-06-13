@@ -9,7 +9,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -22,7 +21,9 @@ import com.zixo.app.data.repository.SettingsRepositoryImpl
 import com.zixo.app.data.repository.StatusRepositoryImpl
 import com.zixo.app.domain.model.AuthState
 import com.zixo.app.ui.auth.AuthViewModel
+import com.zixo.app.ui.auth.EmailSignInScreen
 import com.zixo.app.ui.auth.LoginScreen
+import com.zixo.app.ui.auth.RegisterScreen
 import com.zixo.app.ui.chat.ChatMessageScreen
 import com.zixo.app.ui.chat.ChatViewModel
 import com.zixo.app.ui.main.HomeScreen
@@ -97,6 +98,42 @@ fun ZixoNavigation() {
                     navController.navigate("home") {
                         popUpTo("login") { inclusive = true }
                     }
+                },
+                onEmailSignIn = {
+                    navController.navigate("email_signin")
+                }
+            )
+        }
+
+        composable("email_signin") {
+            val authViewModel = remember { AuthViewModel(authRepo) }
+            EmailSignInScreen(
+                authViewModel = authViewModel,
+                onAuthComplete = {
+                    navController.navigate("home") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                },
+                onRegister = {
+                    navController.navigate("register")
+                },
+                onBack = {
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        composable("register") {
+            val authViewModel = remember { AuthViewModel(authRepo) }
+            RegisterScreen(
+                authViewModel = authViewModel,
+                onAuthComplete = {
+                    navController.navigate("home") {
+                        popUpTo("login") { inclusive = true }
+                    }
+                },
+                onBackToLogin = {
+                    navController.popBackStack()
                 }
             )
         }
