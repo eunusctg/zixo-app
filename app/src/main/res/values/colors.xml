@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="zixo_bg">#0B1519</color>
+    <color name="zixo_surface">#1A2A32</color>
+    <color name="zixo_accent">#00E676</color>
+    <color name="zixo_accent_dark">#05C46B</color>
+    <color name="zixo_text_primary">#FFFFFF</color>
+    <color name="zixo_text_secondary">#90A4AE</color>
+    <color name="zixo_error">#FF5252</color>
+</resources>
