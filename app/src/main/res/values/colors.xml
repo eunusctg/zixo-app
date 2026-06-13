@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="zixo_bg">#0B1519</color>
+    <color name="zixo_surface">#1A2A32</color>
+    <color name="zixo_surface_light">#233138</color>
+    <color name="zixo_primary">#00E676</color>
+    <color name="zixo_primary_dark">#05C46B</color>
+    <color name="zixo_secondary">#128C7E</color>
+    <color name="zixo_accent">#34B7F1</color>
+    <color name="zixo_text">#FFFFFF</color>
+    <color name="zixo_text_secondary">#90A4AE</color>
+    <color name="zixo_chat_bubble_own">#005C4B</color>
+    <color name="zixo_chat_bubble_other">#1F2C34</color>
+    <color name="zixo_error">#FF5252</color>
+    <color name="zixo_error_bg">#4A1515</color>
+    <color name="zixo_online">#00E676</color>
+    <color name="black">#000000</color>
+</resources>

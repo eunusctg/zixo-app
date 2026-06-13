@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="default_web_client_id" translatable="false">809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com</string>
+    <string name="gcm_defaultSenderId" translatable="false">809372450511</string>
+    <string name="google_api_key" translatable="false">AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs</string>
+    <string name="google_app_id" translatable="false">1:809372450511:android:291641412d03842c66c1ba</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs</string>
+    <string name="google_storage_bucket" translatable="false">zixo-call.firebasestorage.app</string>
+    <string name="project_id" translatable="false">zixo-call</string>
+</resources>

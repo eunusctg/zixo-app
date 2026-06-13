@@ -1,0 +1,3 @@
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.chat.ChatViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.chat.ChatViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.chat.ForwardViewModel

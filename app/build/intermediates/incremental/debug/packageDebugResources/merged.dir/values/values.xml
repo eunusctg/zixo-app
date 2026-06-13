@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#000000</color>
+    <color name="zixo_accent">#34B7F1</color>
+    <color name="zixo_bg">#0B1519</color>
+    <color name="zixo_chat_bubble_other">#1F2C34</color>
+    <color name="zixo_chat_bubble_own">#005C4B</color>
+    <color name="zixo_error">#FF5252</color>
+    <color name="zixo_error_bg">#4A1515</color>
+    <color name="zixo_online">#00E676</color>
+    <color name="zixo_primary">#00E676</color>
+    <color name="zixo_primary_dark">#05C46B</color>
+    <color name="zixo_secondary">#128C7E</color>
+    <color name="zixo_surface">#1A2A32</color>
+    <color name="zixo_surface_light">#233138</color>
+    <color name="zixo_text">#FFFFFF</color>
+    <color name="zixo_text_secondary">#90A4AE</color>
+    <string name="all">All</string>
+    <string name="app_name">Zixo</string>
+    <string name="audio_call">Audio Call</string>
+    <string name="calls">Calls</string>
+    <string name="chats">Chats</string>
+    <string name="default_web_client_id" translatable="false">809372450511-7lpbcas0a6nrntljvs5sf4v9nnusrpol.apps.googleusercontent.com</string>
+    <string name="delete_account">Delete Account</string>
+    <string name="display_name">Display Name</string>
+    <string name="email">Email</string>
+    <string name="end_call">End Call</string>
+    <string name="forgot_password">Forgot Password?</string>
+    <string name="gcm_defaultSenderId" translatable="false">809372450511</string>
+    <string name="google_api_key" translatable="false">AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs</string>
+    <string name="google_app_id" translatable="false">1:809372450511:android:291641412d03842c66c1ba</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyD09GkPIrT2aiG5KxSORT0scFxFqH9i9Rs</string>
+    <string name="google_storage_bucket" translatable="false">zixo-call.firebasestorage.app</string>
+    <string name="have_account">Already have an account? Login</string>
+    <string name="incoming">Incoming</string>
+    <string name="login">Login</string>
+    <string name="logout">Log Out</string>
+    <string name="missed">Missed</string>
+    <string name="mute">Mute</string>
+    <string name="new_chat">New Chat</string>
+    <string name="no_account">Don\'t have an account? Sign Up</string>
+    <string name="no_calls">No calls yet</string>
+    <string name="no_chats">No chats yet</string>
+    <string name="outgoing">Outgoing</string>
+    <string name="password">Password</string>
+    <string name="project_id" translatable="false">zixo-call</string>
+    <string name="save_changes">Save Changes</string>
+    <string name="search">Search</string>
+    <string name="settings">Settings</string>
+    <string name="signup">Sign Up</string>
+    <string name="speaker">Speaker</string>
+    <string name="type_message">Type a message…</string>
+    <string name="video_call">Video Call</string>
+    <style name="Theme.Zixo" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorBackground">@color/zixo_bg</item>
+        <item name="android:statusBarColor">@color/zixo_bg</item>
+        <item name="android:navigationBarColor">@color/zixo_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

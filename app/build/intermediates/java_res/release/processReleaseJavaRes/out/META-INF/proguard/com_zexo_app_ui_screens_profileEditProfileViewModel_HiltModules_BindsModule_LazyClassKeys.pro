@@ -1,0 +1,9 @@
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.chat.ChatViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.chat.ChatViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.chat.ForwardViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.chat.ForwardViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.calls.CallsViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.calls.CallsViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.status.StatusViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.status.StatusViewModel
+-keep,allowobfuscation,allowshrinking class com.zexo.app.ui.screens.profile.EditProfileViewModel
