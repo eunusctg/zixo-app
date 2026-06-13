@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "com.zexo.app"
+    namespace = "com.zixo.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.zexo.app"
+        applicationId = "com.zixo.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 6
@@ -41,7 +41,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -111,4 +111,9 @@ dependencies {
 
     // LiveKit Android SDK
     implementation("io.livekit:livekit-android:2.4.0")
+
+    // Google Credential Manager (Native Sign-In API for Android 14+)
+    implementation(libs.credentials)
+    implementation(libs.credentials.play.services)
+    implementation(libs.googleid)
 }

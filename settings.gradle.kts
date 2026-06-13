@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "zexo"
+rootProject.name = "zixo"
 include(":app")

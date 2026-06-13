@@ -3,4 +3,4 @@
 -keepclassmembers class * {
     @com.google.firebase.firestore.Exclude *;
 }
--keep class com.zexo.app.data.model.** { *; }
+-keep class com.zixo.app.data.model.** { *; }
