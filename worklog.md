@@ -1,32 +1,35 @@
-# Zixo App Development Worklog
-
 ---
 Task ID: 1
-Agent: Main Agent
-Task: Build complete Contact-Gated Communication System, Passkey Registration Engine, Real-time Chat/Group Engines, and WebRTC Signaling Network
+Agent: Main
+Task: Fix WebAuthn/Passkey registration failure - "rp id cannot be validated"
 
 Work Log:
-- Updated build.gradle.kts: Removed LiveKit dependency, added WebRTC SDK (io.github.webrtc-sdk:android:120.0.0)
-- Updated libs.versions.toml: Replaced livekit version/library with webrtc version/library
-- Updated AndroidManifest.xml: Added ZixoCallService foreground service with camera+microphone types
-- Created WebRtcEngine.kt: Full native PeerConnection manager with EglBase singleton scope, audio routing, SDP offer/answer, ICE candidate management, toggle controls
-- Created WebRtcSignalingClient.kt: Firebase RTDB-based signaling for SDP exchange, ICE trickle, call state tracking
-- Created ZixoCallService.kt: Foreground service for WebRTC call survival during app backgrounding
-- Rewrote CallRepositoryImpl.kt: Complete WebRTC signaling via Firebase RTDB, contact-gated call initiation, foreground service integration, accept incoming calls with WebRTC answer
-- Rewrote CallScreen.kt: WebRTC video rendering with EglBase scope preservation, SurfaceViewRenderer in AndroidView, PiP local video, liquid glass call controls
-- Updated AuthRepository.kt: Added passkey interface methods (hasPasskeyRegistered, registerPasskey, authenticateWithPasskey, getPasskeyRegistrationChallenge, savePasskeyCredential)
-- Updated AuthRepositoryImpl.kt: Full passkey/WebAuthn implementation with CredentialManager integration, challenge generation, Firestore credential storage
-- Rewrote AccountSecurityScreen.kt: Complete passkey enrollment UI with CreatePublicKeyCredentialRequest, CredentialManager invocation, success/error states
-- Updated Navigation.kt: Wired CallRepositoryImpl with Context for WebRTC, passkey authRepository to AccountSecurityScreen, accept incoming call with WebRTC answer
-- Updated LiquidGlassModifiers.kt: Enhanced with LiquidGlassInputTray (74dp), LiquidGlassTabBar (85dp), OutgoingBubbleBrush, IncomingBubbleBrush
-- Updated Color.kt: Added OutgoingBubble, IncomingBubble, ZixoAccentDark, refined all color definitions per spec
+- Read AuthRepositoryImpl.kt (692 lines) - identified existing defensive validation
+- Read AccountSecurityScreen.kt - identified inline CredentialManager calls
+- Read AuthRepository.kt interface - confirmed passkey method signatures
+- Read Cloudflare Edge Worker challenge/route.ts - verified rp.id = "zixo.pages.dev"
+- Read Cloudflare Edge Worker register/route.ts - verified rp.id validation
+- Computed SHA-256 fingerprint from release keystore: 05:2C:95:BD:FB:FE:9C:12:92:02:CA:B4:F8:F6:F6:6B:37:25:B3:94:18:76:63:A3:D6:7E:C6:F6:4A:95:49:7B
+- Verified assetlinks.json exists at src/public/.well-known/assetlinks.json with correct content
+- Discovered CRITICAL issue: assetlinks.json returning 404 at https://zixo.pages.dev/.well-known/assetlinks.json
+- Root cause: Cloudflare Pages build (via @cloudflare/next-on-pages) doesn't copy dot-prefixed directories from public/
+- Discovered CRITICAL issue: AndroidManifest.xml missing domain verification (android:autoVerify="true") for zixo.pages.dev
+
+Changes Made:
+1. AndroidManifest.xml: Added intent-filter with android:autoVerify="true" for zixo.pages.dev + asset_statements meta-data
+2. strings.xml: Added asset_statements string resource with web namespace declaration
+3. AuthRepositoryImpl.kt: Added defensive createPasskeyCredential() wrapper with full CreateCredentialException handling
+4. AuthRepositoryImpl.kt: Added sanitizePasskeyPayload() with protocol stripping + rp.id forcing
+5. AuthRepositoryImpl.kt: Added validatePasskeyPayloadStructure() for structural pre-validation
+6. AuthRepositoryImpl.kt: Added normalizeToBase64Url() utility method
+7. AccountSecurityScreen.kt: Refactored to use repository's createPasskeyCredential() instead of inline CredentialManager
+8. AccountSecurityScreen.kt: Removed unused CredentialManager imports and enforceRpIdOnClient() function
+9. src/app/.well-known/assetlinks.json/route.ts: Added Next.js edge route handler for assetlinks.json
+10. Built signed APK (46MB) and uploaded to GitHub release v2.0.1
 
 Stage Summary:
-- Complete WebRTC call system replacing LiveKit: native PeerConnection + Firebase RTDB signaling
-- Full Passkey/WebAuthn enrollment engine with Android CredentialManager API
-- Foreground service for call survival during app backgrounding
-- EglBase singleton scope prevents SIGABRT crash on recomposition
-- Audio routing: MODE_IN_COMMUNICATION with USAGE_VOICE_COMMUNICATION
-- All existing features preserved: Zero-Trust contact gating, real-time chat, status delivery
-- 3 new files created: WebRtcEngine.kt, WebRtcSignalingClient.kt, ZixoCallService.kt
-- 8 files significantly updated: build.gradle.kts, AndroidManifest.xml, CallRepositoryImpl.kt, CallScreen.kt, AuthRepository.kt, AuthRepositoryImpl.kt, AccountSecurityScreen.kt, Navigation.kt, LiquidGlassModifiers.kt, Color.kt
+- APK built and uploaded: https://github.com/eunusctg/zixo-app/releases/download/v2.0.1/zixo.apk
+- Code pushed to GitHub main branch
+- assetlinks.json route handler added to Next.js app but NOT YET DEPLOYED to Cloudflare Pages
+- DEPLOYMENT BLOCKED: No Cloudflare API token available for wrangler deploy
+- User must provide CLOUDFLARE_API_TOKEN or manually deploy from Cloudflare Dashboard

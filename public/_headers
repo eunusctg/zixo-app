@@ -1,0 +1,6 @@
+
+# Digital Asset Links — must be served as application/json with CORS
+/.well-known/assetlinks.json
+  Content-Type: application/json
+  Cache-Control: public, max-age=86400, immutable
+  Access-Control-Allow-Origin: *
