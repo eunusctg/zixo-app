@@ -1,0 +1,703 @@
+     1→     1→package com.zixo.app.ui.chat
+     2→     2→
+     3→     3→import android.content.ClipData
+     4→     4→import android.content.ClipboardManager
+     5→     5→import android.content.Context
+     6→     6→import androidx.compose.animation.*
+     7→     7→import androidx.compose.foundation.*
+     8→     8→import androidx.compose.foundation.layout.*
+     9→     9→import androidx.compose.foundation.lazy.LazyColumn
+    10→    10→import androidx.compose.foundation.lazy.items
+    11→    11→import androidx.compose.foundation.lazy.rememberLazyListState
+    12→    12→import androidx.compose.foundation.shape.CircleShape
+    13→    13→import androidx.compose.foundation.shape.RoundedCornerShape
+    14→    14→import androidx.compose.material.icons.Icons
+    15→    15→import androidx.compose.material.icons.automirrored.filled.Send
+    16→    16→import androidx.compose.material.icons.filled.*
+    17→    17→import com.zixo.app.domain.model.Contact
+    18→    18→import com.zixo.app.domain.model.Message
+    19→    19→import com.zixo.app.domain.model.ReactionPanel
+    20→    20→import com.zixo.app.ui.components.LiquidGlassSurface
+    21→    21→import com.zixo.app.ui.theme.*
+    22→    22→import androidx.compose.material3.*
+    23→    23→import androidx.compose.runtime.*
+    24→    24→import androidx.compose.ui.Alignment
+    25→    25→import androidx.compose.ui.Modifier
+    26→    26→import androidx.compose.ui.draw.clip
+    27→    27→import androidx.compose.ui.graphics.Brush
+    28→    28→import androidx.compose.ui.graphics.Color
+    29→    29→import androidx.compose.ui.platform.LocalContext
+    30→    30→import androidx.compose.ui.text.font.FontWeight
+    31→    31→import androidx.compose.ui.text.style.TextOverflow
+    32→    32→import androidx.compose.ui.unit.dp
+    33→    33→import androidx.compose.ui.unit.sp
+    34→    34→
+    35→    35→@OptIn(ExperimentalMaterial3Api::class)
+    36→    36→@Composable
+    37→    37→fun ChatMessageScreen(
+    38→    38→    chatViewModel: ChatViewModel,
+    39→    39→    currentUserId: String,
+    40→    40→    chatName: String,
+    41→    41→    chatAvatar: String,
+    42→    42→    contacts: List<Contact> = emptyList(),
+    43→    43→    onBack: () -> Unit
+    44→    44→) {
+    45→    45→    val messages by chatViewModel.messages.collectAsState()
+    46→    46→    val inputState by chatViewModel.chatInputState.collectAsState()
+    47→    47→    val showActionSheet by chatViewModel.showActionSheet.collectAsState()
+    48→    48→    val showReactionPanel by chatViewModel.showReactionPanel.collectAsState()
+    49→    49→    val showForwardPicker by chatViewModel.showForwardPicker.collectAsState()
+    50→    50→    val selectedMessage by chatViewModel.selectedMessage.collectAsState()
+    51→    51→    val error by chatViewModel.error.collectAsState()
+    52→    52→    val contactGateError by chatViewModel.contactGateError.collectAsState()
+    53→    53→
+    54→    54→    val listState = rememberLazyListState()
+    55→    55→    var messageText by remember { mutableStateOf("") }
+    56→    56→    val context = LocalContext.current
+    57→    57→
+    58→    58→    // Auto-scroll to bottom on new messages
+    59→    59→    LaunchedEffect(messages.size) {
+    60→    60→        if (messages.isNotEmpty()) {
+    61→    61→            listState.animateScrollToItem(0)
+    62→    62→        }
+    63→    63→    }
+    64→    64→
+    65→    65→    // Contact gate error snackbar
+    66→    66→    val snackbarHostState = remember { SnackbarHostState() }
+    67→    67→    LaunchedEffect(contactGateError) {
+    68→    68→        if (contactGateError != null) {
+    69→    69→            snackbarHostState.showSnackbar(
+    70→    70→                message = contactGateError!!,
+    71→    71→                duration = SnackbarDuration.Long
+    72→    72→            )
+    73→    73→            chatViewModel.clearError()
+    74→    74→        }
+    75→    75→    }
+    76→    76→
+    77→    77→    // Error snackbar
+    78→    78→    LaunchedEffect(error) {
+    79→    79→        if (error != null) {
+    80→    80→            snackbarHostState.showSnackbar(
+    81→    81→                message = error!!,
+    82→    82→                duration = SnackbarDuration.Short
+    83→    83→            )
+    84→    84→            chatViewModel.clearError()
+    85→    85→        }
+    86→    86→    }
+    87→    87→
+    88→    88→    Scaffold(
+    89→    89→        snackbarHost = { SnackbarHost(snackbarHostState) { data -> Snackbar(data) } },
+    90→    90→        modifier = Modifier.imePadding()
+    91→    91→    ) { paddingValues ->
+    92→    92→        Box(
+    93→    93→            modifier = Modifier
+    94→    94→                .fillMaxSize()
+    95→    95→                .background(ZixoBackground)
+    96→    96→                .padding(paddingValues)
+    97→    97→        ) {
+    98→    98→            Column(modifier = Modifier.fillMaxSize()) {
+    99→    99→                // Top bar
+   100→   100→                TopAppBar(
+   101→   101→                    title = {
+   102→   102→                        Row(verticalAlignment = Alignment.CenterVertically) {
+   103→   103→                            Box(
+   104→   104→                                modifier = Modifier
+   105→   105→                                    .size(36.dp)
+   106→   106→                                    .clip(CircleShape)
+   107→   107→                                    .background(ZixoSurface),
+   108→   108→                                contentAlignment = Alignment.Center
+   109→   109→                            ) {
+   110→   110→                                if (chatAvatar.isNotBlank()) {
+   111→   111→                                    androidx.compose.foundation.Image(
+   112→   112→                                        painter = coil.compose.rememberAsyncImagePainter(chatAvatar),
+   113→   113→                                        contentDescription = chatName,
+   114→   114→                                        modifier = Modifier.size(36.dp),
+   115→   115→                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+   116→   116→                                    )
+   117→   117→                                } else {
+   118→   118→                                    Text(
+   119→   119→                                        text = chatName.take(1).uppercase(),
+   120→   120→                                        color = ZixoAccent,
+   121→   121→                                        fontWeight = FontWeight.Bold,
+   122→   122→                                        fontSize = 16.sp
+   123→   123→                                    )
+   124→   124→                                }
+   125→   125→                            }
+   126→   126→                            Spacer(modifier = Modifier.width(10.dp))
+   127→   127→                            Text(
+   128→   128→                                text = chatName,
+   129→   129→                                color = ZixoTextPrimary,
+   130→   130→                                fontWeight = FontWeight.SemiBold,
+   131→   131→                                fontSize = 18.sp,
+   132→   132→                                maxLines = 1,
+   133→   133→                                overflow = TextOverflow.Ellipsis
+   134→   134→                            )
+   135→   135→                        }
+   136→   136→                    },
+   137→   137→                    navigationIcon = {
+   138→   138→                        IconButton(onClick = onBack) {
+   139→   139→                            Icon(Icons.Filled.ArrowBack, "Back", tint = ZixoTextPrimary)
+   140→   140→                        }
+   141→   141→                    },
+   142→   142→                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+   143→   143→                )
+   144→   144→
+   145→   145→                // Messages list — reverseLayout for newest at bottom
+   146→   146→                LazyColumn(
+   147→   147→                    modifier = Modifier
+   148→   148→                        .weight(1f)
+   149→   149→                        .fillMaxWidth(),
+   150→   150→                    state = listState,
+   151→   151→                    reverseLayout = true,
+   152→   152→                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+   153→   153→                    verticalArrangement = Arrangement.spacedBy(4.dp)
+   154→   154→                ) {
+   155→   155→                    items(messages.reversed()) { message ->
+   156→   156→                        MessageBubble(
+   157→   157→                            message = message,
+   158→   158→                            isSender = chatViewModel.isSender(message, currentUserId),
+   159→   159→                            currentUserId = currentUserId,
+   160→   160→                            onLongPress = { chatViewModel.onMessageLongPress(message) },
+   161→   161→                            onCopy = {
+   162→   162→                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+   163→   163→                                clipboard.setPrimaryClip(ClipData.newPlainText("Message", message.text))
+   164→   164→                            }
+   165→   165→                        )
+   166→   166→                    }
+   167→   167→                }
+   168→   168→
+   169→   169→                // Reply bar
+   170→   170→                AnimatedVisibility(visible = inputState.isReplying) {
+   171→   171→                    LiquidGlassSurface(
+   172→   172→                        modifier = Modifier
+   173→   173→                            .fillMaxWidth()
+   174→   174→                            .padding(horizontal = 12.dp, vertical = 4.dp),
+   175→   175→                        cornerRadius = 12.dp
+   176→   176→                    ) {
+   177→   177→                        Row(
+   178→   178→                            modifier = Modifier.padding(12.dp),
+   179→   179→                            verticalAlignment = Alignment.CenterVertically
+   180→   180→                        ) {
+   181→   181→                            Box(
+   182→   182→                                modifier = Modifier
+   183→   183→                                    .width(3.dp)
+   184→   184→                                    .height(32.dp)
+   185→   185→                                    .clip(RoundedCornerShape(2.dp))
+   186→   186→                                    .background(ZixoAccent)
+   187→   187→                            )
+   188→   188→                            Spacer(modifier = Modifier.width(8.dp))
+   189→   189→                            Column(modifier = Modifier.weight(1f)) {
+   190→   190→                                Text(
+   191→   191→                                    text = inputState.replyToMessage?.senderId?.take(8) ?: "",
+   192→   192→                                    color = ZixoAccent,
+   193→   193→                                    fontSize = 12.sp,
+   194→   194→                                    fontWeight = FontWeight.SemiBold
+   195→   195→                                )
+   196→   196→                                Text(
+   197→   197→                                    text = inputState.replyToMessage?.text ?: "",
+   198→   198→                                    color = ZixoTextSecondary,
+   199→   199→                                    fontSize = 13.sp,
+   200→   200→                                    maxLines = 1
+   201→   201→                                )
+   202→   202→                            }
+   203→   203→                            IconButton(onClick = { chatViewModel.onCancelReply() }) {
+   204→   204→                                Icon(Icons.Filled.Close, "Cancel", tint = ZixoTextSecondary, modifier = Modifier.size(18.dp))
+   205→   205→                            }
+   206→   206→                        }
+   207→   207→                    }
+   208→   208→                }
+   209→   209→
+   210→   210→                // Input bar — 74dp height with liquid glass pill shape
+   211→   211→                LiquidGlassSurface(
+   212→   212→                    modifier = Modifier
+   213→   213→                        .fillMaxWidth()
+   214→   214→                        .height(74.dp),
+   215→   215→                    cornerRadius = 0.dp
+   216→   216→                ) {
+   217→   217→                    Row(
+   218→   218→                        modifier = Modifier
+   219→   219→                            .fillMaxSize()
+   220→   220→                            .padding(horizontal = 8.dp),
+   221→   221→                        verticalAlignment = Alignment.CenterVertically
+   222→   222→                    ) {
+   223→   223→                        IconButton(onClick = { /* Image picker */ }) {
+   224→   224→                            Icon(Icons.Filled.Image, "Attach", tint = ZixoTextSecondary)
+   225→   225→                        }
+   226→   226→
+   227→   227→                        OutlinedTextField(
+   228→   228→                            value = messageText,
+   229→   229→                            onValueChange = { messageText = it },
+   230→   230→                            modifier = Modifier.weight(1f),
+   231→   231→                            placeholder = {
+   232→   232→                                Text("Message...", color = ZixoTextTertiary, fontSize = 15.sp)
+   233→   233→                            },
+   234→   234→                            colors = OutlinedTextFieldDefaults.colors(
+   235→   235→                                focusedBorderColor = Color.Transparent,
+   236→   236→                                unfocusedBorderColor = Color.Transparent,
+   237→   237→                                cursorColor = ZixoAccent,
+   238→   238→                                focusedTextColor = ZixoTextPrimary,
+   239→   239→                                unfocusedTextColor = ZixoTextPrimary
+   240→   240→                            ),
+   241→   241→                            shape = RoundedCornerShape(24.dp),
+   242→   242→                            maxLines = 3
+   243→   243→                        )
+   244→   244→
+   245→   245→                        IconButton(
+   246→   246→                            onClick = {
+   247→   247→                                if (messageText.isNotBlank()) {
+   248→   248→                                    chatViewModel.sendMessage(messageText)
+   249→   249→                                    messageText = ""
+   250→   250→                                }
+   251→   251→                            },
+   252→   252→                            enabled = messageText.isNotBlank()
+   253→   253→                        ) {
+   254→   254→                            Icon(
+   255→   255→                                Icons.AutoMirrored.Filled.Send,
+   256→   256→                                "Send",
+   257→   257→                                tint = if (messageText.isNotBlank()) ZixoAccent else ZixoTextTertiary
+   258→   258→                            )
+   259→   259→                        }
+   260→   260→                    }
+   261→   261→                }
+   262→   262→            }
+   263→   263→
+   264→   264→            // Action sheet overlay
+   265→   265→            if (showActionSheet && selectedMessage != null) {
+   266→   266→                ActionSheetOverlay(
+   267→   267→                    message = selectedMessage!!,
+   268→   268→                    isSender = chatViewModel.isSender(selectedMessage!!, currentUserId),
+   269→   269→                    canDeleteForEveryone = chatViewModel.canDeleteForEveryone(selectedMessage!!, currentUserId),
+   270→   270→                    onReact = { chatViewModel.showReactionPanel() },
+   271→   271→                    onReply = { chatViewModel.onReply() },
+   272→   272→                    onForward = { chatViewModel.onForward() },
+   273→   273→                    onCopy = {
+   274→   274→                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+   275→   275→                        clipboard.setPrimaryClip(ClipData.newPlainText("Message", selectedMessage!!.text))
+   276→   276→                        chatViewModel.dismissActionSheet()
+   277→   277→                    },
+   278→   278→                    onDeleteForMe = { chatViewModel.onDeleteForMe() },
+   279→   279→                    onDeleteForEveryone = { chatViewModel.onDeleteForEveryone() },
+   280→   280→                    onDismiss = { chatViewModel.dismissActionSheet() }
+   281→   281→                )
+   282→   282→            }
+   283→   283→
+   284→   284→            // Reaction panel overlay
+   285→   285→            if (showReactionPanel) {
+   286→   286→                ReactionPanelOverlay(
+   287→   287→                    onReact = { chatViewModel.onReactionClick(it) },
+   288→   288→                    onDismiss = { chatViewModel.dismissActionSheet() }
+   289→   289→                )
+   290→   290→            }
+   291→   291→
+   292→   292→            // Forward picker overlay
+   293→   293→            if (showForwardPicker) {
+   294→   294→                ForwardPickerOverlay(
+   295→   295→                    contacts = contacts,
+   296→   296→                    onForward = { chatId -> chatViewModel.onForwardToChat(chatId) },
+   297→   297→                    onDismiss = { chatViewModel.dismissForwardPicker() }
+   298→   298→                )
+   299→   299→            }
+   300→   300→        }
+   301→   301→    }
+   302→   302→}
+   303→   303→
+   304→   304→@Composable
+   305→   305→private fun MessageBubble(
+   306→   306→    message: Message,
+   307→   307→    isSender: Boolean,
+   308→   308→    currentUserId: String,
+   309→   309→    onLongPress: () -> Unit,
+   310→   310→    onCopy: () -> Unit
+   311→   311→) {
+   312→   312→    val displayText = message.displayText(currentUserId)
+   313→   313→    val isDeleted = message.isDeletedForEveryone || message.deletedForUsers.contains(currentUserId)
+   314→   314→
+   315→   315→    Row(
+   316→   316→        modifier = Modifier.fillMaxWidth(),
+   317→   317→        horizontalArrangement = if (isSender) Arrangement.End else Arrangement.Start
+   318→   318→    ) {
+   319→   319→        Box(
+   320→   320→            modifier = Modifier
+   321→   321→                .widthIn(max = 280.dp)
+   322→   322→                .clip(
+   323→   323→                    RoundedCornerShape(
+   324→   324→                        topStart = 18.dp,
+   325→   325→                        topEnd = 18.dp,
+   326→   326→                        bottomStart = if (isSender) 18.dp else 4.dp,
+   327→   327→                        bottomEnd = if (isSender) 4.dp else 18.dp
+   328→   328→                    )
+   329→   329→                )
+   330→   330→                .background(
+   331→   331→                    if (isSender) OutgoingBubble else IncomingBubble,
+   332→   332→                    shape = RoundedCornerShape(
+   333→   333→                        topStart = 18.dp,
+   334→   334→                        topEnd = 18.dp,
+   335→   335→                        bottomStart = if (isSender) 18.dp else 4.dp,
+   336→   336→                        bottomEnd = if (isSender) 4.dp else 18.dp
+   337→   337→                    )
+   338→   338→                )
+   339→   339→                .border(
+   340→   340→                    width = 1.dp,
+   341→   341→                    color = GlassBorder,
+   342→   342→                    shape = RoundedCornerShape(
+   343→   343→                        topStart = 18.dp,
+   344→   344→                        topEnd = 18.dp,
+   345→   345→                        bottomStart = if (isSender) 18.dp else 4.dp,
+   346→   346→                        bottomEnd = if (isSender) 4.dp else 18.dp
+   347→   347→                    )
+   348→   348→                )
+   349→   349→                .combinedClickable(
+   350→   350→                    onClick = {},
+   351→   351→                    onLongClick = onLongPress
+   352→   352→                )
+   353→   353→                .padding(horizontal = 14.dp, vertical = 10.dp)
+   354→   354→        ) {
+   355→   355→            Column {
+   356→   356→                // Reply reference
+   357→   357→                if (message.replyToText.isNotBlank()) {
+   358→   358→                    Box(
+   359→   359→                        modifier = Modifier
+   360→   360→                            .fillMaxWidth()
+   361→   361→                            .clip(RoundedCornerShape(8.dp))
+   362→   362→                            .background(ZixoSurface.copy(alpha = 0.5f))
+   363→   363→                            .padding(8.dp)
+   364→   364→                    ) {
+   365→   365→                        Column {
+   366→   366→                            Text(
+   367→   367→                                text = message.replyToSender.take(8),
+   368→   368→                                color = ZixoAccent,
+   369→   369→                                fontSize = 11.sp,
+   370→   370→                                fontWeight = FontWeight.SemiBold
+   371→   371→                            )
+   372→   372→                            Text(
+   373→   373→                                text = message.replyToText,
+   374→   374→                                color = ZixoTextSecondary,
+   375→   375→                                fontSize = 12.sp,
+   376→   376→                                maxLines = 1
+   377→   377→                            )
+   378→   378→                        }
+   379→   379→                    }
+   380→   380→                    Spacer(modifier = Modifier.height(6.dp))
+   381→   381→                }
+   382→   382→
+   383→   383→                // Image
+   384→   384→                if (message.imageUrl.isNotBlank() && !isDeleted) {
+   385→   385→                    Box(
+   386→   386→                        modifier = Modifier
+   387→   387→                            .fillMaxWidth()
+   388→   388→                            .height(180.dp)
+   389→   389→                            .clip(RoundedCornerShape(12.dp))
+   390→   390→                    ) {
+   391→   391→                        androidx.compose.foundation.Image(
+   392→   392→                            painter = coil.compose.rememberAsyncImagePainter(message.imageUrl),
+   393→   393→                            contentDescription = "Image",
+   394→   394→                            modifier = Modifier.fillMaxSize(),
+   395→   395→                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+   396→   396→                        )
+   397→   397→                    }
+   398→   398→                    if (message.text.isNotBlank()) {
+   399→   399→                        Spacer(modifier = Modifier.height(6.dp))
+   400→   400→                    }
+   401→   401→                }
+   402→   402→
+   403→   403→                // Message text
+   404→   404→                Text(
+   405→   405→                    text = displayText,
+   406→   406→                    color = if (isDeleted) ZixoTextTertiary else ZixoTextPrimary,
+   407→   407→                    fontSize = 15.sp,
+   408→   408→                    fontStyle = if (isDeleted) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
+   409→   409→                )
+   410→   410→
+   411→   411→                // Timestamp and reactions row
+   412→   412→                Row(
+   413→   413→                    modifier = Modifier.fillMaxWidth(),
+   414→   414→                    horizontalArrangement = Arrangement.SpaceBetween,
+   415→   415→                    verticalAlignment = Alignment.CenterVertically
+   416→   416→                ) {
+   417→   417→                    // Reactions
+   418→   418→                    if (message.reactions.isNotEmpty()) {
+   419→   419→                        Row {
+   420→   420→                            message.reactions.values.distinct().forEach { emoji ->
+   421→   421→                                Text(text = emoji, fontSize = 14.sp)
+   422→   422→                            }
+   423→   423→                        }
+   424→   424→                    }
+   425→   425→
+   426→   426→                    Row(
+   427→   427→                        verticalAlignment = Alignment.CenterVertically,
+   428→   428→                        horizontalArrangement = Arrangement.End
+   429→   429→                    ) {
+   430→   430→                        Text(
+   431→   431→                            text = formatMessageTime(message.timestamp),
+   432→   432→                            color = ZixoTextTertiary,
+   433→   433→                            fontSize = 11.sp,
+   434→   434→                            modifier = Modifier.padding(top = 4.dp)
+   435→   435→                        )
+   436→   436→                        // Read receipt for sender
+   437→   437→                        if (isSender && !isDeleted) {
+   438→   438→                            Spacer(modifier = Modifier.width(4.dp))
+   439→   439→                            Icon(
+   440→   440→                                if (message.isRead) Icons.Filled.DoneAll else Icons.Filled.Done,
+   441→   441→                                "Read status",
+   442→   442→                                tint = if (message.isRead) ZixoAccent else ZixoTextTertiary,
+   443→   443→                                modifier = Modifier.size(14.dp)
+   444→   444→                            )
+   445→   445→                        }
+   446→   446→                    }
+   447→   447→                }
+   448→   448→            }
+   449→   449→        }
+   450→   450→    }
+   451→   451→}
+   452→   452→
+   453→   453→@Composable
+   454→   454→private fun ActionSheetOverlay(
+   455→   455→    message: Message,
+   456→   456→    isSender: Boolean,
+   457→   457→    canDeleteForEveryone: Boolean,
+   458→   458→    onReact: () -> Unit,
+   459→   459→    onReply: () -> Unit,
+   460→   460→    onForward: () -> Unit,
+   461→   461→    onCopy: () -> Unit,
+   462→   462→    onDeleteForMe: () -> Unit,
+   463→   463→    onDeleteForEveryone: () -> Unit,
+   464→   464→    onDismiss: () -> Unit
+   465→   465→) {
+   466→   466→    Box(
+   467→   467→        modifier = Modifier
+   468→   468→            .fillMaxSize()
+   469→   469→            .background(Color.Black.copy(alpha = 0.5f))
+   470→   470→            .clickable(onClick = onDismiss),
+   471→   471→        contentAlignment = Alignment.BottomCenter
+   472→   472→    ) {
+   473→   473→        LiquidGlassSurface(
+   474→   474→            modifier = Modifier
+   475→   475→                .fillMaxWidth()
+   476→   476→                .padding(16.dp),
+   477→   477→            cornerRadius = 20.dp
+   478→   478→        ) {
+   479→   479→            Column(modifier = Modifier.padding(16.dp)) {
+   480→   480→                // Quick reactions row at top
+   481→   481→                Row(
+   482→   482→                    modifier = Modifier
+   483→   483→                        .fillMaxWidth()
+   484→   484→                        .padding(bottom = 8.dp),
+   485→   485→                    horizontalArrangement = Arrangement.SpaceEvenly
+   486→   486→                ) {
+   487→   487→                    ReactionPanel.quickReactions.take(6).forEach { reaction ->
+   488→   488→                        Box(
+   489→   489→                            modifier = Modifier
+   490→   490→                                .size(40.dp)
+   491→   491→                                .clip(CircleShape)
+   492→   492→                                .clickable { onReact() },
+   493→   493→                            contentAlignment = Alignment.Center
+   494→   494→                        ) {
+   495→   495→                            Text(text = reaction.emoji, fontSize = 22.sp)
+   496→   496→                        }
+   497→   497→                    }
+   498→   498→                }
+   499→   499→
+   500→   500→                HorizontalDivider(color = GlassBorder, modifier = Modifier.padding(vertical = 4.dp))
+   501→   501→
+   502→   502→                ActionSheetItem("React", Icons.Filled.EmojiEmotions, onReact)
+   503→   503→                ActionSheetItem("Reply", Icons.Filled.Reply, onReply)
+   504→   504→                ActionSheetItem("Forward", Icons.Filled.Forward, onForward)
+   505→   505→                ActionSheetItem("Copy", Icons.Filled.ContentCopy, onCopy)
+   506→   506→                HorizontalDivider(color = GlassBorder, modifier = Modifier.padding(vertical = 4.dp))
+   507→   507→                ActionSheetItem("Delete for Me", Icons.Filled.Delete, onDeleteForMe, ZixoError)
+   508→   508→                if (canDeleteForEveryone) {
+   509→   509→                    ActionSheetItem("Delete for Everyone", Icons.Filled.DeleteForever, onDeleteForEveryone, ZixoError)
+   510→   510→                }
+   511→   511→            }
+   512→   512→        }
+   513→   513→    }
+   514→   514→}
+   515→   515→
+   516→   516→@Composable
+   517→   517→private fun ActionSheetItem(
+   518→   518→    title: String,
+   519→   519→    icon: androidx.compose.ui.graphics.vector.ImageVector,
+   520→   520→    onClick: () -> Unit,
+   521→   521→    tint: Color = ZixoTextPrimary
+   522→   522→) {
+   523→   523→    Row(
+   524→   524→        modifier = Modifier
+   525→   525→            .fillMaxWidth()
+   526→   526→            .clickable(onClick = onClick)
+   527→   527→            .padding(vertical = 12.dp),
+   528→   528→        verticalAlignment = Alignment.CenterVertically
+   529→   529→    ) {
+   530→   530→        Icon(icon, title, tint = tint, modifier = Modifier.size(22.dp))
+   531→   531→        Spacer(modifier = Modifier.width(12.dp))
+   532→   532→        Text(title, color = tint, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+   533→   533→    }
+   534→   534→}
+   535→   535→
+   536→   536→@Composable
+   537→   537→private fun ReactionPanelOverlay(
+   538→   538→    onReact: (String) -> Unit,
+   539→   539→    onDismiss: () -> Unit
+   540→   540→) {
+   541→   541→    Box(
+   542→   542→        modifier = Modifier
+   543→   543→            .fillMaxSize()
+   544→   544→            .background(Color.Black.copy(alpha = 0.5f))
+   545→   545→            .clickable(onClick = onDismiss),
+   546→   546→        contentAlignment = Alignment.Center
+   547→   547→    ) {
+   548→   548→        LiquidGlassSurface(
+   549→   549→            modifier = Modifier.padding(24.dp),
+   550→   550→            cornerRadius = 20.dp
+   551→   551→        ) {
+   552→   552→            Column(modifier = Modifier.padding(16.dp)) {
+   553→   553→                Text(
+   554→   554→                    text = "React",
+   555→   555→                    color = ZixoTextPrimary,
+   556→   556→                    fontWeight = FontWeight.SemiBold,
+   557→   557→                    fontSize = 16.sp
+   558→   558→                )
+   559→   559→                Spacer(modifier = Modifier.height(12.dp))
+   560→   560→
+   561→   561→                // Quick reactions grid
+   562→   562→                FlowRow(
+   563→   563→                    modifier = Modifier.fillMaxWidth()
+   564→   564→                ) {
+   565→   565→                    ReactionPanel.extendedReactions.forEach { reaction ->
+   566→   566→                        Box(
+   567→   567→                            modifier = Modifier
+   568→   568→                                .size(48.dp)
+   569→   569→                                .clip(RoundedCornerShape(12.dp))
+   570→   570→                                .clickable { onReact(reaction.emoji) },
+   571→   571→                            contentAlignment = Alignment.Center
+   572→   572→                        ) {
+   573→   573→                            Text(text = reaction.emoji, fontSize = 24.sp)
+   574→   574→                        }
+   575→   575→                    }
+   576→   576→                }
+   577→   577→            }
+   578→   578→        }
+   579→   579→    }
+   580→   580→}
+   581→   581→
+   582→   582→@Composable
+   583→   583→private fun ForwardPickerOverlay(
+   584→   584→    contacts: List<Contact>,
+   585→   585→    onForward: (String) -> Unit,
+   586→   586→    onDismiss: () -> Unit
+   587→   587→) {
+   588→   588→    val mutualContacts = contacts.filter { it.isMutual && !it.isBlocked }
+   589→   589→
+   590→   590→    Box(
+   591→   591→        modifier = Modifier
+   592→   592→            .fillMaxSize()
+   593→   593→            .background(Color.Black.copy(alpha = 0.5f))
+   594→   594→            .clickable(onClick = onDismiss),
+   595→   595→        contentAlignment = Alignment.Center
+   596→   596→    ) {
+   597→   597→        LiquidGlassSurface(
+   598→   598→            modifier = Modifier
+   599→   599→                .fillMaxWidth()
+   600→   600→                .padding(16.dp)
+   601→   601→                .heightIn(max = 500.dp),
+   602→   602→            cornerRadius = 20.dp
+   603→   603→        ) {
+   604→   604→            Column(modifier = Modifier.padding(16.dp)) {
+   605→   605→                // Header
+   606→   606→                Row(
+   607→   607→                    modifier = Modifier.fillMaxWidth(),
+   608→   608→                    horizontalArrangement = Arrangement.SpaceBetween,
+   609→   609→                    verticalAlignment = Alignment.CenterVertically
+   610→   610→                ) {
+   611→   611→                    Text(
+   612→   612→                        text = "Forward to...",
+   613→   613→                        color = ZixoTextPrimary,
+   614→   614→                        fontWeight = FontWeight.Bold,
+   615→   615→                        fontSize = 18.sp
+   616→   616→                    )
+   617→   617→                    IconButton(onClick = onDismiss) {
+   618→   618→                        Icon(Icons.Filled.Close, "Close", tint = ZixoTextSecondary)
+   619→   619→                    }
+   620→   620→                }
+   621→   621→
+   622→   622→                Spacer(modifier = Modifier.height(8.dp))
+   623→   623→
+   624→   624→                if (mutualContacts.isEmpty()) {
+   625→   625→                    Box(
+   626→   626→                        modifier = Modifier
+   627→   627→                            .fillMaxWidth()
+   628→   628→                            .height(120.dp),
+   629→   629→                        contentAlignment = Alignment.Center
+   630→   630→                    ) {
+   631→   631→                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+   632→   632→                            Icon(Icons.Filled.PersonAdd, null, tint = ZixoTextTertiary, modifier = Modifier.size(32.dp))
+   633→   633→                            Spacer(modifier = Modifier.height(8.dp))
+   634→   634→                            Text("No mutual contacts to forward to", color = ZixoTextSecondary, fontSize = 14.sp)
+   635→   635→                        }
+   636→   636→                    }
+   637→   637→                } else {
+   638→   638→                    androidx.compose.foundation.lazy.LazyColumn(
+   639→   639→                        modifier = Modifier.fillMaxWidth(),
+   640→   640→                        verticalArrangement = Arrangement.spacedBy(2.dp)
+   641→   641→                    ) {
+   642→   642→                        items(mutualContacts.size) { index ->
+   643→   643→                            val contact = mutualContacts[index]
+   644→   644→                            Row(
+   645→   645→                                modifier = Modifier
+   646→   646→                                    .fillMaxWidth()
+   647→   647→                                    .clickable { onForward(contact.contactUserId) }
+   648→   648→                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+   649→   649→                                verticalAlignment = Alignment.CenterVertically
+   650→   650→                            ) {
+   651→   651→                                Box(
+   652→   652→                                    modifier = Modifier
+   653→   653→                                        .size(40.dp)
+   654→   654→                                        .clip(CircleShape)
+   655→   655→                                        .background(ZixoSurface),
+   656→   656→                                    contentAlignment = Alignment.Center
+   657→   657→                                ) {
+   658→   658→                                    if (contact.contactAvatarUrl.isNotBlank()) {
+   659→   659→                                        androidx.compose.foundation.Image(
+   660→   660→                                            painter = coil.compose.rememberAsyncImagePainter(contact.contactAvatarUrl),
+   661→   661→                                            contentDescription = contact.contactDisplayName,
+   662→   662→                                            modifier = Modifier.size(40.dp),
+   663→   663→                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+   664→   664→                                        )
+   665→   665→                                    } else {
+   666→   666→                                        Text(
+   667→   667→                                            text = contact.contactDisplayName.take(1).uppercase(),
+   668→   668→                                            color = ZixoAccent,
+   669→   669→                                            fontWeight = FontWeight.Bold,
+   670→   670→                                            fontSize = 16.sp
+   671→   671→                                        )
+   672→   672→                                    }
+   673→   673→                                }
+   674→   674→                                Spacer(modifier = Modifier.width(12.dp))
+   675→   675→                                Column {
+   676→   676→                                    Text(
+   677→   677→                                        text = contact.contactDisplayName,
+   678→   678→                                        color = ZixoTextPrimary,
+   679→   679→                                        fontWeight = FontWeight.Medium,
+   680→   680→                                        fontSize = 15.sp,
+   681→   681→                                        maxLines = 1
+   682→   682→                                    )
+   683→   683→                                    Text(
+   684→   684→                                        text = contact.contactZixoNumber,
+   685→   685→                                        color = ZixoAccent,
+   686→   686→                                        fontSize = 12.sp
+   687→   687→                                    )
+   688→   688→                                }
+   689→   689→                            }
+   690→   690→                        }
+   691→   691→                    }
+   692→   692→                }
+   693→   693→            }
+   694→   694→        }
+   695→   695→    }
+   696→   696→}
+   697→   697→
+   698→   698→private fun formatMessageTime(timestamp: Long): String {
+   699→   699→    if (timestamp == 0L) return ""
+   700→   700→    val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+   701→   701→    return sdf.format(java.util.Date(timestamp))
+   702→   702→}
+   703→   703→
