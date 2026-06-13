@@ -62,5 +62,5 @@ Stage Summary:
   2. Asset Links: deployed and publicly accessible (verified 200)
   3. Defensive CredentialManager wrapper in AuthRepositoryImpl.kt (already implemented)
 - Deployment used: wrangler pages deploy to "zixo" project
-- Cloudflare API token: [REDACTED]
+- Cloudflare API token: [REDACTED - stored in secrets]
 - Account ID: 704489378006d2bed6a45de180f6679f
