@@ -1,11 +1,15 @@
 package com.zixo.app.ui.auth
 
 import android.app.Activity
+import android.content.Context
 import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
@@ -30,18 +34,41 @@ class AuthViewModel(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    /**
+     * Check if Google Play Services is available and up-to-date on the device.
+     * Returns null if available, or an error message if not.
+     */
+    fun checkGooglePlayServices(context: Context): String? {
+        val googleApiAvailability = GoogleApiAvailability.getInstance()
+        val resultCode = googleApiAvailability.isGooglePlayServicesAvailable(context)
+        if (resultCode != ConnectionResult.SUCCESS) {
+            if (googleApiAvailability.isUserResolvableError(resultCode)) {
+                return "Google Play Services needs to be updated for Google Sign-In. Please update it from the Play Store."
+            }
+            return "Google Play Services is not available on this device. Please use Email Sign-In instead."
+        }
+        return null
+    }
+
     /** Google Sign-In using Credential Manager API (Android 14+) */
     suspend fun signInWithGoogle(activity: Activity) {
         try {
             _isLoading.value = true
             _errorMessage.value = null
 
+            // First check Google Play Services
+            val gpsError = checkGooglePlayServices(activity)
+            if (gpsError != null) {
+                _errorMessage.value = gpsError
+                return
+            }
+
             val credentialManager = CredentialManager.create(activity)
 
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
                 .setServerClientId(WEB_CLIENT_ID)
-                .setAutoSelectEnabled(false)
+                .setAutoSelectEnabled(true)
                 .build()
 
             val request = GetCredentialRequest.Builder()
@@ -74,12 +101,18 @@ class AuthViewModel(
             if (authResult.isFailure) {
                 _errorMessage.value = authResult.exceptionOrNull()?.message ?: "Sign-in failed"
             }
+        } catch (e: NoCredentialException) {
+            Log.e(TAG, "No Google credential available", e)
+            _errorMessage.value = "No Google account found on this device. Please sign in with Email instead, or add a Google account in your device Settings."
         } catch (e: GetCredentialException) {
             Log.e(TAG, "Credential exception", e)
             _errorMessage.value = when {
                 e.message?.contains("cancelled", ignoreCase = true) == true -> null
-                e.message?.contains("No credential", ignoreCase = true) == true -> "No Google account found. Please add a Google account to your device."
-                else -> "Google Sign-In failed. Please try again."
+                e.message?.contains("No credential", ignoreCase = true) == true ->
+                    "No Google account found on this device. Please sign in with Email instead, or add a Google account in Settings."
+                e.message?.contains("blocked", ignoreCase = true) == true ->
+                    "Google Sign-In is temporarily unavailable. Please try again or use Email Sign-In."
+                else -> "Google Sign-In failed. Please use Email Sign-In instead."
             }
         } catch (e: Exception) {
             Log.e(TAG, "Sign-in error", e)
@@ -106,7 +139,18 @@ class AuthViewModel(
 
             val authResult = authRepository.signInWithEmail(email, password)
             if (authResult.isFailure) {
-                _errorMessage.value = authResult.exceptionOrNull()?.message ?: "Sign-in failed"
+                val exception = authResult.exceptionOrNull()
+                _errorMessage.value = when {
+                    exception?.message?.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) == true ->
+                        "Invalid email or password. Please check your credentials and try again."
+                    exception?.message?.contains("user not found", ignoreCase = true) == true ->
+                        "No account found with this email. Please register first."
+                    exception?.message?.contains("too many", ignoreCase = true) == true ->
+                        "Too many failed attempts. Please try again later."
+                    exception?.message?.contains("network", ignoreCase = true) == true ->
+                        "Network error. Please check your internet connection."
+                    else -> exception?.message ?: "Sign-in failed"
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Email sign-in error", e)
@@ -145,7 +189,16 @@ class AuthViewModel(
 
             val authResult = authRepository.signUpWithEmail(email, password, displayName)
             if (authResult.isFailure) {
-                _errorMessage.value = authResult.exceptionOrNull()?.message ?: "Registration failed"
+                val exception = authResult.exceptionOrNull()
+                _errorMessage.value = when {
+                    exception?.message?.contains("EMAIL_EXISTS", ignoreCase = true) == true ->
+                        "An account with this email already exists. Please sign in instead."
+                    exception?.message?.contains("WEAK_PASSWORD", ignoreCase = true) == true ->
+                        "Password is too weak. Please use a stronger password."
+                    exception?.message?.contains("network", ignoreCase = true) == true ->
+                        "Network error. Please check your internet connection."
+                    else -> exception?.message ?: "Registration failed"
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Email sign-up error", e)

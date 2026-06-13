@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "809372450511",
+    "firebase_url": "https://zixo-call-default-rtdb.firebaseio.com",
     "project_id": "zixo-call",
     "storage_bucket": "zixo-call.firebasestorage.app"
   },
@@ -20,7 +21,7 @@
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyD09GkPIrT2aiG5KxSort0scFxFqH9i9Rs"
+          "current_key": "AIzaSyBgNhIaIG5jcRkQ7frreFjo1Cz8F3_JfPk"
         }
       ],
       "services": {
