@@ -293,6 +293,28 @@ class FirestoreService @Inject constructor(
     }
 
     // ---------------------------------------------------------------------------
+    // Account data export
+    // ---------------------------------------------------------------------------
+
+    /**
+     * Requests a GDPR-style account data export.
+     * Creates a pending export document in Firestore; a Cloud Function
+     * picks it up, assembles the report, and emails the download link.
+     */
+    fun requestAccountInfo(uid: String): Flow<Unit> = flow {
+        val exportRef = usersCollection.document(uid)
+            .collection("data_exports")
+            .document()
+        exportRef.set(
+            mapOf(
+                "requestedAt" to System.currentTimeMillis(),
+                "status" to "PENDING"
+            )
+        ).await()
+        emit(Unit)
+    }
+
+    // ---------------------------------------------------------------------------
     // Session management
     // ---------------------------------------------------------------------------
 

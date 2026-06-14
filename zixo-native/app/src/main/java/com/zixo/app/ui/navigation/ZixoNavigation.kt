@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,7 +18,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -32,6 +30,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.zixo.app.data.repository.AuthState
 import com.zixo.app.ui.components.ZixoBottomNav
+import com.zixo.app.ui.components.ZixoGlassBackground
 import com.zixo.app.ui.components.ZixoTopBar
 import com.zixo.app.ui.screens.advanced.AdvancedDataScreen
 import com.zixo.app.ui.screens.advanced.AdvancedNetworkScreen
@@ -40,11 +39,15 @@ import com.zixo.app.ui.screens.auth.AuthScreen
 import com.zixo.app.ui.screens.auth.AuthViewModel
 import com.zixo.app.ui.screens.calls.CallsScreen
 import com.zixo.app.ui.screens.chats.ChatsScreen
-import com.zixo.app.ui.screens.editprofile.EditProfileScreen
 import com.zixo.app.ui.screens.encryption.EncryptionKeyScreen
-import com.zixo.app.ui.screens.settings.SettingsScreen
-import com.zixo.app.ui.theme.BackgroundGradientEnd
-import com.zixo.app.ui.theme.BackgroundGradientStart
+import com.zixo.app.ui.settings.EditProfileScreen
+import com.zixo.app.ui.settings.SettingsScreen
+import com.zixo.app.ui.settings.SettingsViewModel
+import com.zixo.app.ui.settings.SubPages.AccountSecurityScreen
+import com.zixo.app.ui.settings.SubPages.ChatConfigScreen
+import com.zixo.app.ui.settings.SubPages.NotificationManagerScreen
+import com.zixo.app.ui.settings.SubPages.PrivacyCenterScreen
+import com.zixo.app.ui.settings.SubPages.StorageDataHubScreen
 
 // ──────────────────────────────────────────────
 // Route Constants
@@ -56,6 +59,11 @@ object ZixoRoutes {
     const val CALLS = "calls"
     const val SETTINGS = "settings"
     const val EDIT_PROFILE = "edit_profile"
+    const val ACCOUNT_SECURITY = "account_security"
+    const val PRIVACY_CENTER = "privacy_center"
+    const val CHAT_CONFIG = "chat_config"
+    const val NOTIFICATION_MANAGER = "notification_manager"
+    const val STORAGE_DATA_HUB = "storage_data_hub"
     const val ADVANCED_NETWORK = "advanced_network"
     const val ADVANCED_SECURITY = "advanced_security"
     const val ADVANCED_DATA = "advanced_data"
@@ -92,6 +100,7 @@ fun ZixoNavHost(
 ) {
     val authViewModel: AuthViewModel = hiltViewModel()
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
+    val settingsViewModel: SettingsViewModel = hiltViewModel()
 
     // Navigate based on auth state changes
     LaunchedEffect(authState) {
@@ -170,12 +179,54 @@ fun ZixoNavHost(
         }
 
         composable(route = ZixoRoutes.SETTINGS) {
-            SettingsScreen(navController = navController)
+            SettingsScreen(
+                navController = navController,
+                viewModel = settingsViewModel,
+            )
         }
 
-        // ── Edit Profile ──────────────────────────────
+        // ── Edit Profile (Liquid Glass) ────────────────
         composable(route = ZixoRoutes.EDIT_PROFILE) {
-            EditProfileScreen(navController = navController)
+            EditProfileScreen(
+                onBackClick = { navController.popBackStack() },
+                viewModel = settingsViewModel,
+            )
+        }
+
+        // ── Settings Sub-Pages (Liquid Glass) ─────────
+        composable(route = ZixoRoutes.ACCOUNT_SECURITY) {
+            AccountSecurityScreen(
+                onBackClick = { navController.popBackStack() },
+                viewModel = settingsViewModel,
+            )
+        }
+
+        composable(route = ZixoRoutes.PRIVACY_CENTER) {
+            PrivacyCenterScreen(
+                onBackClick = { navController.popBackStack() },
+                viewModel = settingsViewModel,
+            )
+        }
+
+        composable(route = ZixoRoutes.CHAT_CONFIG) {
+            ChatConfigScreen(
+                onBackClick = { navController.popBackStack() },
+                viewModel = settingsViewModel,
+            )
+        }
+
+        composable(route = ZixoRoutes.NOTIFICATION_MANAGER) {
+            NotificationManagerScreen(
+                onBackClick = { navController.popBackStack() },
+                viewModel = settingsViewModel,
+            )
+        }
+
+        composable(route = ZixoRoutes.STORAGE_DATA_HUB) {
+            StorageDataHubScreen(
+                onBackClick = { navController.popBackStack() },
+                viewModel = settingsViewModel,
+            )
         }
 
         // ── Advanced Settings ─────────────────────────
@@ -204,7 +255,7 @@ fun ZixoNavHost(
             )
         }
 
-        // ── Blocked Contacts ──────────────────────────
+        // ── Placeholder sub-screens ───────────────────
         composable(route = ZixoRoutes.BLOCKED_CONTACTS) {
             SubScreenPlaceholder(
                 title = "Blocked Contacts",
@@ -212,7 +263,6 @@ fun ZixoNavHost(
             )
         }
 
-        // ── Chat Wallpaper ────────────────────────────
         composable(route = ZixoRoutes.CHAT_WALLPAPER) {
             SubScreenPlaceholder(
                 title = "Chat Wallpaper",
@@ -220,7 +270,6 @@ fun ZixoNavHost(
             )
         }
 
-        // ── Notification Tone ─────────────────────────
         composable(route = ZixoRoutes.NOTIFICATION_TONE) {
             SubScreenPlaceholder(
                 title = "Notification Tone",
@@ -231,7 +280,7 @@ fun ZixoNavHost(
 }
 
 // ──────────────────────────────────────────────
-// Main Scaffold with Bottom Navigation
+// Main Scaffold with Bottom Navigation + Glass BG
 // ──────────────────────────────────────────────
 
 @Composable
@@ -252,52 +301,49 @@ fun ZixoMainScaffold(
         else -> 0
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = {
-            if (showBottomNav) {
-                ZixoBottomNav(
-                    selectedIndex = selectedTabIndex,
-                    onItemSelected = { index ->
-                        val targetRoute = when (index) {
-                            0 -> ZixoRoutes.CHATS
-                            1 -> ZixoRoutes.CALLS
-                            2 -> ZixoRoutes.SETTINGS
-                            else -> ZixoRoutes.CHATS
-                        }
-                        navController.navigate(targetRoute) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+    ZixoGlassBackground {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            bottomBar = {
+                if (showBottomNav) {
+                    ZixoBottomNav(
+                        selectedIndex = selectedTabIndex,
+                        onItemSelected = { index ->
+                            val targetRoute = when (index) {
+                                0 -> ZixoRoutes.CHATS
+                                1 -> ZixoRoutes.CALLS
+                                2 -> ZixoRoutes.SETTINGS
+                                else -> ZixoRoutes.CHATS
                             }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
+                            navController.navigate(targetRoute) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                    )
+                }
+            },
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                ZixoNavHost(
+                    navController = navController,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
-        },
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(BackgroundGradientStart, BackgroundGradientEnd)
-                    )
-                )
-                .padding(innerPadding),
-        ) {
-            ZixoNavHost(
-                navController = navController,
-                modifier = Modifier.fillMaxSize(),
-            )
         }
     }
 }
 
 // ──────────────────────────────────────────────
-// Placeholder for screens not yet implemented
+// Placeholder for screens not yet fully implemented
 // ──────────────────────────────────────────────
 
 @Composable
@@ -305,15 +351,7 @@ private fun SubScreenPlaceholder(
     title: String,
     onBackClick: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(BackgroundGradientStart, BackgroundGradientEnd)
-                )
-            ),
-    ) {
+    ZixoGlassBackground {
         Column(
             modifier = Modifier.fillMaxSize(),
         ) {

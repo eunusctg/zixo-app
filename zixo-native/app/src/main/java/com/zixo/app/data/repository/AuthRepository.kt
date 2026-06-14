@@ -142,4 +142,13 @@ class AuthRepository @Inject constructor(
         firebaseAuthService.sendPasswordResetEmail(email).first()
         emit(Unit)
     }
+
+    /**
+     * Requests a GDPR-style account data export report.
+     * The report is prepared server-side and delivered to the user's registered email.
+     */
+    suspend fun requestAccountInfo() {
+        val uid = firebaseAuthService.getCurrentUser()?.uid ?: return
+        firestoreService.requestAccountInfo(uid).first()
+    }
 }

@@ -1,5 +1,6 @@
 package com.zixo.app.ui.components
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Call
@@ -12,12 +13,9 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-
-private val AccentGreen = Color(0xFF00E676)
-private val TextSecondary = Color(0xFF90A4AE)
-private val NavBackground = Color(0xFF1A2A32)
+import com.zixo.app.ui.theme.NeonMint
+import com.zixo.app.ui.theme.TextSecondary
 
 data class BottomNavItem(
     val label: String,
@@ -57,6 +55,11 @@ private val bottomNavItems = listOf(
     ),
 )
 
+/**
+ * iOS Liquid Glass-styled bottom navigation bar.
+ * Fixed at exactly 80dp height for comfortable touch targets.
+ * Uses the liquidGlassNavItem modifier for the frosted glass visual.
+ */
 @Composable
 fun ZixoBottomNav(
     selectedIndex: Int,
@@ -64,9 +67,11 @@ fun ZixoBottomNav(
     modifier: Modifier = Modifier,
 ) {
     NavigationBar(
-        modifier = modifier,
-        containerColor = NavBackground,
-        contentColor = AccentGreen,
+        modifier = modifier
+            .height(80.dp)
+            .liquidGlassNavItem(),
+        containerColor = Color.Transparent,
+        contentColor = NeonMint,
     ) {
         bottomNavItems.forEachIndexed { index, item ->
             NavigationBarItem(
@@ -79,13 +84,16 @@ fun ZixoBottomNav(
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = AccentGreen,
-                    selectedTextColor = AccentGreen,
+                    selectedIconColor = NeonMint,
+                    selectedTextColor = NeonMint,
                     unselectedIconColor = TextSecondary,
                     unselectedTextColor = TextSecondary,
-                    indicatorColor = AccentGreen.copy(alpha = 0.12f),
+                    indicatorColor = NeonMint.copy(alpha = 0.15f),
                 ),
             )
         }
     }
 }
+
+// Transparent color reference for container
+private val ColorTransparent = androidx.compose.ui.graphics.Color.Transparent

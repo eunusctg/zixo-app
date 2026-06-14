@@ -4,14 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zixo.app.data.repository.AuthRepository
 import com.zixo.app.data.repository.SettingsRepository
+import com.zixo.app.data.repository.SettingsRepositoryImpl
 import com.zixo.app.data.repository.StorageInfo
 import com.zixo.app.data.repository.UserRepository
 import com.zixo.app.domain.model.AutoDownloadMedia
+import com.zixo.app.domain.model.ConversationStorageEntry
 import com.zixo.app.domain.model.DefaultCallType
 import com.zixo.app.domain.model.FontSize
 import com.zixo.app.domain.model.LastSeenVisibility
+import com.zixo.app.domain.model.MediaType
+import com.zixo.app.domain.model.StorageBreakdown
 import com.zixo.app.domain.model.ThemeMode
+import com.zixo.app.domain.model.UploadQuality
 import com.zixo.app.domain.model.User
+import com.zixo.app.domain.model.VibrationPattern
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -19,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -40,14 +47,26 @@ data class SettingsUiState(
     val storageInfo: StorageInfo? = null,
     val isLoading: Boolean = false,
     val showLogoutDialog: Boolean = false,
-    val showDeleteDialog: Boolean = false
+    val showDeleteDialog: Boolean = false,
+    // ── Chat Configuration
+    val enterIsSend: Boolean = true,
+    val isMediaVisibilityEnabled: Boolean = true,
+    val fontSizeScale: Float = 1.0f,
+    // ── Notification Configuration
+    val areConversationTonesEnabled: Boolean = true,
+    val messageNotificationToneUri: String = "",
+    val groupNotificationToneUri: String = "",
+    val callRingtoneUri: String = "",
+    val videoCallRingtoneUri: String = "",
+    val vibrationPattern: VibrationPattern = VibrationPattern.DEFAULT
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val userRepository: UserRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val domainSettingsRepository: SettingsRepositoryImpl
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -91,6 +110,33 @@ class SettingsViewModel @Inject constructor(
     private val noiseSuppressionEnabledFlow = settingsRepository.noiseSuppressionEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    private val enterIsSendFlow = settingsRepository.enterIsSend
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    private val isMediaVisibilityEnabledFlow = settingsRepository.isMediaVisibilityEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    private val fontSizeScaleFlow = settingsRepository.fontSizeScale
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1.0f)
+
+    private val areConversationTonesEnabledFlow = settingsRepository.areConversationTonesEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    private val messageNotificationToneUriFlow = settingsRepository.notificationTone
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    private val groupNotificationToneUriFlow = settingsRepository.groupNotificationToneUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    private val callRingtoneUriFlow = settingsRepository.callRingtoneUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    private val videoCallRingtoneUriFlow = settingsRepository.videoCallRingtoneUri
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
+
+    private val vibrationPatternFlow = settingsRepository.vibrationPattern
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), VibrationPattern.DEFAULT)
+
     init {
         viewModelScope.launch {
             combine(
@@ -106,37 +152,41 @@ class SettingsViewModel @Inject constructor(
                 autoDownloadMediaFlow,
                 defaultCallTypeFlow,
                 noiseSuppressionEnabledFlow,
+                enterIsSendFlow,
+                isMediaVisibilityEnabledFlow,
+                fontSizeScaleFlow,
+                areConversationTonesEnabledFlow,
+                messageNotificationToneUriFlow,
+                groupNotificationToneUriFlow,
+                callRingtoneUriFlow,
+                videoCallRingtoneUriFlow,
+                vibrationPatternFlow,
                 _isLoading
             ) { values ->
-                val currentUser = values[0] as User?
-                val themeMode = values[1] as ThemeMode
-                val fontSize = values[2] as FontSize
-                val lastSeenVisibility = values[3] as LastSeenVisibility
-                val onlineStatusEnabled = values[4] as Boolean
-                val readReceiptsEnabled = values[5] as Boolean
-                val screenLockEnabled = values[6] as Boolean
-                val messagePreviewEnabled = values[7] as Boolean
-                val dndEnabled = values[8] as Boolean
-                val autoDownloadMedia = values[9] as AutoDownloadMedia
-                val defaultCallType = values[10] as DefaultCallType
-                val noiseSuppressionEnabled = values[11] as Boolean
-                val isLoading = values[12] as Boolean
-
                 _uiState.update { current ->
                     current.copy(
-                        currentUser = currentUser,
-                        themeMode = themeMode,
-                        fontSize = fontSize,
-                        lastSeenVisibility = lastSeenVisibility,
-                        onlineStatusEnabled = onlineStatusEnabled,
-                        readReceiptsEnabled = readReceiptsEnabled,
-                        screenLockEnabled = screenLockEnabled,
-                        messagePreviewEnabled = messagePreviewEnabled,
-                        dndEnabled = dndEnabled,
-                        autoDownloadMedia = autoDownloadMedia,
-                        defaultCallType = defaultCallType,
-                        noiseSuppressionEnabled = noiseSuppressionEnabled,
-                        isLoading = isLoading
+                        currentUser = values[0] as User?,
+                        themeMode = values[1] as ThemeMode,
+                        fontSize = values[2] as FontSize,
+                        lastSeenVisibility = values[3] as LastSeenVisibility,
+                        onlineStatusEnabled = values[4] as Boolean,
+                        readReceiptsEnabled = values[5] as Boolean,
+                        screenLockEnabled = values[6] as Boolean,
+                        messagePreviewEnabled = values[7] as Boolean,
+                        dndEnabled = values[8] as Boolean,
+                        autoDownloadMedia = values[9] as AutoDownloadMedia,
+                        defaultCallType = values[10] as DefaultCallType,
+                        noiseSuppressionEnabled = values[11] as Boolean,
+                        enterIsSend = values[12] as Boolean,
+                        isMediaVisibilityEnabled = values[13] as Boolean,
+                        fontSizeScale = values[14] as Float,
+                        areConversationTonesEnabled = values[15] as Boolean,
+                        messageNotificationToneUri = values[16] as String,
+                        groupNotificationToneUri = values[17] as String,
+                        callRingtoneUri = values[18] as String,
+                        videoCallRingtoneUri = values[19] as String,
+                        vibrationPattern = values[20] as VibrationPattern,
+                        isLoading = values[21] as Boolean
                     )
                 }
             }.collect {}
@@ -199,6 +249,46 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.setNoiseSuppressionEnabled(enabled) }
     }
 
+    // ── Chat Configuration ──────────────────────────────────────────────────
+
+    fun setEnterIsSend(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setEnterIsSend(enabled) }
+    }
+
+    fun setMediaVisibilityEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setMediaVisibilityEnabled(enabled) }
+    }
+
+    fun setFontSizeScale(scale: Float) {
+        viewModelScope.launch { settingsRepository.setFontSizeScale(scale) }
+    }
+
+    // ── Notification Configuration ──────────────────────────────────────────
+
+    fun setConversationTonesEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setConversationTonesEnabled(enabled) }
+    }
+
+    fun setMessageNotificationToneUri(uri: String) {
+        viewModelScope.launch { settingsRepository.setNotificationTone(uri) }
+    }
+
+    fun setGroupNotificationToneUri(uri: String) {
+        viewModelScope.launch { settingsRepository.setGroupNotificationToneUri(uri) }
+    }
+
+    fun setCallRingtoneUri(uri: String) {
+        viewModelScope.launch { settingsRepository.setCallRingtoneUri(uri) }
+    }
+
+    fun setVideoCallRingtoneUri(uri: String) {
+        viewModelScope.launch { settingsRepository.setVideoCallRingtoneUri(uri) }
+    }
+
+    fun setVibrationPattern(pattern: VibrationPattern) {
+        viewModelScope.launch { settingsRepository.setVibrationPattern(pattern) }
+    }
+
     // ── Dialogs ─────────────────────────────────────────────────────────────
 
     fun showLogoutDialog() {
@@ -245,6 +335,23 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Requests a GDPR-style account data export report.
+     * The report is prepared server-side and delivered to the user's registered email.
+     */
+    fun requestAccountInfo() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            try {
+                authRepository.requestAccountInfo()
+            } catch (_: Exception) {
+                // Caller handles error via return flow
+            } finally {
+                _uiState.update { it.copy(isLoading = false) }
+            }
+        }
+    }
+
     // ── Storage ─────────────────────────────────────────────────────────────
 
     fun loadStorageUsage() {
@@ -270,5 +377,42 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = false) }
             }
         }
+    }
+
+    // ── Storage & Data Hub ────────────────────────────────────────────────────
+
+    val storageBreakdown: StateFlow<StorageBreakdown> =
+        domainSettingsRepository.getStorageBreakdown()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StorageBreakdown())
+
+    val conversationStorage: StateFlow<List<ConversationStorageEntry>> =
+        domainSettingsRepository.getConversationStorage()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val autoDownloadMobile: StateFlow<Set<MediaType>> =
+        domainSettingsRepository.settingsFlow
+            .map { it.autoDownloadMobile }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    val autoDownloadWifi: StateFlow<Set<MediaType>> =
+        domainSettingsRepository.settingsFlow
+            .map { it.autoDownloadWifi }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), setOf(MediaType.PHOTO))
+
+    val mediaUploadQuality: StateFlow<UploadQuality> =
+        domainSettingsRepository.settingsFlow
+            .map { it.mediaUploadQuality }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UploadQuality.AUTO)
+
+    fun updateAutoDownloadMobile(types: Set<MediaType>) {
+        viewModelScope.launch { domainSettingsRepository.updateAutoDownloadMobile(types) }
+    }
+
+    fun updateAutoDownloadWifi(types: Set<MediaType>) {
+        viewModelScope.launch { domainSettingsRepository.updateAutoDownloadWifi(types) }
+    }
+
+    fun updateMediaUploadQuality(quality: UploadQuality) {
+        viewModelScope.launch { domainSettingsRepository.updateMediaUploadQuality(quality) }
     }
 }

@@ -1,0 +1,892 @@
+     1→package com.zixo.app.ui.screens.settings
+     2→
+     3→import androidx.compose.foundation.background
+     4→import androidx.compose.foundation.clickable
+     5→import androidx.compose.foundation.layout.Arrangement
+     6→import androidx.compose.foundation.layout.Box
+     7→import androidx.compose.foundation.layout.Column
+     8→import androidx.compose.foundation.layout.PaddingValues
+     9→import androidx.compose.foundation.layout.Row
+    10→import androidx.compose.foundation.layout.Spacer
+    11→import androidx.compose.foundation.layout.fillMaxSize
+    12→import androidx.compose.foundation.layout.fillMaxWidth
+    13→import androidx.compose.foundation.layout.height
+    14→import androidx.compose.foundation.layout.padding
+    15→import androidx.compose.foundation.layout.size
+    16→import androidx.compose.foundation.layout.width
+    17→import androidx.compose.foundation.lazy.LazyColumn
+    18→import androidx.compose.foundation.lazy.items
+    19→import androidx.compose.foundation.shape.RoundedCornerShape
+    20→import androidx.compose.material.icons.Icons
+    21→import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+    22→import androidx.compose.material.icons.filled.Block
+    23→import androidx.compose.material.icons.filled.BrandingWatermark
+    24→import androidx.compose.material.icons.filled.Cache
+    25→import androidx.compose.material.icons.filled.Call
+    26→import androidx.compose.material.icons.filled.CloudQueue
+    27→import androidx.compose.material.icons.filled.DataUsage
+    28→import androidx.compose.material.icons.filled.EnhancedEncryption
+    29→import androidx.compose.material.icons.filled.FontDownload
+    30→import androidx.compose.material.icons.filled.Info
+    31→import androidx.compose.material.icons.filled.Lock
+    32→import androidx.compose.material.icons.filled.MicOff
+    33→import androidx.compose.material.icons.filled.Notifications
+    34→import androidx.compose.material.icons.filled.Password
+    35→import androidx.compose.material.icons.filled.Person
+    36→import androidx.compose.material.icons.filled.QrCode2
+    37→import androidx.compose.material.icons.filled.RemoveRedEye
+    38→import androidx.compose.material.icons.filled.Security
+    39→import androidx.compose.material.icons.filled.Share
+    40→import androidx.compose.material.icons.filled.Storage
+    41→import androidx.compose.material.icons.filled.VerifiedUser
+    42→import androidx.compose.material.icons.filled.VisibilityOff
+    43→import androidx.compose.material.icons.filled.Wallpaper
+    44→import androidx.compose.material3.AlertDialog
+    45→import androidx.compose.material3.Button
+    46→import androidx.compose.material3.ButtonDefaults
+    47→import androidx.compose.material3.Card
+    48→import androidx.compose.material3.CardDefaults
+    49→import androidx.compose.material3.CircularProgressIndicator
+    50→import androidx.compose.material3.HorizontalDivider
+    51→import androidx.compose.material3.Icon
+    52→import androidx.compose.material3.MaterialTheme
+    53→import androidx.compose.material3.Scaffold
+    54→import androidx.compose.material3.Text
+    55→import androidx.compose.material3.TextButton
+    56→import androidx.compose.runtime.Composable
+    57→import androidx.compose.runtime.collectAsState
+    58→import androidx.compose.runtime.getValue
+    59→import androidx.compose.ui.Alignment
+    60→import androidx.compose.ui.Modifier
+    61→import androidx.compose.ui.draw.clip
+    62→import androidx.compose.ui.graphics.Brush
+    63→import androidx.compose.ui.graphics.Color
+    64→import androidx.compose.ui.graphics.vector.ImageVector
+    65→import androidx.compose.ui.input.nestedscroll.nestedScroll
+    66→import androidx.compose.ui.text.font.FontWeight
+    67→import androidx.compose.ui.text.style.TextAlign
+    68→import androidx.compose.ui.unit.dp
+    69→import androidx.compose.ui.unit.sp
+    70→import androidx.hilt.navigation.compose.hiltViewModel
+    71→import androidx.navigation.NavController
+    72→import com.zixo.app.ui.navigation.ZixoRoutes
+    73→import com.zixo.app.domain.model.AutoDownloadMedia
+    74→import com.zixo.app.domain.model.DefaultCallType
+    75→import com.zixo.app.domain.model.FontSize
+    76→import com.zixo.app.domain.model.LastSeenVisibility
+    77→import com.zixo.app.domain.model.ThemeMode
+    78→import com.zixo.app.ui.components.AvatarComponent
+    79→import com.zixo.app.ui.components.NavigationItem
+    80→import com.zixo.app.ui.components.SectionHeader
+    81→import com.zixo.app.ui.components.SegmentedPicker
+    82→import com.zixo.app.ui.components.SwitchItem
+    83→import com.zixo.app.ui.components.ZixoNumberBadge
+    84→import com.zixo.app.ui.components.ZixoTopBar
+    85→
+    86→// ──────────────────────────────────────────────────────────────────────────────
+    87→// Color constants matching the project design system
+    88→// ──────────────────────────────────────────────────────────────────────────────
+    89→
+    90→private val BackgroundGradientStart = Color(0xFF0B1519)
+    91→private val BackgroundGradientEnd = Color(0xFF111E24)
+    92→private val CardBackground = Color(0xFF1A2A32)
+    93→private val AccentGreen = Color(0xFF00E676)
+    94→private val TextPrimary = Color.White
+    95→private val TextSecondary = Color(0xFF90A4AE)
+    96→private val DestructiveBackground = Color(0xFF4A1515)
+    97→private val DestructiveText = Color(0xFFFF5252)
+    98→
+    99→// ──────────────────────────────────────────────────────────────────────────────
+   100→// Spacing constants
+   101→// ──────────────────────────────────────────────────────────────────────────────
+   102→
+   103→private val ItemVerticalSpacing = 4.dp
+   104→private val SectionVerticalSpacing = 16.dp
+   105→private val CardCornerRadius = 12.dp
+   106→private val CardHorizontalPadding = 16.dp
+   107→
+   108→// ──────────────────────────────────────────────────────────────────────────────
+   109→// Main Settings Screen
+   110→// ──────────────────────────────────────────────────────────────────────────────
+   111→
+   112→@Composable
+   113→fun SettingsScreen(
+   114→    navController: NavController,
+   115→    viewModel: SettingsViewModel = hiltViewModel()
+   116→) {
+   117→    val uiState by viewModel.uiState.collectAsState()
+   118→
+   119→    val backgroundBrush = Brush.verticalGradient(
+   120→        colors = listOf(BackgroundGradientStart, BackgroundGradientEnd)
+   121→    )
+   122→
+   123→    Scaffold(
+   124→        topBar = {
+   125→            ZixoTopBar(
+   126→                title = "Settings",
+   127→                showBackButton = true,
+   128→                onBackClick = { navController.popBackStack() }
+   129→            )
+   130→        },
+   131→        containerColor = Color.Transparent
+   132→    ) { innerPadding ->
+   133→        Box(
+   134→            modifier = Modifier
+   135→                .fillMaxSize()
+   136→                .background(backgroundBrush)
+   137→        ) {
+   138→            LazyColumn(
+   139→                modifier = Modifier
+   140→                    .fillMaxSize()
+   141→                    .padding(innerPadding),
+   142→                contentPadding = PaddingValues(
+   143→                    start = 16.dp,
+   144→                    end = 16.dp,
+   145→                    top = 8.dp,
+   146→                    bottom = 32.dp
+   147→                ),
+   148→                verticalArrangement = Arrangement.spacedBy(ItemVerticalSpacing)
+   149→            ) {
+   150→                // ── A. Header / User Profile Section ──────────────────────
+   151→                item { UserProfileSection(uiState = uiState, onEditProfile = { navController.navigate(ZixoRoutes.EDIT_PROFILE) }) }
+   152→                item { Spacer(modifier = Modifier.height(SectionVerticalSpacing)) }
+   153→
+   154→                // ── B. Appearance Section ─────────────────────────────────
+   155→                item { SectionHeader(title = "Appearance") }
+   156→                item { AppearanceSection(uiState = uiState, viewModel = viewModel, onWallpaperClick = { navController.navigate(ZixoRoutes.CHAT_WALLPAPER) }) }
+   157→                item { Spacer(modifier = Modifier.height(SectionVerticalSpacing)) }
+   158→
+   159→                // ── C. Privacy & Security Section ─────────────────────────
+   160→                item { SectionHeader(title = "Privacy & Security") }
+   161→                item { PrivacySecuritySection(uiState = uiState, viewModel = viewModel, onEncryptionKeyClick = { navController.navigate(ZixoRoutes.ENCRYPTION_KEY) }, onBlockedContactsClick = { navController.navigate(ZixoRoutes.BLOCKED_CONTACTS) }) }
+   162→                item { Spacer(modifier = Modifier.height(SectionVerticalSpacing)) }
+   163→
+   164→                // ── D. Notifications Section ──────────────────────────────
+   165→                item { SectionHeader(title = "Notifications") }
+   166→                item { NotificationsSection(uiState = uiState, viewModel = viewModel, onNotificationToneClick = { navController.navigate(ZixoRoutes.NOTIFICATION_TONE) }) }
+   167→                item { Spacer(modifier = Modifier.height(SectionVerticalSpacing)) }
+   168→
+   169→                // ── E. Data & Storage Section ─────────────────────────────
+   170→                item { SectionHeader(title = "Data & Storage") }
+   171→                item { DataStorageSection(uiState = uiState, viewModel = viewModel) }
+   172→                item { Spacer(modifier = Modifier.height(SectionVerticalSpacing)) }
+   173→
+   174→                // ── F. Call Settings Section ──────────────────────────────
+   175→                item { SectionHeader(title = "Call Settings") }
+   176→                item { CallSettingsSection(uiState = uiState, viewModel = viewModel) }
+   177→                item { Spacer(modifier = Modifier.height(SectionVerticalSpacing)) }
+   178→
+   179→                // ── G. About & Lifecycle Management Section ───────────────
+   180→                item { SectionHeader(title = "About") }
+   181→                item { AboutSection(uiState = uiState, onAdvancedNetworkClick = { navController.navigate(ZixoRoutes.ADVANCED_NETWORK) }, onEnterpriseSecurityClick = { navController.navigate(ZixoRoutes.ADVANCED_SECURITY) }, onAdvancedDataClick = { navController.navigate(ZixoRoutes.ADVANCED_DATA) }, onLogoutClick = { viewModel.showLogoutDialog() }, onDeleteAccountClick = { viewModel.showDeleteDialog() }) }
+   182→            }
+   183→
+   184→            // ── Logout Confirmation Dialog ───────────────────────────────
+   185→            if (uiState.showLogoutDialog) {
+   186→                LogoutConfirmationDialog(
+   187→                    isLoggingOut = uiState.isLoggingOut,
+   188→                    onConfirm = { viewModel.logout() },
+   189→                    onDismiss = { viewModel.dismissLogoutDialog() }
+   190→                )
+   191→            }
+   192→
+   193→            // ── Delete Account Double-Confirmation Dialog ────────────────
+   194→            if (uiState.showDeleteDialog) {
+   195→                DeleteAccountDialog(
+   196→                    isDeleting = uiState.isDeletingAccount,
+   197→                    onConfirm = { viewModel.deleteAccount() },
+   198→                    onDismiss = { viewModel.dismissDeleteDialog() }
+   199→                )
+   200→            }
+   201→        }
+   202→    }
+   203→}
+   204→
+   205→// ──────────────────────────────────────────────────────────────────────────────
+   206→// A. User Profile Section
+   207→// ──────────────────────────────────────────────────────────────────────────────
+   208→
+   209→@Composable
+   210→private fun UserProfileSection(
+   211→    uiState: SettingsUiState,
+   212→    onEditProfile: () -> Unit
+   213→) {
+   214→    val user = uiState.currentUser
+   215→
+   216→    Card(
+   217→        modifier = Modifier.fillMaxWidth(),
+   218→        shape = RoundedCornerShape(CardCornerRadius),
+   219→        colors = CardDefaults.cardColors(containerColor = CardBackground),
+   220→        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+   221→    ) {
+   222→        Column(
+   223→            modifier = Modifier
+   224→                .fillMaxWidth()
+   225→                .padding(horizontal = CardHorizontalPadding, vertical = 20.dp),
+   226→            horizontalAlignment = Alignment.CenterHorizontally
+   227→        ) {
+   228→            // Avatar - clickable to edit profile
+   229→            AvatarComponent(
+   230→                imageUrl = user.photoUrl,
+   231→                name = user.displayName,
+   232→                size = 80.dp,
+   233→                isOnline = user.isOnline,
+   234→                modifier = Modifier.clickable(onClick = onEditProfile)
+   235→            )
+   236→
+   237→            Spacer(modifier = Modifier.height(12.dp))
+   238→
+   239→            // Display Name
+   240→            Text(
+   241→                text = user.displayName.ifBlank { "Unknown User" },
+   242→                color = TextPrimary,
+   243→                fontSize = 22.sp,
+   244→                fontWeight = FontWeight.Bold,
+   245→                textAlign = TextAlign.Center
+   246→            )
+   247→
+   248→            Spacer(modifier = Modifier.height(2.dp))
+   249→
+   250→            // Username
+   251→            if (user.username.isNotBlank()) {
+   252→                Text(
+   253→                    text = "@${user.username}",
+   254→                    color = TextSecondary,
+   255→                    fontSize = 15.sp,
+   256→                    fontWeight = FontWeight.Normal,
+   257→                    textAlign = TextAlign.Center
+   258→                )
+   259→            }
+   260→
+   261→            // Bio/Status
+   262→            if (!user.bio.isNullOrBlank()) {
+   263→                Spacer(modifier = Modifier.height(6.dp))
+   264→                Text(
+   265→                    text = user.bio,
+   266→                    color = TextSecondary,
+   267→                    fontSize = 14.sp,
+   268→                    fontWeight = FontWeight.Normal,
+   269→                    textAlign = TextAlign.Center
+   270→                )
+   271→            }
+   272→
+   273→            Spacer(modifier = Modifier.height(16.dp))
+   274→
+   275→            // Zixo Number Badge
+   276→            if (user.zixoNumber.isNotBlank()) {
+   277→                ZixoNumberBadge(zixoNumber = user.zixoNumber)
+   278→            }
+   279→
+   280→            Spacer(modifier = Modifier.height(12.dp))
+   281→
+   282→            // QR Code Shortcut Row
+   283→            Row(
+   284→                modifier = Modifier
+   285→                    .fillMaxWidth()
+   286→                    .clip(RoundedCornerShape(10.dp))
+   287→                    .background(CardBackground.copy(alpha = 0.5f))
+   288→                    .clickable { /* Navigate to QR code screen */ }
+   289→                    .padding(horizontal = 16.dp, vertical = 12.dp),
+   290→                verticalAlignment = Alignment.CenterVertically,
+   291→                horizontalArrangement = Arrangement.SpaceBetween
+   292→            ) {
+   293→                Row(verticalAlignment = Alignment.CenterVertically) {
+   294→                    Icon(
+   295→                        imageVector = Icons.Filled.QrCode2,
+   296→                        contentDescription = "QR Code",
+   297→                        tint = AccentGreen,
+   298→                        modifier = Modifier.size(22.dp)
+   299→                    )
+   300→                    Spacer(modifier = Modifier.width(10.dp))
+   301→                    Text(
+   302→                        text = "My QR Code",
+   303→                        color = TextPrimary,
+   304→                        fontSize = 15.sp,
+   305→                        fontWeight = FontWeight.Medium
+   306→                    )
+   307→                }
+   308→
+   309→                Icon(
+   310→                    imageVector = Icons.Filled.Share,
+   311→                    contentDescription = "Share",
+   312→                    tint = TextSecondary,
+   313→                    modifier = Modifier.size(20.dp)
+   314→                )
+   315→            }
+   316→        }
+   317→    }
+   318→}
+   319→
+   320→// ──────────────────────────────────────────────────────────────────────────────
+   321→// B. Appearance Section
+   322→// ──────────────────────────────────────────────────────────────────────────────
+   323→
+   324→@Composable
+   325→private fun AppearanceSection(
+   326→    uiState: SettingsUiState,
+   327→    viewModel: SettingsViewModel,
+   328→    onWallpaperClick: () -> Unit
+   329→) {
+   330→    Column(verticalArrangement = Arrangement.spacedBy(ItemVerticalSpacing)) {
+   331→        // Theme Selector
+   332→        SettingsCard {
+   333→            Column(modifier = Modifier.padding(horizontal = CardHorizontalPadding, vertical = 14.dp)) {
+   334→                Text(
+   335→                    text = "Theme",
+   336→                    color = TextPrimary,
+   337→                    fontSize = 16.sp,
+   338→                    fontWeight = FontWeight.Medium,
+   339→                    modifier = Modifier.padding(bottom = 8.dp)
+   340→                )
+   341→                SegmentedPicker(
+   342→                    options = listOf("Dark", "AMOLED", "System"),
+   343→                    selectedIndex = uiState.themeMode.toSegmentIndex(),
+   344→                    onOptionSelected = { index ->
+   345→                        viewModel.setThemeMode(ThemeMode.fromSegmentIndex(index))
+   346→                    }
+   347→                )
+   348→            }
+   349→        }
+   350→
+   351→        // Chat Wallpaper
+   352→        NavigationItem(
+   353→            title = "Chat Wallpaper",
+   354→            icon = Icons.Filled.Wallpaper,
+   355→            onClick = onWallpaperClick
+   356→        )
+   357→
+   358→        // Font Size
+   359→        SettingsCard {
+   360→            Column(modifier = Modifier.padding(horizontal = CardHorizontalPadding, vertical = 14.dp)) {
+   361→                Text(
+   362→                    text = "Font Size",
+   363→                    color = TextPrimary,
+   364→                    fontSize = 16.sp,
+   365→                    fontWeight = FontWeight.Medium,
+   366→                    modifier = Modifier.padding(bottom = 8.dp)
+   367→                )
+   368→                SegmentedPicker(
+   369→                    options = listOf("Small", "Medium", "Large"),
+   370→                    selectedIndex = uiState.fontSize.toSegmentIndex(),
+   371→                    onOptionSelected = { index ->
+   372→                        viewModel.setFontSize(FontSize.fromSegmentIndex(index))
+   373→                    }
+   374→                )
+   375→            }
+   376→        }
+   377→    }
+   378→}
+   379→
+   380→// ──────────────────────────────────────────────────────────────────────────────
+   381→// C. Privacy & Security Section
+   382→// ──────────────────────────────────────────────────────────────────────────────
+   383→
+   384→@Composable
+   385→private fun PrivacySecuritySection(
+   386→    uiState: SettingsUiState,
+   387→    viewModel: SettingsViewModel,
+   388→    onEncryptionKeyClick: () -> Unit,
+   389→    onBlockedContactsClick: () -> Unit
+   390→) {
+   391→    Column(verticalArrangement = Arrangement.spacedBy(ItemVerticalSpacing)) {
+   392→        // Last Seen Visibility
+   393→        SettingsCard {
+   394→            Column(modifier = Modifier.padding(horizontal = CardHorizontalPadding, vertical = 14.dp)) {
+   395→                Text(
+   396→                    text = "Last Seen Visibility",
+   397→                    color = TextPrimary,
+   398→                    fontSize = 16.sp,
+   399→                    fontWeight = FontWeight.Medium,
+   400→                    modifier = Modifier.padding(bottom = 8.dp)
+   401→                )
+   402→                SegmentedPicker(
+   403→                    options = listOf("Everyone", "Contacts", "Nobody"),
+   404→                    selectedIndex = uiState.lastSeenVisibility.toSegmentIndex(),
+   405→                    onOptionSelected = { index ->
+   406→                        viewModel.setLastSeenVisibility(LastSeenVisibility.fromSegmentIndex(index))
+   407→                    }
+   408→                )
+   409→            }
+   410→        }
+   411→
+   412→        // Online Status
+   413→        SwitchItem(
+   414→            title = "Online Status",
+   415→            checked = uiState.onlineStatusEnabled,
+   416→            onCheckedChange = { viewModel.setOnlineStatusEnabled(it) },
+   417→            icon = Icons.Filled.RemoveRedEye
+   418→        )
+   419→
+   420→        // Read Receipts
+   421→        SwitchItem(
+   422→            title = "Read Receipts",
+   423→            checked = uiState.readReceiptsEnabled,
+   424→            onCheckedChange = { viewModel.setReadReceiptsEnabled(it) },
+   425→            icon = Icons.Filled.VisibilityOff
+   426→        )
+   427→
+   428→        // Screen Lock
+   429→        SwitchItem(
+   430→            title = "Screen Lock",
+   431→            checked = uiState.screenLockEnabled,
+   432→            onCheckedChange = { viewModel.setScreenLockEnabled(it) },
+   433→            icon = Icons.Filled.Lock
+   434→        )
+   435→
+   436→        // Encryption Key
+   437→        NavigationItem(
+   438→            title = "Encryption Key",
+   439→            icon = Icons.Filled.EnhancedEncryption,
+   440→            onClick = onEncryptionKeyClick
+   441→        )
+   442→
+   443→        // Blocked Contacts
+   444→        NavigationItem(
+   445→            title = "Blocked Contacts",
+   446→            icon = Icons.Filled.Block,
+   447→            onClick = onBlockedContactsClick
+   448→        )
+   449→    }
+   450→}
+   451→
+   452→// ──────────────────────────────────────────────────────────────────────────────
+   453→// D. Notifications Section
+   454→// ──────────────────────────────────────────────────────────────────────────────
+   455→
+   456→@Composable
+   457→private fun NotificationsSection(
+   458→    uiState: SettingsUiState,
+   459→    viewModel: SettingsViewModel,
+   460→    onNotificationToneClick: () -> Unit
+   461→) {
+   462→    Column(verticalArrangement = Arrangement.spacedBy(ItemVerticalSpacing)) {
+   463→        // Message Preview
+   464→        SwitchItem(
+   465→            title = "Message Preview",
+   466→            checked = uiState.messagePreviewEnabled,
+   467→            onCheckedChange = { viewModel.setMessagePreviewEnabled(it) },
+   468→            icon = Icons.Filled.Notifications
+   469→        )
+   470→
+   471→        // Notification Tone
+   472→        NavigationItem(
+   473→            title = "Notification Tone",
+   474→            icon = Icons.Filled.Notifications,
+   475→            onClick = onNotificationToneClick,
+   476→            subtitle = if (uiState.notificationTone.isNotBlank()) uiState.notificationTone else "Default"
+   477→        )
+   478→
+   479→        // Do Not Disturb
+   480→        SwitchItem(
+   481→            title = "Do Not Disturb",
+   482→            checked = uiState.dndEnabled,
+   483→            onCheckedChange = { viewModel.setDndEnabled(it) },
+   484→            icon = Icons.Filled.Notifications
+   485→        )
+   486→    }
+   487→}
+   488→
+   489→// ──────────────────────────────────────────────────────────────────────────────
+   490→// E. Data & Storage Section
+   491→// ──────────────────────────────────────────────────────────────────────────────
+   492→
+   493→@Composable
+   494→private fun DataStorageSection(
+   495→    uiState: SettingsUiState,
+   496→    viewModel: SettingsViewModel
+   497→) {
+   498→    Column(verticalArrangement = Arrangement.spacedBy(ItemVerticalSpacing)) {
+   499→        // Storage Usage
+   500→        NavigationItem(
+   501→            title = "Storage Usage",
+   502→            icon = Icons.Filled.Storage,
+   503→            onClick = { /* Navigate to storage detail */ },
+   504→            subtitle = uiState.storageInfo?.let { "${String.format("%.1f", it.totalMB)} MB" } ?: "Calculating…"
+   505→        )
+   506→
+   507→        // Auto-Download Media
+   508→        SettingsCard {
+   509→            Column(modifier = Modifier.padding(horizontal = CardHorizontalPadding, vertical = 14.dp)) {
+   510→                Text(
+   511→                    text = "Auto-Download Media",
+   512→                    color = TextPrimary,
+   513→                    fontSize = 16.sp,
+   514→                    fontWeight = FontWeight.Medium,
+   515→                    modifier = Modifier.padding(bottom = 8.dp)
+   516→                )
+   517→                SegmentedPicker(
+   518→                    options = listOf("Wi-Fi Only", "Cellular", "Never"),
+   519→                    selectedIndex = uiState.autoDownloadMedia.toSegmentIndex(),
+   520→                    onOptionSelected = { index ->
+   521→                        viewModel.setAutoDownloadMedia(AutoDownloadMedia.fromSegmentIndex(index))
+   522→                    }
+   523→                )
+   524→            }
+   525→        }
+   526→
+   527→        // Clear Cache
+   528→        NavigationItem(
+   529→            title = if (uiState.isClearingCache) "Clearing Cache…" else "Clear Cache",
+   530→            icon = Icons.Filled.Cache,
+   531→            onClick = { viewModel.clearCache() }
+   532→        )
+   533→    }
+   534→}
+   535→
+   536→// ──────────────────────────────────────────────────────────────────────────────
+   537→// F. Call Settings Section
+   538→// ──────────────────────────────────────────────────────────────────────────────
+   539→
+   540→@Composable
+   541→private fun CallSettingsSection(
+   542→    uiState: SettingsUiState,
+   543→    viewModel: SettingsViewModel
+   544→) {
+   545→    Column(verticalArrangement = Arrangement.spacedBy(ItemVerticalSpacing)) {
+   546→        // Default Call Type
+   547→        SettingsCard {
+   548→            Column(modifier = Modifier.padding(horizontal = CardHorizontalPadding, vertical = 14.dp)) {
+   549→                Text(
+   550→                    text = "Default Call Type",
+   551→                    color = TextPrimary,
+   552→                    fontSize = 16.sp,
+   553→                    fontWeight = FontWeight.Medium,
+   554→                    modifier = Modifier.padding(bottom = 8.dp)
+   555→                )
+   556→                SegmentedPicker(
+   557→                    options = listOf("Ask Every Time", "LiveKit SIP", "WebRTC Video"),
+   558→                    selectedIndex = uiState.defaultCallType.toSegmentIndex(),
+   559→                    onOptionSelected = { index ->
+   560→                        viewModel.setDefaultCallType(DefaultCallType.fromSegmentIndex(index))
+   561→                    }
+   562→                )
+   563→            }
+   564→        }
+   565→
+   566→        // Noise Suppression
+   567→        SwitchItem(
+   568→            title = "Noise Suppression",
+   569→            checked = uiState.noiseSuppressionEnabled,
+   570→            onCheckedChange = { viewModel.setNoiseSuppressionEnabled(it) },
+   571→            icon = Icons.Filled.MicOff
+   572→        )
+   573→    }
+   574→}
+   575→
+   576→// ──────────────────────────────────────────────────────────────────────────────
+   577→// G. About & Lifecycle Management Section
+   578→// ──────────────────────────────────────────────────────────────────────────────
+   579→
+   580→@Composable
+   581→private fun AboutSection(
+   582→    uiState: SettingsUiState,
+   583→    onAdvancedNetworkClick: () -> Unit,
+   584→    onEnterpriseSecurityClick: () -> Unit,
+   585→    onAdvancedDataClick: () -> Unit,
+   586→    onLogoutClick: () -> Unit,
+   587→    onDeleteAccountClick: () -> Unit
+   588→) {
+   589→    Column(verticalArrangement = Arrangement.spacedBy(ItemVerticalSpacing)) {
+   590→        // App Version
+   591→        NavigationItem(
+   592→            title = "App Version",
+   593→            icon = Icons.Filled.Info,
+   594→            onClick = { /* No-op, informational */ },
+   595→            subtitle = uiState.appVersion
+   596→        )
+   597→
+   598→        // Mission Statement
+   599→        Card(
+   600→            modifier = Modifier.fillMaxWidth(),
+   601→            shape = RoundedCornerShape(CardCornerRadius),
+   602→            colors = CardDefaults.cardColors(containerColor = CardBackground),
+   603→            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+   604→        ) {
+   605→            Text(
+   606→                text = "Secure, private, and seamless communication for everyone.",
+   607→                color = TextSecondary,
+   608→                fontSize = 13.sp,
+   609→                fontWeight = FontWeight.Normal,
+   610→                lineHeight = 18.sp,
+   611→                textAlign = TextAlign.Center,
+   612→                modifier = Modifier
+   613→                    .fillMaxWidth()
+   614→                    .padding(horizontal = CardHorizontalPadding, vertical = 14.dp)
+   615→            )
+   616→        }
+   617→
+   618→        // Advanced Network & Calling
+   619→        NavigationItem(
+   620→            title = "Advanced Network & Calling",
+   621→            icon = Icons.Filled.Call,
+   622→            onClick = onAdvancedNetworkClick
+   623→        )
+   624→
+   625→        // Enterprise Security
+   626→        NavigationItem(
+   627→            title = "Enterprise Security",
+   628→            icon = Icons.Filled.Security,
+   629→            onClick = onEnterpriseSecurityClick
+   630→        )
+   631→
+   632→        // Enhanced Data & Cloud Sync
+   633→        NavigationItem(
+   634→            title = "Enhanced Data & Cloud Sync",
+   635→            icon = Icons.Filled.CloudQueue,
+   636→            onClick = onAdvancedDataClick
+   637→        )
+   638→
+   639→        Spacer(modifier = Modifier.height(8.dp))
+   640→
+   641→        // Log Out Button
+   642→        Button(
+   643→            onClick = onLogoutClick,
+   644→            modifier = Modifier
+   645→                .fillMaxWidth()
+   646→                .height(50.dp),
+   647→            shape = RoundedCornerShape(CardCornerRadius),
+   648→            colors = ButtonDefaults.buttonColors(
+   649→                containerColor = DestructiveBackground,
+   650→                contentColor = DestructiveText
+   651→            ),
+   652→            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+   653→        ) {
+   654→            Text(
+   655→                text = if (uiState.isLoggingOut) "Logging Out…" else "Log Out",
+   656→                color = DestructiveText,
+   657→                fontSize = 16.sp,
+   658→                fontWeight = FontWeight.SemiBold
+   659→            )
+   660→        }
+   661→
+   662→        // Delete Account Button
+   663→        TextButton(
+   664→            onClick = onDeleteAccountClick,
+   665→            modifier = Modifier.fillMaxWidth(),
+   666→            shape = RoundedCornerShape(CardCornerRadius)
+   667→        ) {
+   668→            Text(
+   669→                text = if (uiState.isDeletingAccount) "Deleting Account…" else "Delete Account",
+   670→                color = DestructiveText,
+   671→                fontSize = 15.sp,
+   672→                fontWeight = FontWeight.Medium
+   673→            )
+   674→        }
+   675→
+   676→        Spacer(modifier = Modifier.height(16.dp))
+   677→    }
+   678→}
+   679→
+   680→// ──────────────────────────────────────────────────────────────────────────────
+   681→// Confirmation Dialogs
+   682→// ──────────────────────────────────────────────────────────────────────────────
+   683→
+   684→@Composable
+   685→private fun LogoutConfirmationDialog(
+   686→    isLoggingOut: Boolean,
+   687→    onConfirm: () -> Unit,
+   688→    onDismiss: () -> Unit
+   689→) {
+   690→    AlertDialog(
+   691→        onDismissRequest = { if (!isLoggingOut) onDismiss() },
+   692→        title = {
+   693→            Text(
+   694→                text = "Log Out",
+   695→                color = TextPrimary,
+   696→                fontWeight = FontWeight.Bold
+   697→            )
+   698→        },
+   699→        text = {
+   700→            Text(
+   701→                text = "Are you sure you want to log out of your Zixo account?",
+   702→                color = TextSecondary,
+   703→                lineHeight = 20.sp
+   704→            )
+   705→        },
+   706→        confirmButton = {
+   707→            Button(
+   708→                onClick = onConfirm,
+   709→                enabled = !isLoggingOut,
+   710→                colors = ButtonDefaults.buttonColors(
+   711→                    containerColor = DestructiveBackground,
+   712→                    contentColor = DestructiveText
+   713→                )
+   714→            ) {
+   715→                if (isLoggingOut) {
+   716→                    CircularProgressIndicator(
+   717→                        modifier = Modifier.size(18.dp),
+   718→                        color = DestructiveText,
+   719→                        strokeWidth = 2.dp
+   720→                    )
+   721→                } else {
+   722→                    Text("Log Out", color = DestructiveText, fontWeight = FontWeight.SemiBold)
+   723→                }
+   724→            }
+   725→        },
+   726→        dismissButton = {
+   727→            TextButton(
+   728→                onClick = onDismiss,
+   729→                enabled = !isLoggingOut
+   730→            ) {
+   731→                Text("Cancel", color = TextSecondary)
+   732→            }
+   733→        },
+   734→        containerColor = CardBackground,
+   735→        titleContentColor = TextPrimary,
+   736→        textContentColor = TextSecondary,
+   737→        shape = RoundedCornerShape(16.dp)
+   738→    )
+   739→}
+   740→
+   741→@Composable
+   742→private fun DeleteAccountDialog(
+   743→    isDeleting: Boolean,
+   744→    onConfirm: () -> Unit,
+   745→    onDismiss: () -> Unit
+   746→) {
+   747→    AlertDialog(
+   748→        onDismissRequest = { if (!isDeleting) onDismiss() },
+   749→        title = {
+   750→            Text(
+   751→                text = "Delete Account",
+   752→                color = DestructiveText,
+   753→                fontWeight = FontWeight.Bold
+   754→            )
+   755→        },
+   756→        text = {
+   757→            Column {
+   758→                Text(
+   759→                    text = "This action is permanent and cannot be undone.",
+   760→                    color = TextPrimary,
+   761→                    fontWeight = FontWeight.SemiBold,
+   762→                    lineHeight = 20.sp
+   763→                )
+   764→                Spacer(modifier = Modifier.height(8.dp))
+   765→                Text(
+   766→                    text = "All your data including messages, call history, contacts, and account information will be permanently deleted from Zixo servers. You will not be able to recover this account or any associated data.",
+   767→                    color = TextSecondary,
+   768→                    lineHeight = 20.sp
+   769→                )
+   770→            }
+   771→        },
+   772→        confirmButton = {
+   773→            Button(
+   774→                onClick = onConfirm,
+   775→                enabled = !isDeleting,
+   776→                colors = ButtonDefaults.buttonColors(
+   777→                    containerColor = DestructiveBackground,
+   778→                    contentColor = DestructiveText
+   779→                )
+   780→            ) {
+   781→                if (isDeleting) {
+   782→                    CircularProgressIndicator(
+   783→                        modifier = Modifier.size(18.dp),
+   784→                        color = DestructiveText,
+   785→                        strokeWidth = 2.dp
+   786→                    )
+   787→                } else {
+   788→                    Text("Delete Permanently", color = DestructiveText, fontWeight = FontWeight.SemiBold)
+   789→                }
+   790→            }
+   791→        },
+   792→        dismissButton = {
+   793→            TextButton(
+   794→                onClick = onDismiss,
+   795→                enabled = !isDeleting
+   796→            ) {
+   797→                Text("Cancel", color = TextSecondary)
+   798→            }
+   799→        },
+   800→        containerColor = CardBackground,
+   801→        titleContentColor = DestructiveText,
+   802→        textContentColor = TextSecondary,
+   803→        shape = RoundedCornerShape(16.dp)
+   804→    )
+   805→}
+   806→
+   807→// ──────────────────────────────────────────────────────────────────────────────
+   808→// Reusable card wrapper for section items that need custom content
+   809→// ──────────────────────────────────────────────────────────────────────────────
+   810→
+   811→@Composable
+   812→private fun SettingsCard(
+   813→    content: @Composable () -> Unit
+   814→) {
+   815→    Card(
+   816→        modifier = Modifier.fillMaxWidth(),
+   817→        shape = RoundedCornerShape(CardCornerRadius),
+   818→        colors = CardDefaults.cardColors(containerColor = CardBackground),
+   819→        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+   820→        content = content
+   821→    )
+   822→}
+   823→
+   824→// ──────────────────────────────────────────────────────────────────────────────
+   825→// Enum ↔ Segmented Index mapping extensions
+   826→// ──────────────────────────────────────────────────────────────────────────────
+   827→
+   828→private fun ThemeMode.toSegmentIndex(): Int = when (this) {
+   829→    ThemeMode.DARK -> 0
+   830→    ThemeMode.AMOLED -> 1
+   831→    ThemeMode.SYSTEM -> 2
+   832→}
+   833→
+   834→private fun ThemeMode.Companion.fromSegmentIndex(index: Int): ThemeMode = when (index) {
+   835→    0 -> ThemeMode.DARK
+   836→    1 -> ThemeMode.AMOLED
+   837→    2 -> ThemeMode.SYSTEM
+   838→    else -> ThemeMode.SYSTEM
+   839→}
+   840→
+   841→private fun FontSize.toSegmentIndex(): Int = when (this) {
+   842→    FontSize.SMALL -> 0
+   843→    FontSize.MEDIUM -> 1
+   844→    FontSize.LARGE -> 2
+   845→}
+   846→
+   847→private fun FontSize.Companion.fromSegmentIndex(index: Int): FontSize = when (index) {
+   848→    0 -> FontSize.SMALL
+   849→    1 -> FontSize.MEDIUM
+   850→    2 -> FontSize.LARGE
+   851→    else -> FontSize.MEDIUM
+   852→}
+   853→
+   854→private fun LastSeenVisibility.toSegmentIndex(): Int = when (this) {
+   855→    LastSeenVisibility.EVERYONE -> 0
+   856→    LastSeenVisibility.CONTACTS -> 1
+   857→    LastSeenVisibility.NOBODY -> 2
+   858→}
+   859→
+   860→private fun LastSeenVisibility.Companion.fromSegmentIndex(index: Int): LastSeenVisibility = when (index) {
+   861→    0 -> LastSeenVisibility.EVERYONE
+   862→    1 -> LastSeenVisibility.CONTACTS
+   863→    2 -> LastSeenVisibility.NOBODY
+   864→    else -> LastSeenVisibility.EVERYONE
+   865→}
+   866→
+   867→private fun AutoDownloadMedia.toSegmentIndex(): Int = when (this) {
+   868→    AutoDownloadMedia.WIFI_ONLY -> 0
+   869→    AutoDownloadMedia.CELLULAR -> 1
+   870→    AutoDownloadMedia.NEVER -> 2
+   871→}
+   872→
+   873→private fun AutoDownloadMedia.Companion.fromSegmentIndex(index: Int): AutoDownloadMedia = when (index) {
+   874→    0 -> AutoDownloadMedia.WIFI_ONLY
+   875→    1 -> AutoDownloadMedia.CELLULAR
+   876→    2 -> AutoDownloadMedia.NEVER
+   877→    else -> AutoDownloadMedia.WIFI_ONLY
+   878→}
+   879→
+   880→private fun DefaultCallType.toSegmentIndex(): Int = when (this) {
+   881→    DefaultCallType.ASK_EVERY_TIME -> 0
+   882→    DefaultCallType.LIVEKIT_SIP -> 1
+   883→    DefaultCallType.WEBRTC_VIDEO -> 2
+   884→}
+   885→
+   886→private fun DefaultCallType.Companion.fromSegmentIndex(index: Int): DefaultCallType = when (index) {
+   887→    0 -> DefaultCallType.ASK_EVERY_TIME
+   888→    1 -> DefaultCallType.LIVEKIT_SIP
+   889→    2 -> DefaultCallType.WEBRTC_VIDEO
+   890→    else -> DefaultCallType.ASK_EVERY_TIME
+   891→}
+   892→

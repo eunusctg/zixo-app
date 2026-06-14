@@ -14,6 +14,7 @@ import com.zixo.app.domain.model.MediaCompressionProfile
 import com.zixo.app.domain.model.SelfDestructTimer
 import com.zixo.app.domain.model.Session
 import com.zixo.app.domain.model.ThemeMode
+import com.zixo.app.domain.model.VibrationPattern
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -57,6 +58,46 @@ class SettingsRepository @Inject constructor(
     val chatWallpaper: Flow<String> = userPreferences.chatWallpaper
 
     suspend fun setChatWallpaper(assetPath: String) = userPreferences.setChatWallpaper(assetPath)
+
+    val enterIsSend: Flow<Boolean> = userPreferences.enterIsSend
+
+    suspend fun setEnterIsSend(enabled: Boolean) = userPreferences.setEnterIsSend(enabled)
+
+    val isMediaVisibilityEnabled: Flow<Boolean> = userPreferences.isMediaVisibilityEnabled
+
+    suspend fun setMediaVisibilityEnabled(enabled: Boolean) =
+        userPreferences.setMediaVisibilityEnabled(enabled)
+
+    val fontSizeScale: Flow<Float> = userPreferences.fontSizeScale
+
+    suspend fun setFontSizeScale(scale: Float) = userPreferences.setFontSizeScale(scale)
+
+    // ── Notification Tones ──────────────────────────────────────────────────
+
+    val areConversationTonesEnabled: Flow<Boolean> = userPreferences.areConversationTonesEnabled
+
+    suspend fun setConversationTonesEnabled(enabled: Boolean) =
+        userPreferences.setConversationTonesEnabled(enabled)
+
+    val groupNotificationToneUri: Flow<String> = userPreferences.groupNotificationToneUri
+
+    suspend fun setGroupNotificationToneUri(uri: String) =
+        userPreferences.setGroupNotificationToneUri(uri)
+
+    val callRingtoneUri: Flow<String> = userPreferences.callRingtoneUri
+
+    suspend fun setCallRingtoneUri(uri: String) =
+        userPreferences.setCallRingtoneUri(uri)
+
+    val videoCallRingtoneUri: Flow<String> = userPreferences.videoCallRingtoneUri
+
+    suspend fun setVideoCallRingtoneUri(uri: String) =
+        userPreferences.setVideoCallRingtoneUri(uri)
+
+    val vibrationPattern: Flow<VibrationPattern> = userPreferences.vibrationPattern
+
+    suspend fun setVibrationPattern(pattern: VibrationPattern) =
+        userPreferences.setVibrationPattern(pattern)
 
     // ── Privacy ─────────────────────────────────────────────────────────────
 

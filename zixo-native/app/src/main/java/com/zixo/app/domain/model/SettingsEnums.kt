@@ -47,3 +47,12 @@ enum class AudioProfile { HIGH_FIDELITY, NARROWBAND }
  * Self-destructing media default countdown timers.
  */
 enum class SelfDestructTimer { OFF, FIVE_SECONDS, ONE_MINUTE, ONE_HOUR }
+
+/**
+ * Vibration pattern for incoming message notifications.
+ * OFF: No vibration at all.
+ * DEFAULT: System default vibration pattern.
+ * SHORT: Brief single-pulse vibration.
+ * LONG: Extended multi-pulse vibration.
+ */
+enum class VibrationPattern { OFF, DEFAULT, SHORT, LONG }

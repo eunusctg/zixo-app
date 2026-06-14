@@ -10,11 +10,16 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.zixo.app.domain.model.ThemeMode
+
+// ════════════════════════════════════════════════════════════════
+// ZIXO DARK — Custom Slate / Dark Emerald Matrix
+// ════════════════════════════════════════════════════════════════
 
 private val ZixoDarkColorScheme = darkColorScheme(
     primary = NeonMint,
@@ -54,6 +59,10 @@ private val ZixoDarkColorScheme = darkColorScheme(
     scrim = ScrimDark,
 )
 
+// ════════════════════════════════════════════════════════════════
+// ZIXO AMOLED — Pure Black (#000000) Power-Saving Variant
+// ════════════════════════════════════════════════════════════════
+
 private val ZixoAmoledColorScheme = ZixoDarkColorScheme.copy(
     background = AmoledBlack,
     onBackground = TextPrimary,
@@ -72,6 +81,10 @@ private val ZixoAmoledColorScheme = ZixoDarkColorScheme.copy(
     outlineVariant = Color(0xFF1A1A1A),
     scrim = AmoledBlack,
 )
+
+// ════════════════════════════════════════════════════════════════
+// ZIXO LIGHT — Full Material 3 Light Palette
+// ════════════════════════════════════════════════════════════════
 
 private val ZixoLightColorScheme = lightColorScheme(
     primary = LightPrimary,
@@ -111,6 +124,22 @@ private val ZixoLightColorScheme = lightColorScheme(
     scrim = ScrimLight,
 )
 
+// ════════════════════════════════════════════════════════════════
+// ZIXO THEME — Composable Entry Point
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * Root theme composable for the entire Zixo application.
+ *
+ * @param themeMode   DARK  → custom slate/emerald matrix,
+ *                    AMOLED → pure-black power-saving variant,
+ *                    SYSTEM → follows Android system setting.
+ * @param dynamicColor When true & API 31+, uses Material You
+ *                    dynamic colours from the user's wallpaper.
+ *                    Defaults to `false` so the Zixo brand
+ *                    palette is always shown unless the user
+ *                    explicitly enables Material You.
+ */
 @Composable
 fun ZixoTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -118,32 +147,39 @@ fun ZixoTheme(
     content: @Composable () -> Unit
 ) {
     val isSystemDark = isSystemInDarkTheme()
+
     val useDarkTheme = when (themeMode) {
         ThemeMode.SYSTEM -> isSystemDark
-        ThemeMode.DARK -> true
+        ThemeMode.DARK   -> true
         ThemeMode.AMOLED -> true
     }
 
     val colorScheme = when {
+        // Android 12+ dynamic colour takes priority when enabled
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (useDarkTheme) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
         }
+        // AMOLED overrides everything (even dynamic) — pure black matters
         themeMode == ThemeMode.AMOLED -> ZixoAmoledColorScheme
+        // Standard dark palette
         useDarkTheme -> ZixoDarkColorScheme
+        // Light palette
         else -> ZixoLightColorScheme
     }
 
-    // Make status/nav bars transparent for edge-to-edge
+    // ── Edge-to-edge: transparent status & navigation bars ──────
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.background.toArgb()
             window.navigationBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !useDarkTheme
-            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !useDarkTheme
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !useDarkTheme
+                isAppearanceLightNavigationBars = !useDarkTheme
+            }
         }
     }
 

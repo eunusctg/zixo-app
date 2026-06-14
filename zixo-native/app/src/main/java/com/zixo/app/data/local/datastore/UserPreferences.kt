@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.zixo.app.domain.model.AudioProfile
 import com.zixo.app.domain.model.AutoDownloadMedia
@@ -13,6 +14,7 @@ import com.zixo.app.domain.model.LastSeenVisibility
 import com.zixo.app.domain.model.MediaCompressionProfile
 import com.zixo.app.domain.model.SelfDestructTimer
 import com.zixo.app.domain.model.ThemeMode
+import com.zixo.app.domain.model.VibrationPattern
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -206,6 +208,72 @@ class UserPreferences @Inject constructor(
         dataStore.edit { prefs -> prefs[CHAT_WALLPAPER] = assetPath }
     }
 
+    val enterIsSend: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[ENTER_IS_SEND] ?: true
+    }
+
+    suspend fun setEnterIsSend(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[ENTER_IS_SEND] = enabled }
+    }
+
+    val isMediaVisibilityEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[MEDIA_VISIBILITY_ENABLED] ?: true
+    }
+
+    suspend fun setMediaVisibilityEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[MEDIA_VISIBILITY_ENABLED] = enabled }
+    }
+
+    val fontSizeScale: Flow<Float> = dataStore.data.map { prefs ->
+        prefs[FONT_SIZE_SCALE] ?: 1.0f
+    }
+
+    suspend fun setFontSizeScale(scale: Float) {
+        dataStore.edit { prefs -> prefs[FONT_SIZE_SCALE] = scale }
+    }
+
+    // ── Notification Tones ───────────────────────────────────────────
+
+    val areConversationTonesEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[ARE_CONVERSATION_TONES_ENABLED] ?: true
+    }
+
+    suspend fun setConversationTonesEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[ARE_CONVERSATION_TONES_ENABLED] = enabled }
+    }
+
+    val groupNotificationToneUri: Flow<String> = dataStore.data.map { prefs ->
+        prefs[GROUP_NOTIFICATION_TONE_URI] ?: ""
+    }
+
+    suspend fun setGroupNotificationToneUri(uri: String) {
+        dataStore.edit { prefs -> prefs[GROUP_NOTIFICATION_TONE_URI] = uri }
+    }
+
+    val callRingtoneUri: Flow<String> = dataStore.data.map { prefs ->
+        prefs[CALL_RINGTONE_URI] ?: ""
+    }
+
+    suspend fun setCallRingtoneUri(uri: String) {
+        dataStore.edit { prefs -> prefs[CALL_RINGTONE_URI] = uri }
+    }
+
+    val videoCallRingtoneUri: Flow<String> = dataStore.data.map { prefs ->
+        prefs[VIDEO_CALL_RINGTONE_URI] ?: ""
+    }
+
+    suspend fun setVideoCallRingtoneUri(uri: String) {
+        dataStore.edit { prefs -> prefs[VIDEO_CALL_RINGTONE_URI] = uri }
+    }
+
+    val vibrationPattern: Flow<VibrationPattern> = dataStore.data.map { prefs ->
+        prefs[VIBRATION_PATTERN]?.let { VibrationPattern.valueOf(it) } ?: VibrationPattern.DEFAULT
+    }
+
+    suspend fun setVibrationPattern(pattern: VibrationPattern) {
+        dataStore.edit { prefs -> prefs[VIBRATION_PATTERN] = pattern.name }
+    }
+
     // ── Debug ───────────────────────────────────────────────────────
 
     val debugLoggingEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -247,6 +315,14 @@ class UserPreferences @Inject constructor(
         private val DEBUG_LOGGING_ENABLED = booleanPreferencesKey("debug_logging_enabled")
         private val CHAT_WALLPAPER = stringPreferencesKey("chat_wallpaper")
         private val NOTIFICATION_TONE = stringPreferencesKey("notification_tone")
+        private val ENTER_IS_SEND = booleanPreferencesKey("enter_is_send")
+        private val MEDIA_VISIBILITY_ENABLED = booleanPreferencesKey("media_visibility_enabled")
+        private val FONT_SIZE_SCALE = floatPreferencesKey("font_size_scale")
+        private val ARE_CONVERSATION_TONES_ENABLED = booleanPreferencesKey("are_conversation_tones_enabled")
+        private val GROUP_NOTIFICATION_TONE_URI = stringPreferencesKey("group_notification_tone_uri")
+        private val CALL_RINGTONE_URI = stringPreferencesKey("call_ringtone_uri")
+        private val VIDEO_CALL_RINGTONE_URI = stringPreferencesKey("video_call_ringtone_uri")
+        private val VIBRATION_PATTERN = stringPreferencesKey("vibration_pattern")
     }
 }
 
