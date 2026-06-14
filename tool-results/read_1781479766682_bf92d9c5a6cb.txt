@@ -1,0 +1,826 @@
+     1→package com.zixo.app.ui.settings
+     2→
+     3→import android.content.ClipData
+     4→import android.content.ClipboardManager
+     5→import android.content.Context
+     6→import android.content.Intent
+     7→import android.graphics.Bitmap
+     8→import android.graphics.Color as AndroidColor
+     9→import androidx.compose.animation.AnimatedVisibility
+    10→import androidx.compose.animation.fadeIn
+    11→import androidx.compose.animation.fadeOut
+    12→import androidx.compose.animation.scaleIn
+    13→import androidx.compose.animation.scaleOut
+    14→import androidx.compose.foundation.Canvas
+    15→import androidx.compose.foundation.background
+    16→import androidx.compose.foundation.border
+    17→import androidx.compose.foundation.clickable
+    18→import androidx.compose.foundation.interaction.MutableInteractionSource
+    19→import androidx.compose.foundation.layout.Arrangement
+    20→import androidx.compose.foundation.layout.Box
+    21→import androidx.compose.foundation.layout.Column
+    22→import androidx.compose.foundation.layout.Row
+    23→import androidx.compose.foundation.layout.Spacer
+    24→import androidx.compose.foundation.layout.fillMaxSize
+    25→import androidx.compose.foundation.layout.fillMaxWidth
+    26→import androidx.compose.foundation.layout.height
+    27→import androidx.compose.foundation.layout.padding
+    28→import androidx.compose.foundation.layout.size
+    29→import androidx.compose.foundation.layout.width
+    30→import androidx.compose.foundation.lazy.LazyColumn
+    31→import androidx.compose.foundation.shape.CircleShape
+    32→import androidx.compose.foundation.shape.RoundedCornerShape
+    33→import androidx.compose.material.icons.Icons
+    34→import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+    35→import androidx.compose.material.icons.filled.Call
+    36→import androidx.compose.material.icons.filled.Close
+    37→import androidx.compose.material.icons.filled.Info
+    38→import androidx.compose.material.icons.filled.Lock
+    39→import androidx.compose.material.icons.filled.Notifications
+    40→import androidx.compose.material.icons.filled.QrCode2
+    41→import androidx.compose.material.icons.filled.Share
+    42→import androidx.compose.material.icons.filled.Shield
+    43→import androidx.compose.material3.AlertDialog
+    44→import androidx.compose.material3.CircularProgressIndicator
+    45→import androidx.compose.material3.Icon
+    46→import androidx.compose.material3.IconButton
+    47→import androidx.compose.material3.MaterialTheme
+    48→import androidx.compose.material3.Text
+    49→import androidx.compose.material3.TextButton
+    50→import androidx.compose.runtime.Composable
+    51→import androidx.compose.runtime.getValue
+    52→import androidx.compose.runtime.mutableStateOf
+    53→import androidx.compose.runtime.remember
+    54→import androidx.compose.runtime.setValue
+    55→import androidx.compose.ui.Alignment
+    56→import androidx.compose.ui.Modifier
+    57→import androidx.compose.ui.draw.clip
+    58→import androidx.compose.ui.geometry.Offset
+    59→import androidx.compose.ui.graphics.Brush
+    60→import androidx.compose.ui.graphics.Color
+    61→import androidx.compose.ui.graphics.asImageBitmap
+    62→import androidx.compose.ui.layout.ContentScale
+    63→import androidx.compose.ui.platform.LocalContext
+    64→import androidx.compose.ui.platform.LocalDensity
+    65→import androidx.compose.ui.text.font.FontFamily
+    66→import androidx.compose.ui.text.font.FontWeight
+    67→import androidx.compose.ui.text.style.TextAlign
+    68→import androidx.compose.ui.text.style.TextOverflow
+    69→import androidx.compose.ui.unit.dp
+    70→import androidx.compose.ui.unit.sp
+    71→import androidx.compose.ui.window.Dialog
+    72→import androidx.compose.ui.window.DialogProperties
+    73→import androidx.hilt.navigation.compose.hiltViewModel
+    74→import androidx.lifecycle.compose.collectAsStateWithLifecycle
+    75→import androidx.navigation.NavController
+    76→import coil.compose.AsyncImage
+    77→import coil.request.ImageRequest
+    78→import com.google.zxing.BarcodeFormat
+    79→import com.google.zxing.qrcode.QRCodeWriter
+    80→import com.zixo.app.domain.model.User
+    81→import com.zixo.app.ui.components.AvatarComponent
+    82→import com.zixo.app.ui.components.ZixoGlassBackground
+    83→import com.zixo.app.ui.components.diagonalMeshGradient
+    84→import com.zixo.app.ui.components.liquidGlassCard
+    85→import com.zixo.app.ui.components.liquidGlassContainer
+    86→import com.zixo.app.ui.navigation.ZixoRoutes
+    87→import com.zixo.app.ui.screens.settings.SettingsViewModel
+    88→import com.zixo.app.ui.theme.BackgroundGradientEnd
+    89→import com.zixo.app.ui.theme.BackgroundGradientStart
+    90→import com.zixo.app.ui.theme.DestructiveBackgroundAlpha
+    91→import com.zixo.app.ui.theme.DestructiveText
+    92→import com.zixo.app.ui.theme.NeonMint
+    93→import com.zixo.app.ui.theme.TextPrimary
+    94→import com.zixo.app.ui.theme.TextSecondary
+    95→import com.zixo.app.ui.theme.TextTertiary
+    96→
+    97→// ════════════════════════════════════════════════════════════════
+    98→// Settings Screen — iOS Liquid Glass Dashboard
+    99→// ════════════════════════════════════════════════════════════════
+   100→
+   101→@Composable
+   102→fun SettingsScreen(
+   103→    navController: NavController,
+   104→    viewModel: SettingsViewModel = hiltViewModel()
+   105→) {
+   106→    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+   107→    val context = LocalContext.current
+   108→    var showQrModal by remember { mutableStateOf(false) }
+   109→
+   110→    Box(modifier = Modifier.fillMaxSize()) {
+   111→        // Animated glass background
+   112→        ZixoGlassBackground()
+   113→
+   114→        LazyColumn(
+   115→            modifier = Modifier
+   116→                .fillMaxSize()
+   117→                .padding(horizontal = 16.dp),
+   118→            verticalArrangement = Arrangement.spacedBy(0.dp),
+   119→            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+   120→                top = 16.dp,
+   121→                bottom = 32.dp
+   122→            )
+   123→        ) {
+   124→            // ──────────────────────────────────────────────────────
+   125→            // 1. Profile Header Card
+   126→            // ──────────────────────────────────────────────────────
+   127→            item {
+   128→                ProfileHeaderCard(
+   129→                    user = uiState.currentUser,
+   130→                    onQrClick = { showQrModal = true },
+   131→                    onEditProfileClick = {
+   132→                        navController.navigate(ZixoRoutes.EDIT_PROFILE)
+   133→                    }
+   134→                )
+   135→            }
+   136→
+   137→            item { Spacer(modifier = Modifier.height(20.dp)) }
+   138→
+   139→            // ──────────────────────────────────────────────────────
+   140→            // 2. Settings Section Cards
+   141→            // ──────────────────────────────────────────────────────
+   142→            item {
+   143→                SectionLabel(text = "SETTINGS")
+   144→            }
+   145→
+   146→            item { Spacer(modifier = Modifier.height(8.dp)) }
+   147→
+   148→            item {
+   149→                GlassSettingsCard {
+   150→                    GlassNavigationRow(
+   151→                        title = "Account Security",
+   152→                        icon = Icons.Filled.Shield,
+   153→                        subtitle = if (uiState.screenLockEnabled) "Screen lock enabled" else "Set up security",
+   154→                        onClick = { navController.navigate(ZixoRoutes.ADVANCED_SECURITY) }
+   155→                    )
+   156→                    GlassDivider()
+   157→                    GlassNavigationRow(
+   158→                        title = "Privacy",
+   159→                        icon = Icons.Filled.Lock,
+   160→                        subtitle = "Last seen, read receipts",
+   161→                        onClick = { /* PrivacyCenterScreen */ }
+   162→                    )
+   163→                    GlassDivider()
+   164→                    GlassNavigationRow(
+   165→                        title = "Chats",
+   166→                        icon = Icons.Filled.Call,
+   167→                        subtitle = "Theme, wallpaper, font size",
+   168→                        onClick = { /* ChatConfigScreen */ }
+   169→                    )
+   170→                    GlassDivider()
+   171→                    GlassNavigationRow(
+   172→                        title = "Notifications",
+   173→                        icon = Icons.Filled.Notifications,
+   174→                        subtitle = if (uiState.dndEnabled) "Do Not Disturb active" else "Message & call tones",
+   175→                        onClick = { /* NotificationManagerScreen */ }
+   176→                    )
+   177→                    GlassDivider()
+   178→                    GlassNavigationRow(
+   179→                        title = "Storage & Data",
+   180→                        icon = Icons.Filled.Info,
+   181→                        subtitle = uiState.storageInfo?.let {
+   182→                            "${String.format("%.1f", it.totalMB)} MB used"
+   183→                        } ?: "Manage storage",
+   184→                        onClick = { navController.navigate(ZixoRoutes.ADVANCED_DATA) }
+   185→                    )
+   186→                }
+   187→            }
+   188→
+   189→            item { Spacer(modifier = Modifier.height(20.dp)) }
+   190→
+   191→            // ──────────────────────────────────────────────────────
+   192→            // 3. App Info
+   193→            // ──────────────────────────────────────────────────────
+   194→            item {
+   195→                Text(
+   196→                    text = "Zixo v1.0.0",
+   197→                    color = TextTertiary,
+   198→                    fontSize = 12.sp,
+   199→                    fontWeight = FontWeight.Normal,
+   200→                    fontFamily = FontFamily.Monospace,
+   201→                    textAlign = TextAlign.Center,
+   202→                    modifier = Modifier
+   203→                        .fillMaxWidth()
+   204→                        .padding(vertical = 8.dp)
+   205→                )
+   206→            }
+   207→
+   208→            item { Spacer(modifier = Modifier.height(12.dp)) }
+   209→
+   210→            // ──────────────────────────────────────────────────────
+   211→            // 4. Logout Button
+   212→            // ──────────────────────────────────────────────────────
+   213→            item {
+   214→                LogoutGlassButton(
+   215→                    isLoading = uiState.isLoading,
+   216→                    onClick = { viewModel.showLogoutDialog() }
+   217→                )
+   218→            }
+   219→        }
+   220→
+   221→        // ──────────────────────────────────────────────────────
+   222→        // QR Code Modal Overlay
+   223→        // ──────────────────────────────────────────────────────
+   224→        AnimatedVisibility(
+   225→            visible = showQrModal,
+   226→            enter = fadeIn(),
+   227→            exit = fadeOut(),
+   228→            modifier = Modifier.fillMaxSize()
+   229→        ) {
+   230→            QrCodeModalOverlay(
+   231→                user = uiState.currentUser,
+   232→                onDismiss = { showQrModal = false }
+   233→            )
+   234→        }
+   235→
+   236→        // ──────────────────────────────────────────────────────
+   237→        // Logout Confirmation Dialog
+   238→        // ──────────────────────────────────────────────────────
+   239→        if (uiState.showLogoutDialog) {
+   240→            LogoutConfirmationDialog(
+   241→                onConfirm = { viewModel.logOut() },
+   242→                onDismiss = { viewModel.dismissLogoutDialog() }
+   243→            )
+   244→        }
+   245→    }
+   246→}
+   247→
+   248→// ════════════════════════════════════════════════════════════════
+   249→// Profile Header Card — diagonalMeshGradient with avatar & info
+   250→// ════════════════════════════════════════════════════════════════
+   251→
+   252→@Composable
+   253→private fun ProfileHeaderCard(
+   254→    user: User?,
+   255→    onQrClick: () -> Unit,
+   256→    onEditProfileClick: () -> Unit
+   257→) {
+   258→    Box(
+   259→        modifier = Modifier
+   260→            .fillMaxWidth()
+   261→            .diagonalMeshGradient()
+   262→            .clip(RoundedCornerShape(20.dp))
+   263→            .border(
+   264→                width = 1.dp,
+   265→                color = Color(0x33FFFFFF),
+   266→                shape = RoundedCornerShape(20.dp)
+   267→            )
+   268→    ) {
+   269→        Row(
+   270→            modifier = Modifier
+   271→                .fillMaxWidth()
+   272→                .padding(20.dp),
+   273→            verticalAlignment = Alignment.CenterVertically
+   274→        ) {
+   275→            // Avatar
+   276→            AvatarComponent(
+   277→                imageUrl = user?.photoUrl,
+   278→                name = user?.displayName ?: "",
+   279→                size = 80.dp,
+   280→                isOnline = user?.isOnline == true,
+   281→                modifier = Modifier
+   282→            )
+   283→
+   284→            Spacer(modifier = Modifier.width(16.dp))
+   285→
+   286→            // User info column
+   287→            Column(
+   288→                modifier = Modifier.weight(1f)
+   289→            ) {
+   290→                // Display Name
+   291→                Text(
+   292→                    text = user?.displayName?.ifBlank { "Unknown" } ?: "Unknown",
+   293→                    color = TextPrimary,
+   294→                    fontSize = 24.sp,
+   295→                    fontWeight = FontWeight.Bold,
+   296→                    maxLines = 1,
+   297→                    overflow = TextOverflow.Ellipsis
+   298→                )
+   299→
+   300→                // Username
+   301→                if (!user?.username.isNullOrBlank()) {
+   302→                    Text(
+   303→                        text = "@${user.username}",
+   304→                        color = TextSecondary,
+   305→                        fontSize = 14.sp,
+   306→                        fontWeight = FontWeight.Medium,
+   307→                        maxLines = 1,
+   308→                        overflow = TextOverflow.Ellipsis
+   309→                    )
+   310→                }
+   311→
+   312→                // Bio
+   313→                if (!user?.bio.isNullOrBlank()) {
+   314→                    Text(
+   315→                        text = user.bio!!,
+   316→                        color = TextTertiary,
+   317→                        fontSize = 13.sp,
+   318→                        fontWeight = FontWeight.Normal,
+   319→                        maxLines = 2,
+   320→                        overflow = TextOverflow.Ellipsis,
+   321→                        modifier = Modifier.padding(top = 2.dp)
+   322→                    )
+   323→                }
+   324→
+   325→                // Zixo Number
+   326→                if (!user?.zixoNumber.isNullOrBlank()) {
+   327→                    Row(
+   328→                        modifier = Modifier.padding(top = 6.dp),
+   329→                        verticalAlignment = Alignment.CenterVertically
+   330→                    ) {
+   331→                        Text(
+   332→                            text = user.formattedZixoNumber,
+   333→                            color = NeonMint,
+   334→                            fontSize = 16.sp,
+   335→                            fontWeight = FontWeight.Bold,
+   336→                            fontFamily = FontFamily.Monospace,
+   337→                            letterSpacing = 2.sp
+   338→                        )
+   339→                    }
+   340→                }
+   341→            }
+   342→
+   343→            // Right-side action icons
+   344→            Column(
+   345→                horizontalAlignment = Alignment.End,
+   346→                verticalArrangement = Arrangement.spacedBy(8.dp)
+   347→            ) {
+   348→                // QR Code button
+   349→                IconButton(
+   350→                    onClick = onQrClick,
+   351→                    modifier = Modifier
+   352→                        .size(40.dp)
+   353→                        .clip(CircleShape)
+   354→                        .background(Color.White.copy(alpha = 0.12f))
+   355→                ) {
+   356→                    Icon(
+   357→                        imageVector = Icons.Filled.QrCode2,
+   358→                        contentDescription = "Show QR Code",
+   359→                        tint = NeonMint,
+   360→                        modifier = Modifier.size(22.dp)
+   361→                    )
+   362→                }
+   363→
+   364→                // Edit profile chevron
+   365→                IconButton(
+   366→                    onClick = onEditProfileClick,
+   367→                    modifier = Modifier
+   368→                        .size(40.dp)
+   369→                        .clip(CircleShape)
+   370→                        .background(Color.White.copy(alpha = 0.12f))
+   371→                ) {
+   372→                    Icon(
+   373→                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+   374→                        contentDescription = "Edit Profile",
+   375→                        tint = TextPrimary,
+   376→                        modifier = Modifier.size(22.dp)
+   377→                    )
+   378→                }
+   379→            }
+   380→        }
+   381→    }
+   382→}
+   383→
+   384→// ════════════════════════════════════════════════════════════════
+   385→// QR Code Modal Overlay
+   386→// ════════════════════════════════════════════════════════════════
+   387→
+   388→@Composable
+   389→private fun QrCodeModalOverlay(
+   390→    user: User?,
+   391→    onDismiss: () -> Unit
+   392→) {
+   393→    val context = LocalContext.current
+   394→
+   395→    Box(
+   396→        modifier = Modifier
+   397→            .fillMaxSize()
+   398→            .background(Color.Black.copy(alpha = 0.75f))
+   399→            .clickable(
+   400→                interactionSource = remember { MutableInteractionSource() },
+   401→                indication = null,
+   402→                onClick = onDismiss
+   403→            ),
+   404→        contentAlignment = Alignment.Center
+   405→    ) {
+   406→        // Frosted glass panel
+   407→        Column(
+   408→            modifier = Modifier
+   409→                .fillMaxWidth(0.85f)
+   410→                .liquidGlassContainer()
+   411→                .clip(RoundedCornerShape(20.dp))
+   412→                .border(
+   413→                    width = 1.dp,
+   414→                    color = Color(0x33FFFFFF),
+   415→                    shape = RoundedCornerShape(20.dp)
+   416→                )
+   417→                .clickable(
+   418→                    interactionSource = remember { MutableInteractionSource() },
+   419→                    indication = null,
+   420→                    onClick = {} // Consume clicks so they don't dismiss
+   421→                )
+   422→                .padding(28.dp),
+   423→            horizontalAlignment = Alignment.CenterHorizontally
+   424→        ) {
+   425→            // Title
+   426→            Text(
+   427→                text = "My QR Code",
+   428→                color = TextPrimary,
+   429→                fontSize = 20.sp,
+   430→                fontWeight = FontWeight.Bold
+   431→            )
+   432→
+   433→            Spacer(modifier = Modifier.height(6.dp))
+   434→
+   435→            // Zixo Number under title
+   436→            if (!user?.zixoNumber.isNullOrBlank()) {
+   437→                Text(
+   438→                    text = user.formattedZixoNumber,
+   439→                    color = NeonMint,
+   440→                    fontSize = 14.sp,
+   441→                    fontWeight = FontWeight.SemiBold,
+   442→                    fontFamily = FontFamily.Monospace,
+   443→                    letterSpacing = 1.5.sp
+   444→                )
+   445→            }
+   446→
+   447→            Spacer(modifier = Modifier.height(20.dp))
+   448→
+   449→            // QR Code image
+   450→            if (!user?.zixoNumber.isNullOrBlank()) {
+   451→                QrCodeImage(
+   452→                    data = "zixo://user/${user.zixoNumber}",
+   453→                    size = 220.dp,
+   454→                    qrColor = NeonMint,
+   455→                    backgroundColor = Color.Transparent
+   456→                )
+   457→            }
+   458→
+   459→            Spacer(modifier = Modifier.height(20.dp))
+   460→
+   461→            // Share button
+   462→            Row(
+   463→                modifier = Modifier
+   464→                    .clip(RoundedCornerShape(12.dp))
+   465→                    .background(NeonMint.copy(alpha = 0.15f))
+   466→                    .border(
+   467→                        width = 1.dp,
+   468→                        color = NeonMint.copy(alpha = 0.3f),
+   469→                        shape = RoundedCornerShape(12.dp)
+   470→                    )
+   471→                    .clickable {
+   472→                        val zixoUri = "zixo://user/${user?.zixoNumber ?: ""}"
+   473→                        val shareIntent = Intent().apply {
+   474→                            action = Intent.ACTION_SEND
+   475→                            putExtra(Intent.EXTRA_TEXT, "Add me on Zixo! $zixoUri")
+   476→                            type = "text/plain"
+   477→                        }
+   478→                        context.startActivity(
+   479→                            Intent.createChooser(shareIntent, "Share QR Code")
+   480→                        )
+   481→                    }
+   482→                    .padding(horizontal = 24.dp, vertical = 12.dp),
+   483→                verticalAlignment = Alignment.CenterVertically,
+   484→                horizontalArrangement = Arrangement.Center
+   485→            ) {
+   486→                Icon(
+   487→                    imageVector = Icons.Filled.Share,
+   488→                    contentDescription = "Share",
+   489→                    tint = NeonMint,
+   490→                    modifier = Modifier.size(18.dp)
+   491→                )
+   492→                Spacer(modifier = Modifier.width(8.dp))
+   493→                Text(
+   494→                    text = "Share",
+   495→                    color = NeonMint,
+   496→                    fontSize = 15.sp,
+   497→                    fontWeight = FontWeight.SemiBold
+   498→                )
+   499→            }
+   500→
+   501→            Spacer(modifier = Modifier.height(16.dp))
+   502→
+   503→            // Close button
+   504→            Row(
+   505→                modifier = Modifier
+   506→                    .clip(RoundedCornerShape(12.dp))
+   507→                    .background(Color.White.copy(alpha = 0.08f))
+   508→                    .clickable(onClick = onDismiss)
+   509→                    .padding(horizontal = 32.dp, vertical = 10.dp),
+   510→                verticalAlignment = Alignment.CenterVertically,
+   511→                horizontalArrangement = Arrangement.Center
+   512→            ) {
+   513→                Icon(
+   514→                    imageVector = Icons.Filled.Close,
+   515→                    contentDescription = "Close",
+   516→                    tint = TextSecondary,
+   517→                    modifier = Modifier.size(16.dp)
+   518→                )
+   519→                Spacer(modifier = Modifier.width(6.dp))
+   520→                Text(
+   521→                    text = "Close",
+   522→                    color = TextSecondary,
+   523→                    fontSize = 14.sp,
+   524→                    fontWeight = FontWeight.Medium
+   525→                )
+   526→            }
+   527→        }
+   528→    }
+   529→}
+   530→
+   531→// ════════════════════════════════════════════════════════════════
+   532→// QR Code Image Composable (brand emerald green on frosted glass)
+   533→// ════════════════════════════════════════════════════════════════
+   534→
+   535→@Composable
+   536→private fun QrCodeImage(
+   537→    data: String,
+   538→    size: androidx.compose.ui.unit.Dp,
+   539→    qrColor: Color = NeonMint,
+   540→    backgroundColor: Color = Color.White,
+   541→    modifier: Modifier = Modifier
+   542→) {
+   543→    if (data.isBlank()) return
+   544→
+   545→    val density = LocalDensity.current
+   546→    val sizePx = with(density) { size.roundToPx() }
+   547→
+   548→    val qrBitmap = remember(data, sizePx) {
+   549→        generateQrBitmap(data, sizePx, qrColor, backgroundColor)
+   550→    }
+   551→
+   552→    Box(
+   553→        modifier = modifier
+   554→            .size(size)
+   555→            .clip(RoundedCornerShape(16.dp))
+   556→            .background(Color(0x0D1A2A32)) // Very subtle dark glass behind QR
+   557→            .border(
+   558→                width = 1.dp,
+   559→                color = Color(0x1AFFFFFF),
+   560→                shape = RoundedCornerShape(16.dp)
+   561→            )
+   562→            .padding(12.dp),
+   563→        contentAlignment = Alignment.Center
+   564→    ) {
+   565→        androidx.compose.foundation.Image(
+   566→            bitmap = qrBitmap.asImageBitmap(),
+   567→            contentDescription = "QR Code",
+   568→            modifier = Modifier
+   569→                .size(size - 24.dp)
+   570→                .clip(RoundedCornerShape(8.dp)),
+   571→            contentScale = ContentScale.Fit
+   572→        )
+   573→    }
+   574→}
+   575→
+   576→/**
+   577→ * Generates a QR code bitmap with custom foreground/background colors.
+   578→ */
+   579→private fun generateQrBitmap(
+   580→    data: String,
+   581→    sizePx: Int,
+   582→    fgColor: Color,
+   583→    bgColor: Color
+   584→): Bitmap {
+   585→    val writer = QRCodeWriter()
+   586→    val bitMatrix = writer.encode(data, BarcodeFormat.QR_CODE, sizePx, sizePx)
+   587→    val width = bitMatrix.width
+   588→    val height = bitMatrix.height
+   589→    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+   590→    val fgArgb = fgColor.copy(alpha = 1f).let {
+   591→        AndroidColor.argb(255, (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt())
+   592→    }
+   593→    val bgArgb = bgColor.let {
+   594→        AndroidColor.argb(
+   595→            (it.alpha * 255).toInt(),
+   596→            (it.red * 255).toInt(),
+   597→            (it.green * 255).toInt(),
+   598→            (it.blue * 255).toInt()
+   599→        )
+   600→    }
+   601→    for (x in 0 until width) {
+   602→        for (y in 0 until height) {
+   603→            bitmap.setPixel(x, y, if (bitMatrix[x, y]) fgArgb else bgArgb)
+   604→        }
+   605→    }
+   606→    return bitmap
+   607→}
+   608→
+   609→// ════════════════════════════════════════════════════════════════
+   610→// Glass Settings Card — container for navigation rows
+   611→// ════════════════════════════════════════════════════════════════
+   612→
+   613→@Composable
+   614→private fun GlassSettingsCard(
+   615→    content: @Composable () -> Unit
+   616→) {
+   617→    Column(
+   618→        modifier = Modifier
+   619→            .fillMaxWidth()
+   620→            .liquidGlassCard()
+   621→            .clip(RoundedCornerShape(16.dp))
+   622→            .border(
+   623→                width = 1.dp,
+   624→                color = Color(0x33FFFFFF),
+   625→                shape = RoundedCornerShape(16.dp)
+   626→            )
+   627→            .padding(horizontal = 4.dp, vertical = 4.dp)
+   628→    ) {
+   629→        content()
+   630→    }
+   631→}
+   632→
+   633→// ════════════════════════════════════════════════════════════════
+   634→// Glass Navigation Row — individual setting item
+   635→// ════════════════════════════════════════════════════════════════
+   636→
+   637→@Composable
+   638→private fun GlassNavigationRow(
+   639→    title: String,
+   640→    icon: androidx.compose.ui.graphics.vector.ImageVector,
+   641→    subtitle: String? = null,
+   642→    onClick: () -> Unit
+   643→) {
+   644→    Row(
+   645→        modifier = Modifier
+   646→            .fillMaxWidth()
+   647→            .clip(RoundedCornerShape(12.dp))
+   648→            .clickable(
+   649→                interactionSource = remember { MutableInteractionSource() },
+   650→                indication = null,
+   651→                onClick = onClick
+   652→            )
+   653→            .padding(horizontal = 16.dp, vertical = 14.dp),
+   654→        verticalAlignment = Alignment.CenterVertically
+   655→    ) {
+   656→        // Icon in a glass circle
+   657→        Box(
+   658→            modifier = Modifier
+   659→                .size(40.dp)
+   660→                .clip(RoundedCornerShape(10.dp))
+   661→                .background(Color.White.copy(alpha = 0.06f)),
+   662→            contentAlignment = Alignment.Center
+   663→        ) {
+   664→            Icon(
+   665→                imageVector = icon,
+   666→                contentDescription = null,
+   667→                tint = TextSecondary,
+   668→                modifier = Modifier.size(22.dp)
+   669→            )
+   670→        }
+   671→
+   672→        Spacer(modifier = Modifier.width(14.dp))
+   673→
+   674→        // Title + subtitle
+   675→        Column(modifier = Modifier.weight(1f)) {
+   676→            Text(
+   677→                text = title,
+   678→                color = TextPrimary,
+   679→                fontSize = 16.sp,
+   680→                fontWeight = FontWeight.Medium
+   681→            )
+   682→            if (subtitle != null) {
+   683→                Text(
+   684→                    text = subtitle,
+   685→                    color = TextSecondary,
+   686→                    fontSize = 13.sp,
+   687→                    fontWeight = FontWeight.Normal,
+   688→                    modifier = Modifier.padding(top = 2.dp)
+   689→                )
+   690→            }
+   691→        }
+   692→
+   693→        // Chevron
+   694→        Icon(
+   695→            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+   696→            contentDescription = "Navigate",
+   697→            tint = TextSecondary.copy(alpha = 0.6f),
+   698→            modifier = Modifier.size(20.dp)
+   699→        )
+   700→    }
+   701→}
+   702→
+   703→// ════════════════════════════════════════════════════════════════
+   704→// Glass Divider — subtle separator inside glass cards
+   705→// ════════════════════════════════════════════════════════════════
+   706→
+   707→@Composable
+   708→private fun GlassDivider() {
+   709→    Box(
+   710→        modifier = Modifier
+   711→            .fillMaxWidth()
+   712→            .padding(horizontal = 16.dp)
+   713→            .height(0.5.dp)
+   714→            .background(Color.White.copy(alpha = 0.08f))
+   715→    )
+   716→}
+   717→
+   718→// ════════════════════════════════════════════════════════════════
+   719→// Section Label
+   720→// ════════════════════════════════════════════════════════════════
+   721→
+   722→@Composable
+   723→private fun SectionLabel(text: String) {
+   724→    Text(
+   725→        text = text,
+   726→        color = NeonMint,
+   727→        fontSize = 12.sp,
+   728→        fontWeight = FontWeight.Bold,
+   729→        fontFamily = FontFamily.Default,
+   730→        letterSpacing = 1.5.sp,
+   731→        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)
+   732→    )
+   733→}
+   734→
+   735→// ════════════════════════════════════════════════════════════════
+   736→// Logout Glass Button — destructive red glass card
+   737→// ════════════════════════════════════════════════════════════════
+   738→
+   739→@Composable
+   740→private fun LogoutGlassButton(
+   741→    isLoading: Boolean,
+   742→    onClick: () -> Unit
+   743→) {
+   744→    Box(
+   745→        modifier = Modifier
+   746→            .fillMaxWidth()
+   747→            .clip(RoundedCornerShape(16.dp))
+   748→            .background(DestructiveBackgroundAlpha)
+   749→            .border(
+   750→                width = 1.dp,
+   751→                color = DestructiveText.copy(alpha = 0.3f),
+   752→                shape = RoundedCornerShape(16.dp)
+   753→            )
+   754→            .clickable(
+   755→                interactionSource = remember { MutableInteractionSource() },
+   756→                indication = null,
+   757→                onClick = onClick
+   758→            )
+   759→            .padding(vertical = 16.dp),
+   760→        contentAlignment = Alignment.Center
+   761→    ) {
+   762→        if (isLoading) {
+   763→            CircularProgressIndicator(
+   764→                modifier = Modifier.size(22.dp),
+   765→                color = DestructiveText,
+   766→                strokeWidth = 2.5.dp
+   767→            )
+   768→        } else {
+   769→            Text(
+   770→                text = "Log Out",
+   771→                color = DestructiveText,
+   772→                fontSize = 16.sp,
+   773→                fontWeight = FontWeight.Bold,
+   774→                letterSpacing = 0.3.sp
+   775→            )
+   776→        }
+   777→    }
+   778→}
+   779→
+   780→// ════════════════════════════════════════════════════════════════
+   781→// Logout Confirmation Dialog
+   782→// ════════════════════════════════════════════════════════════════
+   783→
+   784→@Composable
+   785→private fun LogoutConfirmationDialog(
+   786→    onConfirm: () -> Unit,
+   787→    onDismiss: () -> Unit
+   788→) {
+   789→    AlertDialog(
+   790→        onDismissRequest = onDismiss,
+   791→        title = {
+   792→            Text(
+   793→                text = "Log Out",
+   794→                color = TextPrimary,
+   795→                fontWeight = FontWeight.Bold
+   796→            )
+   797→        },
+   798→        text = {
+   799→            Text(
+   800→                text = "Are you sure you want to log out of your Zixo account?",
+   801→                color = TextSecondary,
+   802→                fontSize = 15.sp
+   803→            )
+   804→        },
+   805→        confirmButton = {
+   806→            TextButton(onClick = onConfirm) {
+   807→                Text(
+   808→                    text = "Log Out",
+   809→                    color = DestructiveText,
+   810→                    fontWeight = FontWeight.Bold
+   811→                )
+   812→            }
+   813→        },
+   814→        dismissButton = {
+   815→            TextButton(onClick = onDismiss) {
+   816→                Text(
+   817→                    text = "Cancel",
+   818→                    color = TextSecondary
+   819→                )
+   820→            }
+   821→        },
+   822→        containerColor = Color(0xFF1A2A32),
+   823→        shape = RoundedCornerShape(20.dp)
+   824→    )
+   825→}
+   826→

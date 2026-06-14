@@ -11,7 +11,11 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- Storage / Media -->
+    <!-- Location (Required by Permission Shield) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Storage / Media (API 33+ uses READ_MEDIA_*) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -54,7 +58,11 @@
         android:theme="@style/Theme.Zixo"
         tools:targetApi="35">
 
-        <!-- Main Activity -->
+        <!--
+            Main Activity — adjustResize ensures keyboard does not overlap input fields.
+            Combined with Modifier.imePadding() and reverseLayout = true in chat screens,
+            this provides a fully responsive keyboard experience.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -75,7 +83,7 @@
             </intent-filter>
         </service>
 
-        <!-- Call foreground service -->
+        <!-- Call foreground service — runs on Dispatchers.IO, never blocks Main Thread -->
         <service
             android:name=".data.remote.livekit.CallForegroundService"
             android:exported="false"

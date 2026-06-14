@@ -82,6 +82,7 @@ interface SettingsRepository {
 
     suspend fun updateAutoDownloadMobile(types: Set<MediaType>)
     suspend fun updateAutoDownloadWifi(types: Set<MediaType>)
+    suspend fun updateAutoDownloadRoaming(types: Set<MediaType>)
 
     // ── Media Upload Quality ──────────────────────────────────────────────────
 

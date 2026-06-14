@@ -5,12 +5,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -24,22 +20,23 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.zixo.app.data.repository.AuthState
+import com.zixo.app.ui.chat.ChatMessageScreen
+import com.zixo.app.ui.chat.GroupChatScreen
 import com.zixo.app.ui.components.ZixoBottomNav
 import com.zixo.app.ui.components.ZixoGlassBackground
 import com.zixo.app.ui.components.ZixoTopBar
-import com.zixo.app.ui.screens.advanced.AdvancedDataScreen
-import com.zixo.app.ui.screens.advanced.AdvancedNetworkScreen
-import com.zixo.app.ui.screens.advanced.AdvancedSecurityScreen
+import com.zixo.app.ui.contacts.ContactListScreen
+import com.zixo.app.ui.main.HomeScreen
 import com.zixo.app.ui.screens.auth.AuthScreen
 import com.zixo.app.ui.screens.auth.AuthViewModel
 import com.zixo.app.ui.screens.calls.CallsScreen
-import com.zixo.app.ui.screens.chats.ChatsScreen
-import com.zixo.app.ui.screens.encryption.EncryptionKeyScreen
 import com.zixo.app.ui.settings.EditProfileScreen
 import com.zixo.app.ui.settings.SettingsScreen
 import com.zixo.app.ui.settings.SettingsViewModel
@@ -48,6 +45,11 @@ import com.zixo.app.ui.settings.SubPages.ChatConfigScreen
 import com.zixo.app.ui.settings.SubPages.NotificationManagerScreen
 import com.zixo.app.ui.settings.SubPages.PrivacyCenterScreen
 import com.zixo.app.ui.settings.SubPages.StorageDataHubScreen
+import com.zixo.app.ui.status.StatusTabScreen
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 
 // ──────────────────────────────────────────────
 // Route Constants
@@ -55,8 +57,11 @@ import com.zixo.app.ui.settings.SubPages.StorageDataHubScreen
 
 object ZixoRoutes {
     const val AUTH = "auth"
+    const val HOME = "home"
     const val CHATS = "chats"
+    const val CONTACTS = "contacts"
     const val CALLS = "calls"
+    const val STATUS = "status"
     const val SETTINGS = "settings"
     const val EDIT_PROFILE = "edit_profile"
     const val ACCOUNT_SECURITY = "account_security"
@@ -64,13 +69,11 @@ object ZixoRoutes {
     const val CHAT_CONFIG = "chat_config"
     const val NOTIFICATION_MANAGER = "notification_manager"
     const val STORAGE_DATA_HUB = "storage_data_hub"
-    const val ADVANCED_NETWORK = "advanced_network"
-    const val ADVANCED_SECURITY = "advanced_security"
-    const val ADVANCED_DATA = "advanced_data"
-    const val ENCRYPTION_KEY = "encryption_key"
-    const val BLOCKED_CONTACTS = "blocked_contacts"
-    const val CHAT_WALLPAPER = "chat_wallpaper"
-    const val NOTIFICATION_TONE = "notification_tone"
+    const val CHAT_MESSAGE = "chat_message/{threadId}"
+    const val GROUP_CHAT = "group_chat/{threadId}"
+
+    fun chatMessageRoute(threadId: String) = "chat_message/$threadId"
+    fun groupChatRoute(threadId: String) = "group_chat/$threadId"
 }
 
 // ──────────────────────────────────────────────
@@ -78,8 +81,7 @@ object ZixoRoutes {
 // ──────────────────────────────────────────────
 
 private val BOTTOM_NAV_ROUTES = setOf(
-    ZixoRoutes.CHATS,
-    ZixoRoutes.CALLS,
+    ZixoRoutes.HOME,
     ZixoRoutes.SETTINGS,
 )
 
@@ -108,7 +110,7 @@ fun ZixoNavHost(
             is AuthState.Authenticated -> {
                 val currentRoute = navController.currentDestination?.route
                 if (currentRoute == ZixoRoutes.AUTH) {
-                    navController.navigate(ZixoRoutes.CHATS) {
+                    navController.navigate(ZixoRoutes.HOME) {
                         popUpTo(ZixoRoutes.AUTH) { inclusive = true }
                     }
                 }
@@ -169,15 +171,19 @@ fun ZixoNavHost(
             AuthScreen()
         }
 
-        // ── Main screens (with bottom nav) ────────────
-        composable(route = ZixoRoutes.CHATS) {
-            ChatsScreen()
+        // ── Home (main tab host) ─────────────────────
+        composable(route = ZixoRoutes.HOME) {
+            HomeScreen(
+                onChatClick = { threadId ->
+                    navController.navigate(ZixoRoutes.chatMessageRoute(threadId))
+                },
+                onGroupChatClick = { threadId ->
+                    navController.navigate(ZixoRoutes.groupChatRoute(threadId))
+                },
+            )
         }
 
-        composable(route = ZixoRoutes.CALLS) {
-            CallsScreen()
-        }
-
+        // ── Settings (with bottom nav) ──────────────
         composable(route = ZixoRoutes.SETTINGS) {
             SettingsScreen(
                 navController = navController,
@@ -185,7 +191,31 @@ fun ZixoNavHost(
             )
         }
 
-        // ── Edit Profile (Liquid Glass) ────────────────
+        // ── Chat Message Screen (keyboard-safe) ────
+        composable(
+            route = ZixoRoutes.CHAT_MESSAGE,
+            arguments = listOf(navArgument("threadId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val threadId = backStackEntry.arguments?.getString("threadId") ?: return@composable
+            ChatMessageScreen(
+                threadId = threadId,
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        // ── Group Chat Screen ──────────────────────
+        composable(
+            route = ZixoRoutes.GROUP_CHAT,
+            arguments = listOf(navArgument("threadId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val threadId = backStackEntry.arguments?.getString("threadId") ?: return@composable
+            GroupChatScreen(
+                threadId = threadId,
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        // ── Edit Profile (Liquid Glass) ────────────
         composable(route = ZixoRoutes.EDIT_PROFILE) {
             EditProfileScreen(
                 onBackClick = { navController.popBackStack() },
@@ -193,7 +223,7 @@ fun ZixoNavHost(
             )
         }
 
-        // ── Settings Sub-Pages (Liquid Glass) ─────────
+        // ── Settings Sub-Pages (Liquid Glass) ─────
         composable(route = ZixoRoutes.ACCOUNT_SECURITY) {
             AccountSecurityScreen(
                 onBackClick = { navController.popBackStack() },
@@ -228,54 +258,6 @@ fun ZixoNavHost(
                 viewModel = settingsViewModel,
             )
         }
-
-        // ── Advanced Settings ─────────────────────────
-        composable(route = ZixoRoutes.ADVANCED_NETWORK) {
-            AdvancedNetworkScreen(
-                onBackClick = { navController.popBackStack() },
-            )
-        }
-
-        composable(route = ZixoRoutes.ADVANCED_SECURITY) {
-            AdvancedSecurityScreen(
-                onBackClick = { navController.popBackStack() },
-            )
-        }
-
-        composable(route = ZixoRoutes.ADVANCED_DATA) {
-            AdvancedDataScreen(
-                onBackClick = { navController.popBackStack() },
-            )
-        }
-
-        // ── Encryption Key ────────────────────────────
-        composable(route = ZixoRoutes.ENCRYPTION_KEY) {
-            EncryptionKeyScreen(
-                onBackClick = { navController.popBackStack() },
-            )
-        }
-
-        // ── Placeholder sub-screens ───────────────────
-        composable(route = ZixoRoutes.BLOCKED_CONTACTS) {
-            SubScreenPlaceholder(
-                title = "Blocked Contacts",
-                onBackClick = { navController.popBackStack() },
-            )
-        }
-
-        composable(route = ZixoRoutes.CHAT_WALLPAPER) {
-            SubScreenPlaceholder(
-                title = "Chat Wallpaper",
-                onBackClick = { navController.popBackStack() },
-            )
-        }
-
-        composable(route = ZixoRoutes.NOTIFICATION_TONE) {
-            SubScreenPlaceholder(
-                title = "Notification Tone",
-                onBackClick = { navController.popBackStack() },
-            )
-        }
     }
 }
 
@@ -295,9 +277,8 @@ fun ZixoMainScaffold(
     }
 
     val selectedTabIndex = when (currentRoute) {
-        ZixoRoutes.CHATS -> 0
-        ZixoRoutes.CALLS -> 1
-        ZixoRoutes.SETTINGS -> 2
+        ZixoRoutes.HOME -> 0
+        ZixoRoutes.SETTINGS -> 1
         else -> 0
     }
 
@@ -311,10 +292,9 @@ fun ZixoMainScaffold(
                         selectedIndex = selectedTabIndex,
                         onItemSelected = { index ->
                             val targetRoute = when (index) {
-                                0 -> ZixoRoutes.CHATS
-                                1 -> ZixoRoutes.CALLS
-                                2 -> ZixoRoutes.SETTINGS
-                                else -> ZixoRoutes.CHATS
+                                0 -> ZixoRoutes.HOME
+                                1 -> ZixoRoutes.SETTINGS
+                                else -> ZixoRoutes.HOME
                             }
                             navController.navigate(targetRoute) {
                                 popUpTo(navController.graph.findStartDestination().id) {

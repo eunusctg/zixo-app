@@ -13,6 +13,17 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import com.zixo.app.data.local.room.ZixoDatabase
 import com.zixo.app.data.local.room.dao.CallLogDao
 import com.zixo.app.data.local.room.dao.ChatDao
+import com.zixo.app.data.remote.cloudflare.CloudflareApiService
+import com.zixo.app.domain.repository.CallRepository
+import com.zixo.app.domain.repository.ChatRepository
+import com.zixo.app.domain.repository.ContactRepository
+import com.zixo.app.domain.repository.SettingsRepository
+import com.zixo.app.domain.repository.StatusRepository
+import com.zixo.app.data.repository.CallRepositoryImpl
+import com.zixo.app.data.repository.ChatRepositoryImpl
+import com.zixo.app.data.repository.ContactRepositoryImpl
+import com.zixo.app.data.repository.SettingsRepositoryImpl
+import com.zixo.app.data.repository.StatusRepositoryImpl
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -108,4 +119,33 @@ object AppModule {
         .client(okHttpClient)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
+
+    @Provides
+    @Singleton
+    fun provideCloudflareApiService(retrofit: Retrofit): CloudflareApiService =
+        retrofit.create(CloudflareApiService::class.java)
+
+    // ── Repository Bindings ─────────────────────────────────────────────────
+    // Binds domain repository interfaces to their concrete implementations.
+    // All implementations are @Singleton and injected via @Inject constructor().
+
+    @Provides
+    @Singleton
+    fun provideContactRepository(impl: ContactRepositoryImpl): ContactRepository = impl
+
+    @Provides
+    @Singleton
+    fun provideChatRepository(impl: ChatRepositoryImpl): ChatRepository = impl
+
+    @Provides
+    @Singleton
+    fun provideCallRepository(impl: CallRepositoryImpl): CallRepository = impl
+
+    @Provides
+    @Singleton
+    fun provideSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository = impl
+
+    @Provides
+    @Singleton
+    fun provideStatusRepository(impl: StatusRepositoryImpl): StatusRepository = impl
 }

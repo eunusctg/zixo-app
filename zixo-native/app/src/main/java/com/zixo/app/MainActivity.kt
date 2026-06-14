@@ -24,7 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.core.content.ContextCompat
-import com.zixo.app.data.local.datastore.UserPreferences
+import com.zixo.app.data.local.PreferencesDataStore
 import com.zixo.app.ui.navigation.ZixoMainScaffold
 import com.zixo.app.ui.theme.BackgroundGradientEnd
 import com.zixo.app.ui.theme.BackgroundGradientStart
@@ -45,7 +45,7 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject
-    lateinit var userPreferences: UserPreferences
+    lateinit var preferencesDataStore: PreferencesDataStore
 
     private val activityScope = CoroutineScope(Dispatchers.Main.immediate)
 
@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
 
     private fun maybeShowBiometricAuth() {
         activityScope.launch {
-            val screenLockEnabled = userPreferences.screenLockEnabled.first()
+            val screenLockEnabled = preferencesDataStore.isScreenLockEnabled.first()
 
             if (!screenLockEnabled) {
                 // Screen lock is not required — grant access immediately

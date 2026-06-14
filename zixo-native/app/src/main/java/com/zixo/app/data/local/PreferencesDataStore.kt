@@ -266,6 +266,18 @@ class PreferencesDataStore @Inject constructor(
         dataStore.edit { prefs -> prefs[KEY_AUTO_DOWNLOAD_WIFI] = jsonStr }
     }
 
+    val autoDownloadRoaming: Flow<Set<MediaType>> = dataStore.data.map { prefs ->
+        prefs[KEY_AUTO_DOWNLOAD_ROAMING]?.let { jsonStr ->
+            runCatching { json.decodeFromString(mediaTypeSetSerializer, jsonStr) }
+                .getOrDefault(emptySet())
+        } ?: emptySet()
+    }
+
+    suspend fun setAutoDownloadRoaming(types: Set<MediaType>) {
+        val jsonStr = json.encodeToString(mediaTypeSetSerializer, types)
+        dataStore.edit { prefs -> prefs[KEY_AUTO_DOWNLOAD_ROAMING] = jsonStr }
+    }
+
     // ── Media Upload Quality ──────────────────────────────────────────────────
 
     val mediaUploadQuality: Flow<UploadQuality> = dataStore.data.map { prefs ->
@@ -325,6 +337,7 @@ class PreferencesDataStore @Inject constructor(
         // Media Auto-Download
         private val KEY_AUTO_DOWNLOAD_MOBILE = stringPreferencesKey("auto_download_mobile")
         private val KEY_AUTO_DOWNLOAD_WIFI = stringPreferencesKey("auto_download_wifi")
+        private val KEY_AUTO_DOWNLOAD_ROAMING = stringPreferencesKey("auto_download_roaming")
 
         // Media Upload Quality
         private val KEY_MEDIA_UPLOAD_QUALITY = stringPreferencesKey("media_upload_quality")

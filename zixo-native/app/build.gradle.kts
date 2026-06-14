@@ -33,6 +33,8 @@ android {
             buildConfigField("String", "FIREBASE_MESSAGING_SENDER_ID", "\"809372450511\"")
             buildConfigField("String", "FIREBASE_APP_ID", "\"1:809372450511:android:7910b1a9b8836c7666c1ba\"")
             buildConfigField("String", "FIREBASE_MEASUREMENT_ID", "\"G-L792VKMNTT\"")
+            // LiveKit server URL — hidden from user-facing UI, used only by background repositories
+            buildConfigField("String", "LIVEKIT_URL", "\"wss://zixo-livekit.livekit.cloud\"")
         }
         release {
             isMinifyEnabled = true
@@ -49,6 +51,7 @@ android {
             buildConfigField("String", "FIREBASE_MESSAGING_SENDER_ID", "\"809372450511\"")
             buildConfigField("String", "FIREBASE_APP_ID", "\"1:809372450511:android:7910b1a9b8836c7666c1ba\"")
             buildConfigField("String", "FIREBASE_MEASUREMENT_ID", "\"G-L792VKMNTT\"")
+            buildConfigField("String", "LIVEKIT_URL", "\"wss://zixo-livekit.livekit.cloud\"")
         }
     }
 
@@ -74,70 +77,75 @@ android {
 }
 
 dependencies {
-    // AndroidX Core
+    // ── Jetpack Compose, Graphics & Animation Core ──
+    implementation(platform("androidx.compose:compose-bom:2026.01.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.animation:animation")
+    implementation("androidx.compose.material:material-icons-extended")
+
+    // ── Core Platform Architecture & Persistent Engines ──
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.runtime.compose)
-    implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.activity.compose)
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.navigation:navigation-compose:2.8.5")
+    implementation("androidx.activity:activity-compose:1.9.3")
 
-    // Compose
-    implementation(platform(libs.compose.bom))
-    implementation(libs.compose.ui)
-    implementation(libs.compose.ui.graphics)
-    implementation(libs.compose.ui.tooling.preview)
-    implementation(libs.compose.material3)
-    implementation(libs.compose.material.icons.extended)
-    implementation(libs.compose.runtime)
-    implementation(libs.compose.foundation)
-    debugImplementation(libs.compose.ui.tooling)
+    // ── Coroutines ──
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
-    // Navigation
-    implementation(libs.navigation.compose)
-
-    // Hilt
+    // ── Hilt Dependency Injection ──
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     implementation(libs.hilt.navigation.compose)
 
-    // DataStore
-    implementation(libs.datastore.preferences)
+    // ── DataStore Preferences ──
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
 
-    // Room
+    // ── Room Local Database ──
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
-    // Firebase
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.auth.ktx)
-    implementation(libs.firebase.firestore.ktx)
-    implementation(libs.firebase.database.ktx)
-    implementation(libs.firebase.storage.ktx)
-    implementation(libs.firebase.messaging.ktx)
+    // ── Google Credential Manager (Native Sign-In API) ──
+    implementation("androidx.credentials:credentials:1.2.2")
+    implementation("androidx.credentials:credentials-play-services-auth:1.2.2")
 
-    // Networking
+    // ── Unified Firebase Enterprise Realtime Stack ──
+    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-storage-ktx")
+    implementation("com.google.firebase:firebase-database-ktx")  // 100% Realtime Database Sockets
+    implementation("com.google.firebase:firebase-messaging-ktx")
+
+    // ── LiveKit WebRTC Core SDK (Real-time Peer-to-Peer Calling Media Engine) ──
+    implementation("io.livekit:livekit-android:2.4.0")
+
+    // ── Networking ──
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 
-    // Image Loading
+    // ── Image Loading ──
     implementation(libs.coil.compose)
 
-    // LiveKit
-    implementation(libs.livekit.android)
-
-    // Biometric
+    // ── Biometric Authentication ──
     implementation(libs.biometric)
 
-    // QR Code
+    // ── QR Code Generation ──
     implementation(libs.zxing.core)
 
-    // Serialization
+    // ── Serialization ──
     implementation(libs.kotlinx.serialization.json)
 
-    // Coroutines
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.kotlinx.coroutines.play.services)
+    // ── Logging ──
+    implementation("com.jakewharton.timber:timber:5.0.1")
+
+    // ── Compose Tooling (Debug) ──
+    debugImplementation(libs.compose.ui.tooling)
 }

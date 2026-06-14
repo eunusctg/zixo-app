@@ -343,6 +343,10 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.updateAutoDownloadWifi(types)
     }
 
+    fun updateAutoDownloadRoaming(types: Set<MediaType>) = runMutation {
+        settingsRepository.updateAutoDownloadRoaming(types)
+    }
+
     fun updateMediaUploadQuality(quality: UploadQuality) = runMutation {
         settingsRepository.updateMediaUploadQuality(quality)
     }

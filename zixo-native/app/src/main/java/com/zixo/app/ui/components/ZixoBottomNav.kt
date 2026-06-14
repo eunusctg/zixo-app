@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Contacts
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -13,6 +14,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextSecondary
@@ -29,6 +31,16 @@ private val bottomNavItems = listOf(
             Icon(
                 imageVector = Icons.Outlined.Chat,
                 contentDescription = "Chats",
+                modifier = Modifier.size(24.dp),
+            )
+        },
+    ),
+    BottomNavItem(
+        label = "Contacts",
+        icon = {
+            Icon(
+                imageVector = Icons.Outlined.Contacts,
+                contentDescription = "Contacts",
                 modifier = Modifier.size(24.dp),
             )
         },
@@ -57,8 +69,9 @@ private val bottomNavItems = listOf(
 
 /**
  * iOS Liquid Glass-styled bottom navigation bar.
- * Fixed at exactly 80dp height for comfortable touch targets.
+ * Fixed at exactly 85dp height for comfortable touch targets.
  * Uses the liquidGlassNavItem modifier for the frosted glass visual.
+ * Floats smoothly above the fluid background with the Liquid Glass effect.
  */
 @Composable
 fun ZixoBottomNav(
@@ -68,7 +81,7 @@ fun ZixoBottomNav(
 ) {
     NavigationBar(
         modifier = modifier
-            .height(80.dp)
+            .height(85.dp)
             .liquidGlassNavItem(),
         containerColor = Color.Transparent,
         contentColor = NeonMint,
@@ -94,6 +107,3 @@ fun ZixoBottomNav(
         }
     }
 }
-
-// Transparent color reference for container
-private val ColorTransparent = androidx.compose.ui.graphics.Color.Transparent

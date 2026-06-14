@@ -62,6 +62,7 @@ data class AppSettingsState(
     val vibrationPattern: VibrationOption = VibrationOption.DEFAULT,
     val autoDownloadMobile: Set<MediaType> = emptySet(),
     val autoDownloadWifi: Set<MediaType> = setOf(MediaType.PHOTO),
+    val autoDownloadRoaming: Set<MediaType> = emptySet(),
     val mediaUploadQuality: UploadQuality = UploadQuality.BALANCED,
     val isLoading: Boolean = false,
     val errorMessage: String? = null
@@ -112,10 +113,80 @@ enum class MediaType { PHOTO, AUDIO, VIDEO, DOCUMENT }
 enum class UploadQuality { AUTO, BEST_QUALITY, BALANCED }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Call State — WebRTC Engine
+// Call State — WebRTC Engine (Sealed Class for Full Lifecycle)
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum class CallState { IDLE, DIALING, ACTIVE }
+/**
+ * Sealed class representing the full lifecycle of a WebRTC call.
+ *
+ * All LiveKit session parameters, peer allocations, ICE setups, token
+ * collections, and audio track rendering components are isolated in
+ * asynchronous background workers running under Dispatchers.IO.
+ * The Android Main Thread is NEVER blocked by call operations.
+ *
+ * When a call triggers, an animated fullscreen overlay pops over the
+ * chat interface smoothly using a frosted translucent glass canvas,
+ * preventing thread deadlocks or screen failures (black screen fix).
+ */
+sealed class CallState {
+    /** No call is active. */
+    data object IDLE : CallState()
+
+    /** An outgoing call has been initiated; waiting for the remote peer to respond. */
+    data class DIALING(
+        val callId: String = "",
+        val targetUid: String = "",
+        val targetDisplayName: String = "",
+        val targetAvatarUrl: String = "",
+        val isVideoCall: Boolean = false,
+        val startedAt: Long = System.currentTimeMillis()
+    ) : CallState()
+
+    /** An incoming call is ringing on the local device. */
+    data class RINGING(
+        val callId: String = "",
+        val callerUid: String = "",
+        val callerDisplayName: String = "",
+        val callerAvatarUrl: String = "",
+        val isVideoCall: Boolean = false,
+        val receivedAt: Long = System.currentTimeMillis()
+    ) : CallState()
+
+    /** The call is actively connected with audio/video streams flowing. */
+    data class CONNECTED(
+        val callId: String = "",
+        val targetUid: String = "",
+        val targetDisplayName: String = "",
+        val targetAvatarUrl: String = "",
+        val isVideoCall: Boolean = false,
+        val isMuted: Boolean = false,
+        val isCameraOff: Boolean = false,
+        val isSpeakerOn: Boolean = false,
+        val connectedAt: Long = System.currentTimeMillis(),
+        val participantCount: Int = 1,
+        val durationSeconds: Long = 0L
+    ) : CallState()
+
+    /** The call has ended. */
+    data class ENDED(
+        val callId: String = "",
+        val durationSeconds: Long = 0L,
+        val endReason: CallEndReason = CallEndReason.COMPLETED
+    ) : CallState()
+}
+
+/**
+ * Reason why a call ended.
+ */
+enum class CallEndReason {
+    COMPLETED,          // Normal hangup
+    MISSED,             // Incoming call not answered
+    DECLINED,           // Recipient declined the call
+    CANCELLED,          // Caller cancelled before answer
+    TIMEOUT,            // No answer within the timeout window
+    NETWORK_ERROR,      // Connection failed due to network issues
+    PERMISSION_DENIED   // Camera/microphone permission was denied
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage Usage Breakdown

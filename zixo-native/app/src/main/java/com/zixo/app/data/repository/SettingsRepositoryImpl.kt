@@ -94,6 +94,7 @@ class SettingsRepositoryImpl @Inject constructor(
             preferencesDataStore.vibrationPattern,
             preferencesDataStore.autoDownloadMobile,
             preferencesDataStore.autoDownloadWifi,
+            preferencesDataStore.autoDownloadRoaming,
             preferencesDataStore.mediaUploadQuality
         )
     ) { values ->
@@ -122,7 +123,8 @@ class SettingsRepositoryImpl @Inject constructor(
             vibrationPattern = values[21] as VibrationOption,
             autoDownloadMobile = values[22] as Set<MediaType>,
             autoDownloadWifi = values[23] as Set<MediaType>,
-            mediaUploadQuality = values[24] as UploadQuality
+            autoDownloadRoaming = values[24] as Set<MediaType>,
+            mediaUploadQuality = values[25] as UploadQuality
         )
     }
 
@@ -323,6 +325,14 @@ class SettingsRepositoryImpl @Inject constructor(
             preferencesDataStore.setAutoDownloadWifi(types)
         } catch (e: Exception) {
             Timber.e(e, "Failed to update auto-download Wi-Fi")
+        }
+    }
+
+    override suspend fun updateAutoDownloadRoaming(types: Set<MediaType>) {
+        try {
+            preferencesDataStore.setAutoDownloadRoaming(types)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update auto-download roaming")
         }
     }
 
