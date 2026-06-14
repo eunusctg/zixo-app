@@ -1,0 +1,783 @@
+     1→package com.zixo.app.ui.screens.editprofile
+     2→
+     3→import android.content.ClipData
+     4→import android.content.ClipboardManager
+     5→import android.content.Context
+     6→import android.graphics.Bitmap
+     7→import android.graphics.Color as AndroidColor
+     8→import androidx.activity.compose.rememberLauncherForActivityResult
+     9→import androidx.activity.result.PickVisualMediaRequest
+    10→import androidx.activity.result.contract.ActivityResultContracts
+    11→import androidx.compose.foundation.background
+    12→import androidx.compose.foundation.border
+    13→import androidx.compose.foundation.clickable
+    14→import androidx.compose.foundation.interaction.MutableInteractionSource
+    15→import androidx.compose.foundation.layout.Arrangement
+    16→import androidx.compose.foundation.layout.Box
+    17→import androidx.compose.foundation.layout.Column
+    18→import androidx.compose.foundation.layout.Row
+    19→import androidx.compose.foundation.layout.Spacer
+    20→import androidx.compose.foundation.layout.fillMaxSize
+    21→import androidx.compose.foundation.layout.fillMaxWidth
+    22→import androidx.compose.foundation.layout.height
+    23→import androidx.compose.foundation.layout.padding
+    24→import androidx.compose.foundation.layout.size
+    25→import androidx.compose.foundation.layout.width
+    26→import androidx.compose.foundation.rememberScrollState
+    27→import androidx.compose.foundation.shape.CircleShape
+    28→import androidx.compose.foundation.shape.RoundedCornerShape
+    29→import androidx.compose.foundation.text.KeyboardOptions
+    30→import androidx.compose.foundation.verticalScroll
+    31→import androidx.compose.material.icons.Icons
+    32→import androidx.compose.material.icons.filled.CameraAlt
+    33→import androidx.compose.material.icons.filled.ContentCopy
+    34→import androidx.compose.material3.Button
+    35→import androidx.compose.material3.ButtonDefaults
+    36→import androidx.compose.material3.Card
+    37→import androidx.compose.material3.CardDefaults
+    38→import androidx.compose.material3.CircularProgressIndicator
+    39→import androidx.compose.material3.ExperimentalMaterial3Api
+    40→import androidx.compose.material3.Icon
+    41→import androidx.compose.material3.MaterialTheme
+    42→import androidx.compose.material3.OutlinedTextField
+    43→import androidx.compose.material3.OutlinedTextFieldDefaults
+    44→import androidx.compose.material3.Scaffold
+    45→import androidx.compose.material3.Snackbar
+    46→import androidx.compose.material3.SnackbarDuration
+    47→import androidx.compose.material3.SnackbarHost
+    48→import androidx.compose.material3.SnackbarHostState
+    49→import androidx.compose.material3.Text
+    50→import androidx.compose.runtime.Composable
+    51→import androidx.compose.runtime.LaunchedEffect
+    52→import androidx.compose.runtime.getValue
+    53→import androidx.compose.runtime.remember
+    54→import androidx.compose.runtime.rememberCoroutineScope
+    55→import androidx.compose.ui.Alignment
+    56→import androidx.compose.ui.Modifier
+    57→import androidx.compose.ui.draw.clip
+    58→import androidx.compose.ui.graphics.Brush
+    59→import androidx.compose.ui.graphics.Color
+    60→import androidx.compose.ui.graphics.asImageBitmap
+    61→import androidx.compose.ui.layout.ContentScale
+    62→import androidx.compose.ui.platform.LocalDensity
+    63→import androidx.compose.ui.platform.LocalContext
+    64→import androidx.compose.ui.text.font.FontFamily
+    65→import androidx.compose.ui.text.font.FontWeight
+    66→import androidx.compose.ui.text.input.KeyboardType
+    67→import androidx.compose.ui.text.style.TextAlign
+    68→import androidx.compose.ui.unit.dp
+    69→import androidx.compose.ui.unit.sp
+    70→import androidx.hilt.navigation.compose.hiltViewModel
+    71→import androidx.navigation.NavController
+    72→import coil.compose.AsyncImage
+    73→import coil.request.ImageRequest
+    74→import com.google.zxing.BarcodeFormat
+    75→import com.google.zxing.qrcode.QRCodeWriter
+    76→import com.zixo.app.ui.components.ZixoTopBar
+    77→import com.zixo.app.ui.theme.BackgroundGradientEnd
+    78→import com.zixo.app.ui.theme.BackgroundGradientStart
+    79→import com.zixo.app.ui.theme.DarkPetrolCharcoal
+    80→import com.zixo.app.ui.theme.NeonMint
+    81→import com.zixo.app.ui.theme.OutlineDark
+    82→import com.zixo.app.ui.theme.TextPrimary
+    83→import com.zixo.app.ui.theme.TextSecondary
+    84→import kotlinx.coroutines.launch
+    85→
+    86→// ──────────────────────────────────────────────────────────────────────────────
+    87→// Color constants matching the Zixo design system
+    88→// ──────────────────────────────────────────────────────────────────────────────
+    89→private val AccentGreen = NeonMint
+    90→private val CardBackground = DarkPetrolCharcoal
+    91→private val DisabledFieldBackground = Color(0xFF0F1D23)
+    92→private val SnackbarBackground = Color(0xFF1E3239)
+    93→
+    94→// ──────────────────────────────────────────────────────────────────────────────
+    95→// Main screen composable
+    96→// ──────────────────────────────────────────────────────────────────────────────
+    97→
+    98→@OptIn(ExperimentalMaterial3Api::class)
+    99→@Composable
+   100→fun EditProfileScreen(
+   101→    navController: NavController,
+   102→    viewModel: EditProfileViewModel = hiltViewModel()
+   103→) {
+   104→    val uiState by viewModel.uiState
+   105→    val hasChanges by viewModel.hasChanges
+   106→    val snackbarHostState = remember { SnackbarHostState() }
+   107→    val scope = rememberCoroutineScope()
+   108→    val context = LocalContext.current
+   109→    val scrollState = rememberScrollState()
+   110→
+   111→    // ── Photo picker launcher ──────────────────────────────────────────────
+   112→    val photoPicker = rememberLauncherForActivityResult(
+   113→        contract = ActivityResultContracts.PickVisualMedia()
+   114→    ) { uri: android.net.Uri? ->
+   115→        viewModel.onImageSelected(uri)
+   116→    }
+   117→
+   118→    // ── Snackbar for save results ──────────────────────────────────────────
+   119→    LaunchedEffect(uiState.saveResult) {
+   120→        when (uiState.saveResult) {
+   121→            SaveResult.SUCCESS -> {
+   122→                scope.launch {
+   123→                    snackbarHostState.showSnackbar(
+   124→                        message = "Profile updated successfully!",
+   125→                        duration = SnackbarDuration.Short
+   126→                    )
+   127→                }
+   128→                viewModel.clearSaveResult()
+   129→            }
+   130→            SaveResult.ERROR -> {
+   131→                scope.launch {
+   132→                    snackbarHostState.showSnackbar(
+   133→                        message = "Failed to update profile. Please try again.",
+   134→                        duration = SnackbarDuration.Short
+   135→                    )
+   136→                }
+   137→                viewModel.clearSaveResult()
+   138→            }
+   139→            null -> { /* No-op */ }
+   140→        }
+   141→    }
+   142→
+   143→    Scaffold(
+   144→        topBar = {
+   145→            ZixoTopBar(
+   146→                title = "Edit Profile",
+   147→                showBackButton = true,
+   148→                onBackClick = { navController.popBackStack() },
+   149→            )
+   150→        },
+   151→        snackbarHost = {
+   152→            SnackbarHost(hostState = snackbarHostState) { data ->
+   153→                Snackbar(
+   154→                    snackbarData = data,
+   155→                    containerColor = SnackbarBackground,
+   156→                    contentColor = TextPrimary,
+   157→                    shape = RoundedCornerShape(8.dp),
+   158→                )
+   159→            }
+   160→        },
+   161→        containerColor = Color.Transparent,
+   162→    ) { innerPadding ->
+   163→        Box(
+   164→            modifier = Modifier
+   165→                .fillMaxSize()
+   166→                .background(
+   167→                    Brush.verticalGradient(
+   168→                        colors = listOf(BackgroundGradientStart, BackgroundGradientEnd)
+   169→                    )
+   170→                )
+   171→                .padding(innerPadding)
+   172→        ) {
+   173→            Column(
+   174→                modifier = Modifier
+   175→                    .fillMaxSize()
+   176→                    .verticalScroll(scrollState)
+   177→                    .padding(horizontal = 20.dp),
+   178→                horizontalAlignment = Alignment.CenterHorizontally,
+   179→            ) {
+   180→                Spacer(modifier = Modifier.height(16.dp))
+   181→
+   182→                // ──────────────────────────────────────────────────────────
+   183→                // 2. Editable Profile Photo
+   184→                // ──────────────────────────────────────────────────────────
+   185→                ProfilePhotoSection(
+   186→                    photoUrl = if (uiState.selectedImageUri != null) {
+   187→                        uiState.selectedImageUri.toString()
+   188→                    } else {
+   189→                        uiState.photoUrl
+   190→                    },
+   191→                    selectedImageUri = uiState.selectedImageUri,
+   192→                    displayName = uiState.displayName,
+   193→                    onPickImage = {
+   194→                        photoPicker.launch(
+   195→                            PickVisualMediaRequest(
+   196→                                ActivityResultContracts.PickVisualMedia.ImageOnly
+   197→                            )
+   198→                        )
+   199→                    }
+   200→                )
+   201→
+   202→                Spacer(modifier = Modifier.height(24.dp))
+   203→
+   204→                // ──────────────────────────────────────────────────────────
+   205→                // 3. Zixo Number Card (read-only)
+   206→                // ──────────────────────────────────────────────────────────
+   207→                ZixoNumberCard(
+   208→                    zixoNumber = uiState.zixoNumber,
+   209→                    onCopyToClipboard = {
+   210→                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+   211→                        val clip = ClipData.newPlainText("Zixo Number", uiState.zixoNumber)
+   212→                        clipboard.setPrimaryClip(clip)
+   213→                        scope.launch {
+   214→                            snackbarHostState.showSnackbar(
+   215→                                message = "Zixo number copied to clipboard!",
+   216→                                duration = SnackbarDuration.Short
+   217→                            )
+   218→                        }
+   219→                    }
+   220→                )
+   221→
+   222→                Spacer(modifier = Modifier.height(20.dp))
+   223→
+   224→                // ──────────────────────────────────────────────────────────
+   225→                // 4. Form Fields Card
+   226→                // ──────────────────────────────────────────────────────────
+   227→                FormFieldsCard(
+   228→                    displayName = uiState.displayName,
+   229→                    onDisplayNameChanged = viewModel::onDisplayNameChanged,
+   230→                    username = uiState.username,
+   231→                    phoneNumber = uiState.phoneNumber,
+   232→                    bio = uiState.bio,
+   233→                    onBioChanged = viewModel::onBioChanged,
+   234→                )
+   235→
+   236→                Spacer(modifier = Modifier.height(20.dp))
+   237→
+   238→                // ──────────────────────────────────────────────────────────
+   239→                // 5. Save Changes Button
+   240→                // ──────────────────────────────────────────────────────────
+   241→                SaveChangesButton(
+   242→                    enabled = hasChanges && !uiState.isSaving,
+   243→                    isSaving = uiState.isSaving,
+   244→                    onClick = viewModel::onSaveChanges
+   245→                )
+   246→
+   247→                Spacer(modifier = Modifier.height(32.dp))
+   248→            }
+   249→        }
+   250→    }
+   251→}
+   252→
+   253→// ──────────────────────────────────────────────────────────────────────────────
+   254→// Profile Photo Section
+   255→// ──────────────────────────────────────────────────────────────────────────────
+   256→
+   257→@Composable
+   258→private fun ProfilePhotoSection(
+   259→    photoUrl: String?,
+   260→    selectedImageUri: android.net.Uri?,
+   261→    displayName: String,
+   262→    onPickImage: () -> Unit
+   263→) {
+   264→    Column(
+   265→        horizontalAlignment = Alignment.CenterHorizontally
+   266→    ) {
+   267→        Box(
+   268→            modifier = Modifier
+   269→                .size(96.dp)
+   270→                .clickable(
+   271→                    interactionSource = remember { MutableInteractionSource() },
+   272→                    indication = null,
+   273→                    onClick = onPickImage
+   274→                ),
+   275→            contentAlignment = Alignment.BottomEnd
+   276→        ) {
+   277→            // Avatar circle
+   278→            Box(
+   279→                modifier = Modifier
+   280→                    .size(96.dp)
+   281→                    .clip(CircleShape)
+   282→                    .background(CardBackground),
+   283→                contentAlignment = Alignment.Center
+   284→            ) {
+   285→                if (selectedImageUri != null) {
+   286→                    AsyncImage(
+   287→                        model = ImageRequest.Builder(LocalContext.current)
+   288→                            .data(selectedImageUri)
+   289→                            .crossfade(true)
+   290→                            .build(),
+   291→                        contentDescription = "Profile photo",
+   292→                        modifier = Modifier
+   293→                            .size(96.dp)
+   294→                            .clip(CircleShape),
+   295→                        contentScale = ContentScale.Crop,
+   296→                    )
+   297→                } else if (!photoUrl.isNullOrBlank()) {
+   298→                    AsyncImage(
+   299→                        model = ImageRequest.Builder(LocalContext.current)
+   300→                            .data(photoUrl)
+   301→                            .crossfade(true)
+   302→                            .build(),
+   303→                        contentDescription = "Profile photo",
+   304→                        modifier = Modifier
+   305→                            .size(96.dp)
+   306→                            .clip(CircleShape),
+   307→                        contentScale = ContentScale.Crop,
+   308→                    )
+   309→                } else {
+   310→                    Text(
+   311→                        text = displayName.firstOrNull()?.uppercase() ?: "?",
+   312→                        color = TextPrimary,
+   313→                        fontSize = 38.sp,
+   314→                        fontWeight = FontWeight.SemiBold,
+   315→                    )
+   316→                }
+   317→            }
+   318→
+   319→            // Camera icon overlay
+   320→            Box(
+   321→                modifier = Modifier
+   322→                    .size(30.dp)
+   323→                    .clip(CircleShape)
+   324→                    .background(AccentGreen)
+   325→                    .border(
+   326→                        width = 2.dp,
+   327→                        color = BackgroundGradientEnd,
+   328→                        shape = CircleShape
+   329→                    ),
+   330→                contentAlignment = Alignment.Center
+   331→            ) {
+   332→                Icon(
+   333→                    imageVector = Icons.Filled.CameraAlt,
+   334→                    contentDescription = "Change profile photo",
+   335→                    tint = Color(0xFF003A1F),
+   336→                    modifier = Modifier.size(16.dp)
+   337→                )
+   338→            }
+   339→        }
+   340→
+   341→        Spacer(modifier = Modifier.height(8.dp))
+   342→
+   343→        Text(
+   344→            text = "Tap to change profile photo",
+   345→            color = TextSecondary,
+   346→            fontSize = 13.sp,
+   347→            fontWeight = FontWeight.Normal,
+   348→            textAlign = TextAlign.Center,
+   349→        )
+   350→    }
+   351→}
+   352→
+   353→// ──────────────────────────────────────────────────────────────────────────────
+   354→// Zixo Number Card (read-only) with QR code
+   355→// ──────────────────────────────────────────────────────────────────────────────
+   356→
+   357→@Composable
+   358→private fun ZixoNumberCard(
+   359→    zixoNumber: String,
+   360→    onCopyToClipboard: () -> Unit
+   361→) {
+   362→    val formattedNumber = formatZixoNumber(zixoNumber)
+   363→
+   364→    Card(
+   365→        modifier = Modifier.fillMaxWidth(),
+   366→        shape = RoundedCornerShape(12.dp),
+   367→        colors = CardDefaults.cardColors(
+   368→            containerColor = CardBackground
+   369→        ),
+   370→        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+   371→    ) {
+   372→        Column(
+   373→            modifier = Modifier
+   374→                .fillMaxWidth()
+   375→                .border(
+   376→                    width = 1.dp,
+   377→                    color = AccentGreen.copy(alpha = 0.3f),
+   378→                    shape = RoundedCornerShape(12.dp),
+   379→                )
+   380→                .padding(20.dp),
+   381→            horizontalAlignment = Alignment.CenterHorizontally,
+   382→        ) {
+   383→            Text(
+   384→                text = "Zixo Number",
+   385→                color = TextSecondary,
+   386→                fontSize = 12.sp,
+   387→                fontWeight = FontWeight.Medium,
+   388→                letterSpacing = 0.5.sp,
+   389→            )
+   390→
+   391→            Spacer(modifier = Modifier.height(4.dp))
+   392→
+   393→            Text(
+   394→                text = formattedNumber,
+   395→                color = AccentGreen,
+   396→                fontSize = 22.sp,
+   397→                fontWeight = FontWeight.Bold,
+   398→                fontFamily = FontFamily.Monospace,
+   399→                letterSpacing = 2.sp,
+   400→            )
+   401→
+   402→            Spacer(modifier = Modifier.height(16.dp))
+   403→
+   404→            // QR Code
+   405→            ZixoQrCode(
+   406→                data = zixoNumber,
+   407→                size = 140.dp
+   408→            )
+   409→
+   410→            Spacer(modifier = Modifier.height(16.dp))
+   411→
+   412→            // Copy to clipboard button
+   413→            Row(
+   414→                modifier = Modifier
+   415→                    .clip(RoundedCornerShape(8.dp))
+   416→                    .background(AccentGreen.copy(alpha = 0.12f))
+   417→                    .clickable(onClick = onCopyToClipboard)
+   418→                    .padding(horizontal = 16.dp, vertical = 8.dp),
+   419→                verticalAlignment = Alignment.CenterVertically,
+   420→                horizontalArrangement = Arrangement.Center,
+   421→            ) {
+   422→                Icon(
+   423→                    imageVector = Icons.Filled.ContentCopy,
+   424→                    contentDescription = "Copy to clipboard",
+   425→                    tint = AccentGreen,
+   426→                    modifier = Modifier.size(16.dp)
+   427→                )
+   428→                Spacer(modifier = Modifier.width(6.dp))
+   429→                Text(
+   430→                    text = "Copy to Clipboard",
+   431→                    color = AccentGreen,
+   432→                    fontSize = 13.sp,
+   433→                    fontWeight = FontWeight.SemiBold,
+   434→                )
+   435→            }
+   436→        }
+   437→    }
+   438→}
+   439→
+   440→// ──────────────────────────────────────────────────────────────────────────────
+   441→// QR Code composable using ZXing
+   442→// ──────────────────────────────────────────────────────────────────────────────
+   443→
+   444→@Composable
+   445→private fun ZixoQrCode(
+   446→    data: String,
+   447→    size: androidx.compose.ui.unit.Dp,
+   448→    modifier: Modifier = Modifier
+   449→) {
+   450→    if (data.isBlank()) return
+   451→
+   452→    val density = LocalDensity.current
+   453→    val sizePx = with(density) { size.roundToPx() }
+   454→
+   455→    val qrBitmap = remember(data, sizePx) {
+   456→        generateQrBitmap(data, sizePx)
+   457→    }
+   458→
+   459→    Card(
+   460→        modifier = modifier.padding(2.dp),
+   461→        shape = RoundedCornerShape(8.dp),
+   462→        colors = CardDefaults.cardColors(containerColor = Color.White),
+   463→        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+   464→    ) {
+   465→        androidx.compose.foundation.Image(
+   466→            bitmap = qrBitmap.asImageBitmap(),
+   467→            contentDescription = "QR Code for Zixo number",
+   468→            modifier = Modifier
+   469→                .size(size)
+   470→                .padding(8.dp),
+   471→            contentScale = ContentScale.Fit
+   472→        )
+   473→    }
+   474→}
+   475→
+   476→/**
+   477→ * Generates a QR code bitmap using ZXing core library.
+   478→ */
+   479→private fun generateQrBitmap(data: String, sizePx: Int): Bitmap {
+   480→    val writer = QRCodeWriter()
+   481→    val bitMatrix = writer.encode(
+   482→        data,
+   483→        BarcodeFormat.QR_CODE,
+   484→        sizePx,
+   485→        sizePx
+   486→    )
+   487→    val width = bitMatrix.width
+   488→    val height = bitMatrix.height
+   489→    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+   490→    for (x in 0 until width) {
+   491→        for (y in 0 until height) {
+   492→            bitmap.setPixel(
+   493→                x, y,
+   494→                if (bitMatrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE
+   495→            )
+   496→        }
+   497→    }
+   498→    return bitmap
+   499→}
+   500→
+   501→// ──────────────────────────────────────────────────────────────────────────────
+   502→// Form Fields Card
+   503→// ──────────────────────────────────────────────────────────────────────────────
+   504→
+   505→@Composable
+   506→private fun FormFieldsCard(
+   507→    displayName: String,
+   508→    onDisplayNameChanged: (String) -> Unit,
+   509→    username: String,
+   510→    phoneNumber: String?,
+   511→    bio: String,
+   512→    onBioChanged: (String) -> Unit,
+   513→) {
+   514→    Card(
+   515→        modifier = Modifier.fillMaxWidth(),
+   516→        shape = RoundedCornerShape(12.dp),
+   517→        colors = CardDefaults.cardColors(containerColor = CardBackground),
+   518→        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+   519→    ) {
+   520→        Column(
+   521→            modifier = Modifier
+   522→                .fillMaxWidth()
+   523→                .padding(20.dp)
+   524→        ) {
+   525→            // ── Display Name ───────────────────────────────────────────
+   526→            Text(
+   527→                text = "Display Name",
+   528→                color = TextSecondary,
+   529→                fontSize = 12.sp,
+   530→                fontWeight = FontWeight.Medium,
+   531→                letterSpacing = 0.5.sp,
+   532→                modifier = Modifier.padding(bottom = 6.dp)
+   533→            )
+   534→
+   535→            OutlinedTextField(
+   536→                value = displayName,
+   537→                onValueChange = onDisplayNameChanged,
+   538→                modifier = Modifier.fillMaxWidth(),
+   539→                textStyle = MaterialTheme.typography.bodyLarge.copy(
+   540→                    color = TextPrimary
+   541→                ),
+   542→                placeholder = {
+   543→                    Text(
+   544→                        text = "Enter display name",
+   545→                        color = TextSecondary.copy(alpha = 0.5f)
+   546→                    )
+   547→                },
+   548→                singleLine = true,
+   549→                maxLines = 1,
+   550→                colors = OutlinedTextFieldDefaults.colors(
+   551→                    focusedBorderColor = AccentGreen,
+   552→                    unfocusedBorderColor = OutlineDark,
+   553→                    cursorColor = AccentGreen,
+   554→                    focusedContainerColor = Color.Transparent,
+   555→                    unfocusedContainerColor = Color.Transparent,
+   556→                ),
+   557→                shape = RoundedCornerShape(8.dp),
+   558→                keyboardOptions = KeyboardOptions(
+   559→                    keyboardType = KeyboardType.Text
+   560→                ),
+   561→            )
+   562→
+   563→            Row(
+   564→                modifier = Modifier
+   565→                    .fillMaxWidth()
+   566→                    .padding(top = 4.dp, start = 4.dp, end = 4.dp),
+   567→                horizontalArrangement = Arrangement.End
+   568→            ) {
+   569→                Text(
+   570→                    text = "${displayName.length}/${EditProfileViewModel.DISPLAY_NAME_MAX_LENGTH}",
+   571→                    color = if (displayName.length >= EditProfileViewModel.DISPLAY_NAME_MAX_LENGTH) {
+   572→                        Color(0xFFFF5252)
+   573→                    } else {
+   574→                        TextSecondary
+   575→                    },
+   576→                    fontSize = 11.sp,
+   577→                    fontWeight = FontWeight.Normal,
+   578→                    fontFamily = FontFamily.Monospace,
+   579→                )
+   580→            }
+   581→
+   582→            Spacer(modifier = Modifier.height(16.dp))
+   583→
+   584→            // ── Username (read-only) ────────────────────────────────────
+   585→            Text(
+   586→                text = "Username",
+   587→                color = TextSecondary,
+   588→                fontSize = 12.sp,
+   589→                fontWeight = FontWeight.Medium,
+   590→                letterSpacing = 0.5.sp,
+   591→                modifier = Modifier.padding(bottom = 6.dp)
+   592→            )
+   593→
+   594→            OutlinedTextField(
+   595→                value = username,
+   596→                onValueChange = {},
+   597→                modifier = Modifier.fillMaxWidth(),
+   598→                readOnly = true,
+   599→                enabled = false,
+   600→                textStyle = MaterialTheme.typography.bodyLarge.copy(
+   601→                    color = TextSecondary
+   602→                ),
+   603→                colors = OutlinedTextFieldDefaults.colors(
+   604→                    disabledBorderColor = OutlineDark.copy(alpha = 0.5f),
+   605→                    disabledContainerColor = DisabledFieldBackground,
+   606→                    disabledTextColor = TextSecondary,
+   607→                    disabledPlaceholderColor = TextSecondary.copy(alpha = 0.4f),
+   608→                ),
+   609→                shape = RoundedCornerShape(8.dp),
+   610→            )
+   611→
+   612→            Text(
+   613→                text = "Username cannot be changed.",
+   614→                color = TextSecondary,
+   615→                fontSize = 11.sp,
+   616→                fontWeight = FontWeight.Normal,
+   617→                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+   618→            )
+   619→
+   620→            Spacer(modifier = Modifier.height(16.dp))
+   621→
+   622→            // ── Phone Number (read-only) ────────────────────────────────
+   623→            Text(
+   624→                text = "Phone Number",
+   625→                color = TextSecondary,
+   626→                fontSize = 12.sp,
+   627→                fontWeight = FontWeight.Medium,
+   628→                letterSpacing = 0.5.sp,
+   629→                modifier = Modifier.padding(bottom = 6.dp)
+   630→            )
+   631→
+   632→            OutlinedTextField(
+   633→                value = phoneNumber ?: "Not set",
+   634→                onValueChange = {},
+   635→                modifier = Modifier.fillMaxWidth(),
+   636→                readOnly = true,
+   637→                enabled = false,
+   638→                textStyle = MaterialTheme.typography.bodyLarge.copy(
+   639→                    color = TextSecondary
+   640→                ),
+   641→                colors = OutlinedTextFieldDefaults.colors(
+   642→                    disabledBorderColor = OutlineDark.copy(alpha = 0.5f),
+   643→                    disabledContainerColor = DisabledFieldBackground,
+   644→                    disabledTextColor = TextSecondary,
+   645→                    disabledPlaceholderColor = TextSecondary.copy(alpha = 0.4f),
+   646→                ),
+   647→                shape = RoundedCornerShape(8.dp),
+   648→            )
+   649→
+   650→            Text(
+   651→                text = "Phone number cannot be changed.",
+   652→                color = TextSecondary,
+   653→                fontSize = 11.sp,
+   654→                fontWeight = FontWeight.Normal,
+   655→                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+   656→            )
+   657→
+   658→            Spacer(modifier = Modifier.height(16.dp))
+   659→
+   660→            // ── Bio / Status (multi-line) ───────────────────────────────
+   661→            Text(
+   662→                text = "Bio / Status",
+   663→                color = TextSecondary,
+   664→                fontSize = 12.sp,
+   665→                fontWeight = FontWeight.Medium,
+   666→                letterSpacing = 0.5.sp,
+   667→                modifier = Modifier.padding(bottom = 6.dp)
+   668→            )
+   669→
+   670→            OutlinedTextField(
+   671→                value = bio,
+   672→                onValueChange = onBioChanged,
+   673→                modifier = Modifier.fillMaxWidth(),
+   674→                textStyle = MaterialTheme.typography.bodyLarge.copy(
+   675→                    color = TextPrimary
+   676→                ),
+   677→                placeholder = {
+   678→                    Text(
+   679→                        text = "Write something about yourself…",
+   680→                        color = TextSecondary.copy(alpha = 0.5f)
+   681→                    )
+   682→                },
+   683→                singleLine = false,
+   684→                maxLines = 3,
+   685→                minLines = 2,
+   686→                colors = OutlinedTextFieldDefaults.colors(
+   687→                    focusedBorderColor = AccentGreen,
+   688→                    unfocusedBorderColor = OutlineDark,
+   689→                    cursorColor = AccentGreen,
+   690→                    focusedContainerColor = Color.Transparent,
+   691→                    unfocusedContainerColor = Color.Transparent,
+   692→                ),
+   693→                shape = RoundedCornerShape(8.dp),
+   694→                keyboardOptions = KeyboardOptions(
+   695→                    keyboardType = KeyboardType.Text
+   696→                ),
+   697→            )
+   698→
+   699→            Row(
+   700→                modifier = Modifier
+   701→                    .fillMaxWidth()
+   702→                    .padding(top = 4.dp, start = 4.dp, end = 4.dp),
+   703→                horizontalArrangement = Arrangement.End
+   704→            ) {
+   705→                Text(
+   706→                    text = "${bio.length}/${EditProfileViewModel.BIO_MAX_LENGTH}",
+   707→                    color = if (bio.length >= EditProfileViewModel.BIO_MAX_LENGTH) {
+   708→                        Color(0xFFFF5252)
+   709→                    } else {
+   710→                        TextSecondary
+   711→                    },
+   712→                    fontSize = 11.sp,
+   713→                    fontWeight = FontWeight.Normal,
+   714→                    fontFamily = FontFamily.Monospace,
+   715→                )
+   716→            }
+   717→        }
+   718→    }
+   719→}
+   720→
+   721→// ──────────────────────────────────────────────────────────────────────────────
+   722→// Save Changes Button
+   723→// ──────────────────────────────────────────────────────────────────────────────
+   724→
+   725→@Composable
+   726→private fun SaveChangesButton(
+   727→    enabled: Boolean,
+   728→    isSaving: Boolean,
+   729→    onClick: () -> Unit
+   730→) {
+   731→    Button(
+   732→        onClick = onClick,
+   733→        enabled = enabled,
+   734→        modifier = Modifier
+   735→            .fillMaxWidth()
+   736→            .height(52.dp),
+   737→        shape = RoundedCornerShape(12.dp),
+   738→        colors = ButtonDefaults.buttonColors(
+   739→            containerColor = AccentGreen,
+   740→            contentColor = Color(0xFF003A1F),
+   741→            disabledContainerColor = AccentGreen.copy(alpha = 0.35f),
+   742→            disabledContentColor = Color(0xFF003A1F).copy(alpha = 0.5f),
+   743→        ),
+   744→        elevation = ButtonDefaults.buttonElevation(
+   745→            defaultElevation = 0.dp,
+   746→            pressedElevation = 0.dp,
+   747→            disabledElevation = 0.dp,
+   748→        ),
+   749→    ) {
+   750→        if (isSaving) {
+   751→            CircularProgressIndicator(
+   752→                modifier = Modifier.size(22.dp),
+   753→                color = Color(0xFF003A1F),
+   754→                strokeWidth = 2.5.dp,
+   755→            )
+   756→        } else {
+   757→            Text(
+   758→                text = "Save Changes",
+   759→                fontSize = 16.sp,
+   760→                fontWeight = FontWeight.Bold,
+   761→                letterSpacing = 0.3.sp,
+   762→            )
+   763→        }
+   764→    }
+   765→}
+   766→
+   767→// ──────────────────────────────────────────────────────────────────────────────
+   768→// Helpers
+   769→// ──────────────────────────────────────────────────────────────────────────────
+   770→
+   771→/**
+   772→ * Formats an 8-digit number as two 4-digit blocks separated by a space.
+   773→ * e.g., "12345678" -> "1234 5678"
+   774→ */
+   775→private fun formatZixoNumber(number: String): String {
+   776→    val digits = number.filter { it.isDigit() }
+   777→    return if (digits.length >= 8) {
+   778→        "${digits.substring(0, 4)} ${digits.substring(4, 8)}"
+   779→    } else {
+   780→        digits
+   781→    }
+   782→}
+   783→

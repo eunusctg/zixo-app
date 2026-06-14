@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Zixo Color System -->
+    <color name="background_start">#0B1519</color>
+    <color name="background_end">#111E24</color>
+    <color name="card_panel">#1A2A32</color>
+    <color name="accent_green">#00E676</color>
+    <color name="accent_green_alt">#05C46B</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#90A4AE</color>
+    <color name="destructive_bg">#4A1515</color>
+    <color name="destructive_text">#FF5252</color>
+    <color name="amoled_black">#000000</color>
+    <color name="online_indicator">#00E676</color>
+    <color name="missed_call">#FF5252</color>
+    <color name="outgoing_call">#00E676</color>
+    <color name="incoming_call">#90A4AE</color>
+</resources>
