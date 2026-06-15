@@ -1,0 +1,958 @@
+     1→package com.zixo.app.ui.chat
+     2→
+     3→import androidx.compose.animation.AnimatedVisibility
+     4→import androidx.compose.animation.fadeIn
+     5→import androidx.compose.animation.fadeOut
+     6→import androidx.compose.animation.slideInVertically
+     7→import androidx.compose.animation.slideOutVertically
+     8→import androidx.compose.foundation.ExperimentalFoundationApi
+     9→import androidx.compose.foundation.background
+    10→import androidx.compose.foundation.border
+    11→import androidx.compose.foundation.combinedClickable
+    12→import androidx.compose.foundation.interaction.MutableInteractionSource
+    13→import androidx.compose.foundation.layout.Arrangement
+    14→import androidx.compose.foundation.layout.Box
+    15→import androidx.compose.foundation.layout.Column
+    16→import androidx.compose.foundation.layout.Row
+    17→import androidx.compose.foundation.layout.Spacer
+    18→import androidx.compose.foundation.layout.fillMaxSize
+    19→import androidx.compose.foundation.layout.fillMaxWidth
+    20→import androidx.compose.foundation.layout.height
+    21→import androidx.compose.foundation.layout.imePadding
+    22→import androidx.compose.foundation.layout.padding
+    23→import androidx.compose.foundation.layout.size
+    24→import androidx.compose.foundation.layout.width
+    25→import androidx.compose.foundation.lazy.LazyColumn
+    26→import androidx.compose.foundation.lazy.rememberLazyListState
+    27→import androidx.compose.foundation.shape.CircleShape
+    28→import androidx.compose.foundation.shape.RoundedCornerShape
+    29→import androidx.compose.material.icons.Icons
+    30→import androidx.compose.material.icons.automirrored.filled.ArrowBack
+    31→import androidx.compose.material.icons.filled.Call
+    32→import androidx.compose.material.icons.filled.Close
+    33→import androidx.compose.material.icons.filled.ContentCopy
+    34→import androidx.compose.material.icons.filled.Delete
+    35→import androidx.compose.material.icons.filled.DeleteForever
+    36→import androidx.compose.material.icons.filled.Forward
+    37→import androidx.compose.material.icons.filled.Image
+    38→import androidx.compose.material.icons.filled.PlayArrow
+    39→import androidx.compose.material.icons.filled.Reply
+    40→import androidx.compose.material.icons.filled.Send
+    41→import androidx.compose.material.icons.filled.Videocam
+    42→import androidx.compose.material3.Icon
+    43→import androidx.compose.material3.IconButton
+    44→import androidx.compose.material3.Scaffold
+    45→import androidx.compose.material3.SnackbarHost
+    46→import androidx.compose.material3.SnackbarHostState
+    47→import androidx.compose.material3.Text
+    48→import androidx.compose.material3.TopAppBar
+    49→import androidx.compose.material3.TopAppBarDefaults
+    50→import androidx.compose.runtime.Composable
+    51→import androidx.compose.runtime.LaunchedEffect
+    52→import androidx.compose.runtime.collectAsState
+    53→import androidx.compose.runtime.getValue
+    54→import androidx.compose.runtime.remember
+    55→import androidx.compose.ui.Alignment
+    56→import androidx.compose.ui.Modifier
+    57→import androidx.compose.ui.draw.clip
+    58→import androidx.compose.ui.graphics.Color
+    59→import androidx.compose.ui.layout.ContentScale
+    60→import androidx.compose.ui.platform.LocalClipboardManager
+    61→import androidx.compose.ui.text.AnnotatedString
+    62→import androidx.compose.ui.text.font.FontWeight
+    63→import androidx.compose.ui.text.style.TextOverflow
+    64→import androidx.compose.ui.unit.dp
+    65→import androidx.compose.ui.unit.sp
+    66→import androidx.hilt.navigation.compose.hiltViewModel
+    67→import androidx.navigation.NavController
+    68→import coil3.compose.AsyncImage
+    69→import com.zixo.app.domain.model.CallState
+    70→import com.zixo.app.domain.model.CommunicationGate
+    71→import com.zixo.app.domain.model.MessageContentType
+    72→import com.zixo.app.domain.model.MessageModel
+    73→import com.zixo.app.ui.components.GlassOutlinedTextField
+    74→import com.zixo.app.ui.components.ZixoGlassBackground
+    75→import com.zixo.app.ui.components.liquidGlassCard
+    76→import com.zixo.app.ui.components.liquidGlassContainer
+    77→import com.zixo.app.ui.theme.DarkPetrolCharcoal
+    78→import com.zixo.app.ui.theme.NeonMint
+    79→import com.zixo.app.ui.theme.TextPrimary
+    80→import com.zixo.app.ui.theme.TextSecondary
+    81→
+    82→// ── Design Tokens ─────────────────────────────────────────────────────────────
+    83→
+    84→private val NeonMintAlpha15 = NeonMint.copy(alpha = 0.15f)
+    85→private val IncomingBubbleColor = Color(0x1A1A2A32)
+    86→private val GlassBorderColor = Color(0x33FFFFFF)
+    87→private val InputTrayHeight = 74.dp
+    88→private val InputTrayCornerSize = 28.dp
+    89→private val BubbleCornerSize = 16.dp
+    90→private val OnlineIndicatorColor = NeonMint
+    91→
+    92→/** Common 3D reaction emoji bar. */
+    93→private val ReactionEmojis = listOf("❤️", "😂", "😮", "😢", "👍", "🔥", "🎉", "💯")
+    94→
+    95→// ── Screen Entry Point ────────────────────────────────────────────────────────
+    96→
+    97→/**
+    98→ * Full chat message screen with keyboard avoidance and Liquid Glass design.
+    99→ *
+   100→ * Features:
+   101→ * - Wrapped in [Scaffold] with `Modifier.imePadding()` for keyboard avoidance
+   102→ * - [LazyColumn] with `reverseLayout = true` for messages — newest at bottom
+   103→ * - Auto-scroll on new messages via [LaunchedEffect]
+   104→ * - 74dp liquid glass pill-shaped input tray
+   105→ * - Outgoing messages: glowing neon mint transparency background
+   106→ * - Incoming messages: translucent dark petrol grey curves
+   107→ * - Long-press action menu with 3D reactions, reply, forward, delete, copy
+   108→ * - Reply preview bar above input tray
+   109→ * - Call state overlay when active
+   110→ * - Top bar with contact avatar, name, online status, and call icons
+   111→ * - Communication gate check — blocked overlay if not mutual contact
+   112→ * - NavController for navigation
+   113→ *
+   114→ * @param threadId The ID of the chat thread to display.
+   115→ * @param navController Navigation controller for screen transitions.
+   116→ * @param onBack Callback for the back navigation button.
+   117→ */
+   118→@OptIn(ExperimentalFoundationApi::class)
+   119→@Composable
+   120→fun ChatMessageScreen(
+   121→    threadId: String,
+   122→    navController: NavController,
+   123→    onBack: () -> Unit = {},
+   124→    viewModel: ChatViewModel = hiltViewModel()
+   125→) {
+   126→    val messages by viewModel.messages.collectAsState()
+   127→    val thread by viewModel.thread.collectAsState()
+   128→    val inputText by viewModel.inputText.collectAsState()
+   129→    val isSending by viewModel.isSending.collectAsState()
+   130→    val callState by viewModel.callState.collectAsState()
+   131→    val replyToMessage by viewModel.replyToMessage.collectAsState()
+   132→    val showActionMenu by viewModel.showActionMenu.collectAsState()
+   133→    val currentUserId by viewModel.currentUserId.collectAsState()
+   134→    val errorMessage by viewModel.errorMessage.collectAsState()
+   135→    val communicationGate by viewModel.communicationGate.collectAsState()
+   136→
+   137→    val snackbarHostState = remember { SnackbarHostState() }
+   138→    val listState = rememberLazyListState()
+   139→
+   140→    // Auto-scroll to bottom on new messages
+   141→    LaunchedEffect(messages.size) {
+   142→        if (messages.isNotEmpty()) {
+   143→            listState.animateScrollToItem(0)
+   144→        }
+   145→    }
+   146→
+   147→    // Display error messages as snackbars
+   148→    LaunchedEffect(errorMessage) {
+   149→        errorMessage?.let {
+   150→            snackbarHostState.showSnackbar(it)
+   151→            viewModel.clearError()
+   152→        }
+   153→    }
+   154→
+   155→    // Determine contact info from thread
+   156→    val otherParticipant = thread?.participantProfiles?.values?.firstOrNull {
+   157→        it.uid != currentUserId
+   158→    }
+   159→    val contactName = otherParticipant?.displayName ?: "Chat"
+   160→    val contactAvatar = otherParticipant?.avatarUrl ?: ""
+   161→    val isOnline = otherParticipant?.isOnline ?: false
+   162→
+   163→    // Check if communication is blocked
+   164→    val isBlocked = communicationGate is CommunicationGate.Blocked
+   165→
+   166→    Scaffold(
+   167→        snackbarHost = { SnackbarHost(snackbarHostState) },
+   168→        containerColor = Color.Transparent,
+   169→        modifier = Modifier.fillMaxSize()
+   170→    ) { innerPadding ->
+   171→        Box(modifier = Modifier.fillMaxSize()) {
+   172→            // Animated glass background
+   173→            ZixoGlassBackground()
+   174→
+   175→            Column(
+   176→                modifier = Modifier
+   177→                    .fillMaxSize()
+   178→                    .imePadding()
+   179→                    .padding(innerPadding)
+   180→            ) {
+   181→                // ── Top Bar ────────────────────────────────────────────────
+   182→                ChatTopBar(
+   183→                    contactName = contactName,
+   184→                    contactAvatar = contactAvatar,
+   185→                    isOnline = isOnline,
+   186→                    onBackClick = onBack,
+   187→                    onAudioCallClick = { viewModel.startAudioCall() },
+   188→                    onVideoCallClick = { viewModel.startVideoCall() }
+   189→                )
+   190→
+   191→                // ── Message List ───────────────────────────────────────────
+   192→                LazyColumn(
+   193→                    state = listState,
+   194→                    reverseLayout = true,
+   195→                    modifier = Modifier
+   196→                        .weight(1f)
+   197→                        .fillMaxWidth()
+   198→                        .padding(horizontal = 12.dp),
+   199→                    verticalArrangement = Arrangement.spacedBy(6.dp)
+   200→                ) {
+   201→                    items(
+   202→                        count = messages.size,
+   203→                        key = { index -> messages[index].id }
+   204→                    ) { index ->
+   205→                        val message = messages[index]
+   206→                        val isOwnMessage = message.senderUid == currentUserId
+   207→
+   208→                        MessageBubble(
+   209→                            message = message,
+   210→                            isOwnMessage = isOwnMessage,
+   211→                            onLongClick = { viewModel.showActionMenu.value = message }
+   212→                        )
+   213→                    }
+   214→                }
+   215→
+   216→                // ── Reply Preview Bar ──────────────────────────────────────
+   217→                AnimatedVisibility(
+   218→                    visible = replyToMessage != null,
+   219→                    enter = slideInVertically() + fadeIn(),
+   220→                    exit = slideOutVertically() + fadeOut()
+   221→                ) {
+   222→                    replyToMessage?.let { replied ->
+   223→                        ReplyPreviewBar(
+   224→                            senderName = replied.replyToSenderName ?: replied.senderDisplayName,
+   225→                            previewText = replied.replyToPreview ?: replied.content,
+   226→                            onDismiss = { viewModel.clearReplyTo() }
+   227→                        )
+   228→                    }
+   229→                }
+   230→
+   231→                // ── Input Tray (74dp Liquid Glass Pill) ────────────────────
+   232→                InputTray(
+   233→                    value = inputText,
+   234→                    onValueChange = { viewModel.onInputTextChanged(it) },
+   235→                    onSendClick = { viewModel.sendMessage() },
+   236→                    isSending = isSending,
+   237→                    enabled = !isBlocked,
+   238→                    modifier = Modifier.fillMaxWidth()
+   239→                )
+   240→            }
+   241→
+   242→            // ── Communication Gate Blocked Overlay ────────────────────────
+   243→            if (isBlocked) {
+   244→                CommunicationGateOverlay(
+   245→                    reason = (communicationGate as? CommunicationGate.Blocked)?.reason
+   246→                        ?: "You can only message mutual contacts"
+   247→                )
+   248→            }
+   249→
+   250→            // ── Action Menu Overlay ────────────────────────────────────────
+   251→            showActionMenu?.let { actionMessage ->
+   252→                ActionMenuOverlay(
+   253→                    message = actionMessage,
+   254→                    isOwnMessage = actionMessage.senderUid == currentUserId,
+   255→                    onReact = { emoji, isThreeD ->
+   256→                        viewModel.addReaction(actionMessage.id, emoji, isThreeD)
+   257→                    },
+   258→                    onReply = {
+   259→                        viewModel.setReplyTo(actionMessage.id)
+   260→                    },
+   261→                    onForward = {
+   262→                        viewModel.forwardMessage(actionMessage.id, emptyList())
+   263→                    },
+   264→                    onDeleteForMe = {
+   265→                        viewModel.deleteForMe(actionMessage.id)
+   266→                    },
+   267→                    onDeleteForEveryone = {
+   268→                        viewModel.deleteForEveryone(actionMessage.id)
+   269→                    },
+   270→                    onCopy = {
+   271→                        // Handled inside the overlay
+   272→                    },
+   273→                    onDismiss = { viewModel.dismissActionMenu() }
+   274→                )
+   275→            }
+   276→
+   277→            // ── Call State Overlay ─────────────────────────────────────────
+   278→            if (callState !is CallState.IDLE) {
+   279→                CallStateOverlay(
+   280→                    callState = callState,
+   281→                    contactName = contactName,
+   282→                    contactAvatar = contactAvatar
+   283→                )
+   284→            }
+   285→        }
+   286→    }
+   287→}
+   288→
+   289→// ── Top Bar ───────────────────────────────────────────────────────────────────
+   290→
+   291→@Composable
+   292→private fun ChatTopBar(
+   293→    contactName: String,
+   294→    contactAvatar: String,
+   295→    isOnline: Boolean,
+   296→    onBackClick: () -> Unit,
+   297→    onAudioCallClick: () -> Unit,
+   298→    onVideoCallClick: () -> Unit
+   299→) {
+   300→    TopAppBar(
+   301→        title = {
+   302→            Row(verticalAlignment = Alignment.CenterVertically) {
+   303→                // Contact avatar
+   304→                if (contactAvatar.isNotBlank()) {
+   305→                    AsyncImage(
+   306→                        model = contactAvatar,
+   307→                        contentDescription = "Avatar",
+   308→                        modifier = Modifier
+   309→                            .size(36.dp)
+   310→                            .clip(CircleShape)
+   311→                            .border(1.dp, GlassBorderColor, CircleShape),
+   312→                        contentScale = ContentScale.Crop
+   313→                    )
+   314→                    Spacer(modifier = Modifier.width(10.dp))
+   315→                }
+   316→                Column {
+   317→                    Text(
+   318→                        text = contactName,
+   319→                        color = TextPrimary,
+   320→                        fontSize = 18.sp,
+   321→                        fontWeight = FontWeight.SemiBold,
+   322→                        maxLines = 1,
+   323→                        overflow = TextOverflow.Ellipsis
+   324→                    )
+   325→                    Text(
+   326→                        text = if (isOnline) "Online" else "Offline",
+   327→                        color = if (isOnline) OnlineIndicatorColor else TextSecondary,
+   328→                        fontSize = 12.sp,
+   329→                        fontWeight = FontWeight.Normal
+   330→                    )
+   331→                }
+   332→            }
+   333→        },
+   334→        navigationIcon = {
+   335→            IconButton(onClick = onBackClick) {
+   336→                Icon(
+   337→                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+   338→                    contentDescription = "Back",
+   339→                    tint = TextPrimary
+   340→                )
+   341→            }
+   342→        },
+   343→        actions = {
+   344→            IconButton(onClick = onAudioCallClick) {
+   345→                Icon(
+   346→                    imageVector = Icons.Filled.Call,
+   347→                    contentDescription = "Audio Call",
+   348→                    tint = TextSecondary
+   349→                )
+   350→            }
+   351→            IconButton(onClick = onVideoCallClick) {
+   352→                Icon(
+   353→                    imageVector = Icons.Filled.Videocam,
+   354→                    contentDescription = "Video Call",
+   355→                    tint = TextSecondary
+   356→                )
+   357→            }
+   358→        },
+   359→        colors = TopAppBarDefaults.topAppBarColors(
+   360→            containerColor = Color.Transparent
+   361→        )
+   362→    )
+   363→}
+   364→
+   365→// ── Message Bubble ────────────────────────────────────────────────────────────
+   366→
+   367→@OptIn(ExperimentalFoundationApi::class)
+   368→@Composable
+   369→private fun MessageBubble(
+   370→    message: MessageModel,
+   371→    isOwnMessage: Boolean,
+   372→    onLongClick: () -> Unit
+   373→) {
+   374→    // Deleted placeholder
+   375→    if (message.isDeletedForEveryone) {
+   376→        Row(
+   377→            modifier = Modifier
+   378→                .fillMaxWidth()
+   379→                .padding(
+   380→                    start = if (isOwnMessage) 48.dp else 0.dp,
+   381→                    end = if (!isOwnMessage) 48.dp else 0.dp
+   382→                ),
+   383→            horizontalArrangement = if (isOwnMessage) Arrangement.End else Arrangement.Start
+   384→        ) {
+   385→            Box(
+   386→                modifier = Modifier
+   387→                    .clip(RoundedCornerShape(BubbleCornerSize))
+   388→                    .background(IncomingBubbleColor)
+   389→                    .padding(horizontal = 14.dp, vertical = 10.dp)
+   390→            ) {
+   391→                Text(
+   392→                    text = "This message was deleted",
+   393→                    color = TextSecondary,
+   394→                    fontSize = 14.sp,
+   395→                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+   396→                )
+   397→            }
+   398→        }
+   399→        return
+   400→    }
+   401→
+   402→    // Soft-deleted for me — invisible
+   403→    if (message.isDeletedForMe) return
+   404→
+   405→    val bubbleColor = if (isOwnMessage) NeonMintAlpha15 else IncomingBubbleColor
+   406→    val alignment = if (isOwnMessage) Arrangement.End else Arrangement.Start
+   407→    val shape = RoundedCornerShape(
+   408→        topStart = BubbleCornerSize,
+   409→        topEnd = BubbleCornerSize,
+   410→        bottomStart = if (isOwnMessage) BubbleCornerSize else 4.dp,
+   411→        bottomEnd = if (isOwnMessage) 4.dp else BubbleCornerSize
+   412→    )
+   413→
+   414→    Row(
+   415→        modifier = Modifier
+   416→            .fillMaxWidth()
+   417→            .padding(
+   418→                start = if (isOwnMessage) 48.dp else 0.dp,
+   419→                end = if (!isOwnMessage) 48.dp else 0.dp
+   420→            ),
+   421→        horizontalArrangement = alignment
+   422→    ) {
+   423→        Column(
+   424→            modifier = Modifier
+   425→                .clip(shape)
+   426→                .background(bubbleColor)
+   427→                .combinedClickable(
+   428→                    interactionSource = remember { MutableInteractionSource() },
+   429→                    indication = null,
+   430→                    onClick = {},
+   431→                    onLongClick = onLongClick
+   432→                )
+   433→                .padding(horizontal = 14.dp, vertical = 10.dp)
+   434→        ) {
+   435→            // Reply reference preview
+   436→            if (message.replyToPreview != null) {
+   437→                Row(
+   438→                    modifier = Modifier
+   439→                        .fillMaxWidth()
+   440→                        .clip(RoundedCornerShape(8.dp))
+   441→                        .background(NeonMintAlpha15)
+   442→                        .padding(horizontal = 8.dp, vertical = 4.dp)
+   443→                ) {
+   444→                    Text(
+   445→                        text = message.replyToSenderName ?: "",
+   446→                        color = NeonMint,
+   447→                        fontSize = 12.sp,
+   448→                        fontWeight = FontWeight.SemiBold,
+   449→                        maxLines = 1
+   450→                    )
+   451→                    Spacer(modifier = Modifier.width(6.dp))
+   452→                    Text(
+   453→                        text = message.replyToPreview ?: "",
+   454→                        color = TextSecondary,
+   455→                        fontSize = 12.sp,
+   456→                        maxLines = 1,
+   457→                        overflow = TextOverflow.Ellipsis,
+   458→                        modifier = Modifier.weight(1f)
+   459→                    )
+   460→                }
+   461→                Spacer(modifier = Modifier.height(4.dp))
+   462→            }
+   463→
+   464→            // Forwarded label
+   465→            if (message.isForwarded) {
+   466→                Text(
+   467→                    text = "Forwarded",
+   468→                    color = TextSecondary,
+   469→                    fontSize = 11.sp,
+   470→                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+   471→                )
+   472→                Spacer(modifier = Modifier.height(2.dp))
+   473→            }
+   474→
+   475→            // Media thumbnail
+   476→            if (message.type == MessageContentType.IMAGE || message.type == MessageContentType.VIDEO) {
+   477→                val imageUrl = message.mediaThumbnailUrl ?: message.mediaUrl
+   478→                if (!imageUrl.isNullOrBlank()) {
+   479→                    AsyncImage(
+   480→                        model = imageUrl,
+   481→                        contentDescription = "Media",
+   482→                        modifier = Modifier
+   483→                            .fillMaxWidth()
+   484→                            .height(180.dp)
+   485→                            .clip(RoundedCornerShape(10.dp)),
+   486→                        contentScale = ContentScale.Crop
+   487→                    )
+   488→                    Spacer(modifier = Modifier.height(4.dp))
+   489→                }
+   490→                // Play icon overlay for video
+   491→                if (message.type == MessageContentType.VIDEO) {
+   492→                    Box(
+   493→                        modifier = Modifier
+   494→                            .size(36.dp)
+   495→                            .clip(CircleShape)
+   496→                            .background(DarkPetrolCharcoal.copy(alpha = 0.7f)),
+   497→                        contentAlignment = Alignment.Center
+   498→                    ) {
+   499→                        Icon(
+   500→                            imageVector = Icons.Filled.PlayArrow,
+   501→                            contentDescription = "Play",
+   502→                            tint = TextPrimary,
+   503→                            modifier = Modifier.size(20.dp)
+   504→                        )
+   505→                    }
+   506→                }
+   507→            }
+   508→
+   509→            // Voice message indicator
+   510→            if (message.type == MessageContentType.AUDIO_VOICE) {
+   511→                Row(verticalAlignment = Alignment.CenterVertically) {
+   512→                    Icon(
+   513→                        imageVector = Icons.Filled.PlayArrow,
+   514→                        contentDescription = "Voice",
+   515→                        tint = NeonMint,
+   516→                        modifier = Modifier.size(20.dp)
+   517→                    )
+   518→                    Spacer(modifier = Modifier.width(6.dp))
+   519→                    Text(
+   520→                        text = "Voice message",
+   521→                        color = TextSecondary,
+   522→                        fontSize = 14.sp
+   523→                    )
+   524→                }
+   525→                Spacer(modifier = Modifier.height(4.dp))
+   526→            }
+   527→
+   528→            // Text content
+   529→            if (message.content.isNotBlank()) {
+   530→                Text(
+   531→                    text = message.content,
+   532→                    color = TextPrimary,
+   533→                    fontSize = 15.sp,
+   534→                    lineHeight = 20.sp
+   535→                )
+   536→            }
+   537→
+   538→            // Media caption
+   539→            if (!message.caption.isNullOrBlank() && message.type != MessageContentType.TEXT) {
+   540→                Spacer(modifier = Modifier.height(4.dp))
+   541→                Text(
+   542→                    text = message.caption,
+   543→                    color = TextPrimary,
+   544→                    fontSize = 14.sp
+   545→                )
+   546→            }
+   547→
+   548→            // Timestamp and read receipt row
+   549→            Row(
+   550→                modifier = Modifier.fillMaxWidth(),
+   551→                horizontalArrangement = Arrangement.End,
+   552→                verticalAlignment = Alignment.CenterVertically
+   553→            ) {
+   554→                Text(
+   555→                    text = formatTimestamp(message.timestamp),
+   556→                    color = TextSecondary,
+   557→                    fontSize = 11.sp
+   558→                )
+   559→                if (isOwnMessage) {
+   560→                    Spacer(modifier = Modifier.width(4.dp))
+   561→                    val tickColor = if (message.isRead) NeonMint else TextSecondary
+   562→                    Text(text = if (message.isRead) "✓✓" else "✓", color = tickColor, fontSize = 11.sp)
+   563→                }
+   564→            }
+   565→
+   566→            // Reactions row — emoji badges below the bubble
+   567→            if (message.reactions.isNotEmpty()) {
+   568→                Spacer(modifier = Modifier.height(4.dp))
+   569→                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+   570→                    message.reactions.distinctBy { it.emoji }.forEach { reaction ->
+   571→                        Box(
+   572→                            modifier = Modifier
+   573→                                .clip(RoundedCornerShape(12.dp))
+   574→                                .background(GlassBorderColor)
+   575→                                .padding(horizontal = 6.dp, vertical = 2.dp)
+   576→                        ) {
+   577→                            Text(
+   578→                                text = "${reaction.emoji} ${message.reactions.count { it.emoji == reaction.emoji }}",
+   579→                                fontSize = 12.sp
+   580→                            )
+   581→                        }
+   582→                    }
+   583→                }
+   584→            }
+   585→        }
+   586→    }
+   587→}
+   588→
+   589→// ── Reply Preview Bar ─────────────────────────────────────────────────────────
+   590→
+   591→@Composable
+   592→private fun ReplyPreviewBar(
+   593→    senderName: String,
+   594→    previewText: String,
+   595→    onDismiss: () -> Unit
+   596→) {
+   597→    Row(
+   598→        modifier = Modifier
+   599→            .fillMaxWidth()
+   600→            .background(DarkPetrolCharcoal.copy(alpha = 0.8f))
+   601→            .padding(horizontal = 16.dp, vertical = 8.dp),
+   602→        verticalAlignment = Alignment.CenterVertically
+   603→    ) {
+   604→        Box(
+   605→            modifier = Modifier
+   606→                .width(3.dp)
+   607→                .height(36.dp)
+   608→                .clip(RoundedCornerShape(2.dp))
+   609→                .background(NeonMint)
+   610→        )
+   611→        Spacer(modifier = Modifier.width(10.dp))
+   612→        Column(modifier = Modifier.weight(1f)) {
+   613→            Text(
+   614→                text = senderName,
+   615→                color = NeonMint,
+   616→                fontSize = 13.sp,
+   617→                fontWeight = FontWeight.SemiBold,
+   618→                maxLines = 1
+   619→            )
+   620→            Text(
+   621→                text = previewText,
+   622→                color = TextSecondary,
+   623→                fontSize = 13.sp,
+   624→                maxLines = 1,
+   625→                overflow = TextOverflow.Ellipsis
+   626→            )
+   627→        }
+   628→        IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+   629→            Icon(
+   630→                imageVector = Icons.Filled.Close,
+   631→                contentDescription = "Dismiss reply",
+   632→                tint = TextSecondary,
+   633→                modifier = Modifier.size(16.dp)
+   634→            )
+   635→        }
+   636→    }
+   637→}
+   638→
+   639→// ── Input Tray (74dp Liquid Glass Pill) ───────────────────────────────────────
+   640→
+   641→@Composable
+   642→private fun InputTray(
+   643→    value: String,
+   644→    onValueChange: (String) -> Unit,
+   645→    onSendClick: () -> Unit,
+   646→    isSending: Boolean,
+   647→    enabled: Boolean,
+   648→    modifier: Modifier = Modifier
+   649→) {
+   650→    Row(
+   651→        modifier = modifier
+   652→            .height(InputTrayHeight)
+   653→            .padding(horizontal = 12.dp, vertical = 8.dp)
+   654→            .clip(RoundedCornerShape(InputTrayCornerSize))
+   655→            .background(DarkPetrolCharcoal.copy(alpha = 0.6f))
+   656→            .border(1.dp, GlassBorderColor, RoundedCornerShape(InputTrayCornerSize))
+   657→            .padding(horizontal = 8.dp),
+   658→        verticalAlignment = Alignment.CenterVertically
+   659→    ) {
+   660→        // Attach button (camera/image icon)
+   661→        IconButton(
+   662→            onClick = { /* TODO: Launch media picker */ },
+   663→            enabled = enabled,
+   664→            modifier = Modifier.size(40.dp)
+   665→        ) {
+   666→            Icon(
+   667→                imageVector = Icons.Filled.Image,
+   668→                contentDescription = "Attach",
+   669→                tint = if (enabled) TextSecondary else TextSecondary.copy(alpha = 0.4f)
+   670→            )
+   671→        }
+   672→
+   673→        // Text input field (GlassOutlinedTextField style)
+   674→        GlassOutlinedTextField(
+   675→            value = value,
+   676→            onValueChange = onValueChange,
+   677→            placeholder = {
+   678→                Text(
+   679→                    text = "Message…",
+   680→                    color = TextSecondary.copy(alpha = 0.6f),
+   681→                    fontSize = 15.sp
+   682→                )
+   683→            },
+   684→            modifier = Modifier
+   685→                .weight(1f),
+   686→            enabled = enabled,
+   687→            singleLine = false,
+   688→            maxLength = 4096
+   689→        )
+   690→
+   691→        // Send button (NeonMint arrow icon)
+   692→        IconButton(
+   693→            onClick = onSendClick,
+   694→            enabled = value.isNotBlank() && !isSending && enabled,
+   695→            modifier = Modifier.size(40.dp)
+   696→        ) {
+   697→            Icon(
+   698→                imageVector = Icons.Filled.Send,
+   699→                contentDescription = "Send",
+   700→                tint = if (value.isNotBlank() && !isSending && enabled) NeonMint else TextSecondary.copy(alpha = 0.4f)
+   701→            )
+   702→        }
+   703→    }
+   704→}
+   705→
+   706→// ── Action Menu Overlay (Frosted Glass) ───────────────────────────────────────
+   707→
+   708→@Composable
+   709→private fun ActionMenuOverlay(
+   710→    message: MessageModel,
+   711→    isOwnMessage: Boolean,
+   712→    onReact: (emoji: String, isThreeD: Boolean) -> Unit,
+   713→    onReply: () -> Unit,
+   714→    onForward: () -> Unit,
+   715→    onDeleteForMe: () -> Unit,
+   716→    onDeleteForEveryone: () -> Unit,
+   717→    onCopy: () -> Unit,
+   718→    onDismiss: () -> Unit
+   719→) {
+   720→    val clipboardManager = LocalClipboardManager.current
+   721→
+   722→    Box(
+   723→        modifier = Modifier
+   724→            .fillMaxSize()
+   725→            .background(Color.Black.copy(alpha = 0.5f))
+   726→    ) {
+   727→        // Scrim to dismiss
+   728→        Box(
+   729→            modifier = Modifier
+   730→                .fillMaxSize()
+   731→                .combinedClickable(
+   732→                    interactionSource = remember { MutableInteractionSource() },
+   733→                    indication = null,
+   734→                    onClick = onDismiss,
+   735→                    onLongClick = {}
+   736→                )
+   737→        )
+   738→
+   739→        // Frosted glass action panel — uses liquidGlassCard()
+   740→        Column(
+   741→            modifier = Modifier
+   742→                .fillMaxWidth()
+   743→                .align(Alignment.Center)
+   744→                .padding(horizontal = 24.dp)
+   745→                .liquidGlassCard()
+   746→                .padding(16.dp),
+   747→            verticalArrangement = Arrangement.spacedBy(8.dp)
+   748→        ) {
+   749→            // 3D Reactions bar (floating emoji picker with premium symbols)
+   750→            Row(
+   751→                modifier = Modifier.fillMaxWidth(),
+   752→                horizontalArrangement = Arrangement.SpaceEvenly
+   753→            ) {
+   754→                ReactionEmojis.forEach { emoji ->
+   755→                    IconButton(
+   756→                        onClick = { onReact(emoji, true) },
+   757→                        modifier = Modifier.size(44.dp)
+   758→                    ) {
+   759→                        Text(text = emoji, fontSize = 24.sp)
+   760→                    }
+   761→                }
+   762→            }
+   763→
+   764→            Spacer(modifier = Modifier.height(4.dp))
+   765→
+   766→            // Reply action
+   767→            ActionMenuItem(
+   768→                icon = Icons.Filled.Reply,
+   769→                label = "Reply",
+   770→                onClick = onReply
+   771→            )
+   772→
+   773→            // Forward action
+   774→            ActionMenuItem(
+   775→                icon = Icons.Filled.Forward,
+   776→                label = "Forward",
+   777→                onClick = onForward
+   778→            )
+   779→
+   780→            // Copy option
+   781→            ActionMenuItem(
+   782→                icon = Icons.Filled.ContentCopy,
+   783→                label = "Copy",
+   784→                onClick = {
+   785→                    clipboardManager.setText(AnnotatedString(message.content))
+   786→                    onDismiss()
+   787→                }
+   788→            )
+   789→
+   790→            // Delete for Me
+   791→            ActionMenuItem(
+   792→                icon = Icons.Filled.Delete,
+   793→                label = "Delete for Me",
+   794→                onClick = onDeleteForMe,
+   795→                tint = Color(0xFFFF5252)
+   796→            )
+   797→
+   798→            // Delete for Everyone — only for own messages
+   799→            if (isOwnMessage) {
+   800→                ActionMenuItem(
+   801→                    icon = Icons.Filled.DeleteForever,
+   802→                    label = "Delete for Everyone",
+   803→                    onClick = onDeleteForEveryone,
+   804→                    tint = Color(0xFFFF5252)
+   805→                )
+   806→            }
+   807→        }
+   808→    }
+   809→}
+   810→
+   811→// ── Action Menu Item ──────────────────────────────────────────────────────────
+   812→
+   813→@Composable
+   814→private fun ActionMenuItem(
+   815→    icon: androidx.compose.ui.graphics.vector.ImageVector,
+   816→    label: String,
+   817→    onClick: () -> Unit,
+   818→    tint: Color = TextPrimary
+   819→) {
+   820→    Row(
+   821→        modifier = Modifier
+   822→            .fillMaxWidth()
+   823→            .clip(RoundedCornerShape(12.dp))
+   824→            .combinedClickable(
+   825→                interactionSource = remember { MutableInteractionSource() },
+   826→                indication = null,
+   827→                onClick = onClick,
+   828→                onLongClick = {}
+   829→            )
+   830→            .padding(horizontal = 8.dp, vertical = 10.dp),
+   831→        verticalAlignment = Alignment.CenterVertically
+   832→    ) {
+   833→        Icon(
+   834→            imageVector = icon,
+   835→            contentDescription = label,
+   836→            tint = tint,
+   837→            modifier = Modifier.size(22.dp)
+   838→        )
+   839→        Spacer(modifier = Modifier.width(14.dp))
+   840→        Text(
+   841→            text = label,
+   842→            color = tint,
+   843→            fontSize = 15.sp,
+   844→            fontWeight = FontWeight.Medium
+   845→        )
+   846→    }
+   847→}
+   848→
+   849→// ── Communication Gate Blocked Overlay ────────────────────────────────────────
+   850→
+   851→/**
+   852→ * Full-screen overlay shown when the communication gate blocks messaging.
+   853→ * Displays a message explaining that only mutual contacts can exchange messages.
+   854→ */
+   855→@Composable
+   856→private fun CommunicationGateOverlay(
+   857→    reason: String
+   858→) {
+   859→    Box(
+   860→        modifier = Modifier
+   861→            .fillMaxSize()
+   862→            .background(Color.Black.copy(alpha = 0.7f)),
+   863→        contentAlignment = Alignment.Center
+   864→    ) {
+   865→        Column(
+   866→            modifier = Modifier
+   867→                .fillMaxWidth()
+   868→                .padding(horizontal = 32.dp)
+   869→                .liquidGlassContainer()
+   870→                .padding(24.dp),
+   871→            horizontalAlignment = Alignment.CenterHorizontally
+   872→        ) {
+   873→            Text(
+   874→                text = "🔒",
+   875→                fontSize = 40.sp
+   876→            )
+   877→            Spacer(modifier = Modifier.height(12.dp))
+   878→            Text(
+   879→                text = "Communication Blocked",
+   880→                color = TextPrimary,
+   881→                fontSize = 20.sp,
+   882→                fontWeight = FontWeight.Bold,
+   883→                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+   884→            )
+   885→            Spacer(modifier = Modifier.height(8.dp))
+   886→            Text(
+   887→                text = reason,
+   888→                color = TextSecondary,
+   889→                fontSize = 14.sp,
+   890→                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+   891→                lineHeight = 20.sp
+   892→            )
+   893→        }
+   894→    }
+   895→}
+   896→
+   897→// ── Call State Overlay ────────────────────────────────────────────────────────
+   898→
+   899→@Composable
+   900→private fun CallStateOverlay(
+   901→    callState: CallState,
+   902→    contactName: String,
+   903→    contactAvatar: String
+   904→) {
+   905→    Box(
+   906→        modifier = Modifier
+   907→            .fillMaxSize()
+   908→            .background(DarkPetrolCharcoal.copy(alpha = 0.85f))
+   909→    ) {
+   910→        Column(
+   911→            modifier = Modifier
+   912→                .align(Alignment.Center)
+   913→                .padding(32.dp),
+   914→            horizontalAlignment = Alignment.CenterHorizontally
+   915→        ) {
+   916→            val statusText = when (callState) {
+   917→                is CallState.DIALING -> "Calling ${callState.targetDisplayName}…"
+   918→                is CallState.RINGING -> "Incoming call from ${callState.callerDisplayName}…"
+   919→                is CallState.CONNECTED -> "Connected with ${callState.targetDisplayName}"
+   920→                is CallState.ENDED -> "Call ended"
+   921→                else -> ""
+   922→            }
+   923→
+   924→            AsyncImage(
+   925→                model = contactAvatar,
+   926→                contentDescription = "Contact",
+   927→                modifier = Modifier
+   928→                    .size(80.dp)
+   929→                    .clip(CircleShape)
+   930→                    .border(2.dp, NeonMint, CircleShape),
+   931→                contentScale = ContentScale.Crop
+   932→            )
+   933→            Spacer(modifier = Modifier.height(16.dp))
+   934→            Text(
+   935→                text = contactName,
+   936→                color = TextPrimary,
+   937→                fontSize = 22.sp,
+   938→                fontWeight = FontWeight.Bold
+   939→            )
+   940→            Spacer(modifier = Modifier.height(6.dp))
+   941→            Text(
+   942→                text = statusText,
+   943→                color = TextSecondary,
+   944→                fontSize = 14.sp
+   945→            )
+   946→        }
+   947→    }
+   948→}
+   949→
+   950→// ── Utilities ─────────────────────────────────────────────────────────────────
+   951→
+   952→/** Formats epoch milliseconds to a readable time string. */
+   953→private fun formatTimestamp(epochMs: Long): String {
+   954→    if (epochMs == 0L) return ""
+   955→    val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+   956→    return sdf.format(java.util.Date(epochMs))
+   957→}
+   958→

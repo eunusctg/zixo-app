@@ -1,5 +1,6 @@
 package com.zixo.app.domain.usecase
 
+import com.zixo.app.domain.model.CallEndReason
 import com.zixo.app.domain.model.CallState
 import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.repository.CallRepository
@@ -47,7 +48,7 @@ class InitiateCallUseCase @Inject constructor(
             .flowOn(Dispatchers.IO)
     } catch (e: Exception) {
         Timber.e(e, "InitiateCallUseCase: Unhandled error initiating call")
-        kotlinx.coroutines.flow.flowOf(CallState.FAILED(e.localizedMessage ?: "Call initiation failed"))
+        kotlinx.coroutines.flow.flowOf(CallState.ENDED(endReason = CallEndReason.NETWORK_ERROR))
     }
 
     /**
@@ -102,7 +103,7 @@ class InitiateCallUseCase @Inject constructor(
                         ?: "Not mutually verified"
                     Timber.w("InitiateCallUseCase: Cannot accept — %s", reason)
                     kotlinx.coroutines.flow.flowOf(
-                        CallState.FAILED("Cannot accept call: $reason")
+                        CallState.ENDED(endReason = CallEndReason.PERMISSION_DENIED)
                     )
                 } else {
                     callRepository.answerCall(callId)
@@ -110,7 +111,7 @@ class InitiateCallUseCase @Inject constructor(
             } catch (e: Exception) {
                 Timber.e(e, "InitiateCallUseCase: Accept call failed")
                 kotlinx.coroutines.flow.flowOf(
-                    CallState.FAILED(e.localizedMessage ?: "Accept call failed")
+                    CallState.ENDED(endReason = CallEndReason.NETWORK_ERROR)
                 )
             }
         }

@@ -195,7 +195,7 @@ fun HomeScreen(
                             onGroupChatClick = onGroupChatClick
                         )
 
-                        HomeTab.STATUS.index -> StatusTabContent()
+                        HomeTab.STATUS.index -> StatusTabContent(navController = navController)
 
                         HomeTab.CALLS.index -> CallsTabContent()
 
@@ -398,8 +398,8 @@ fun ChatsTabContent(
  * Will be connected to StatusViewModel by other agents.
  */
 @Composable
-fun StatusTabContent() {
-    StatusTabScreen()
+fun StatusTabContent(navController: NavController) {
+    StatusTabScreen(navController = navController)
 }
 
 /**

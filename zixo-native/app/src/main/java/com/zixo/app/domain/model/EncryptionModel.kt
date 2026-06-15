@@ -42,8 +42,8 @@ object EncryptionConstants {
     const val AES_KEY_LENGTH = 32
     const val HKDF_ALGORITHM = "HmacSHA256"
     const val SALT_LENGTH = 32
-    const val INFO_ENCRYPTION = "zixo Encryption".toByteArray()
-    const val INFO_KEY = "zixo Ratchet Key".toByteArray()
+    val INFO_ENCRYPTION = "zixo Encryption".toByteArray()
+    val INFO_KEY = "zixo Ratchet Key".toByteArray()
     const val PROTOCOL_VERSION = 1
 }
 
@@ -172,7 +172,7 @@ data class EncryptedPayload(
 /**
  * Message type enumeration for encrypted envelope classification.
  */
-enum class MessageType(val code: String) {
+enum class EncryptionMessageType(val code: String) {
     TEXT("TEXT"),
     IMAGE("IMAGE"),
     FILE("FILE"),
@@ -180,7 +180,7 @@ enum class MessageType(val code: String) {
     VIDEO("VIDEO");
 
     companion object {
-        fun fromCode(code: String): MessageType =
+        fun fromCode(code: String): EncryptionMessageType =
             entries.find { it.code == code } ?: TEXT
     }
 }
@@ -193,7 +193,7 @@ data class CryptoEnvelope(
     val messageId: String,
     val senderId: String,
     val recipientId: String,
-    val messageType: MessageType,
+    val messageType: EncryptionMessageType,
     val encryptedPayload: EncryptedPayload,
     val timestamp: Long = System.currentTimeMillis(),
     val version: Int = EncryptionConstants.PROTOCOL_VERSION
@@ -218,7 +218,7 @@ data class CryptoEnvelope(
             senderId: String,
             recipientId: String,
             plainText: String,
-            messageType: MessageType,
+            messageType: EncryptionMessageType,
             sharedSecret: ByteArray,
             ephemeralPublicKey: String
         ): Result<CryptoEnvelope> = try {

@@ -56,7 +56,7 @@ fun ChatThreadModel.toEntity(): ChatEntity = ChatEntity(
 
 private fun serializeUidList(uids: List<String>): String {
     if (uids.isEmpty()) return "[]"
-    return uids.joinToString(prefix = "[", separator = ",", suffix = "]") { uid ->
+    return uids.joinToString(prefix = "[", separator = ",", postfix = "]") { uid ->
         "\"$uid\""
     }
 }

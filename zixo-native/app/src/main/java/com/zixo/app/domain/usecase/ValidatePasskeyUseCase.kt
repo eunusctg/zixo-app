@@ -3,6 +3,7 @@ package com.zixo.app.domain.usecase
 import com.zixo.app.domain.repository.AuthRepository
 import com.zixo.app.domain.repository.AuthResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -34,24 +35,12 @@ class ValidatePasskeyUseCase @Inject constructor(
         credentialId: String
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            Timber.d("ValidatePasskeyUseCase: Validating passkey challenge")
-
-            val result = authRepository.validatePasskey(challenge, credentialId)
-
-            result.fold(
-                onSuccess = { isValid ->
-                    if (isValid) {
-                        Timber.d("ValidatePasskeyUseCase: Passkey validation succeeded")
-                    } else {
-                        Timber.w("ValidatePasskeyUseCase: Passkey validation returned false")
-                    }
-                    Result.success(isValid)
-                },
-                onFailure = { error ->
-                    Timber.e(error, "ValidatePasskeyUseCase: Passkey validation failed")
-                    Result.failure(error)
-                }
-            )
+            // TODO: AuthRepository does not expose a validatePasskey() method yet.
+            //  Implement server-side passkey challenge verification in the repository
+            //  (e.g., fun validatePasskey(challenge: String, credentialId: String): Flow<Result<Boolean>>)
+            //  and update this use case to delegate to it.
+            Timber.w("ValidatePasskeyUseCase: validatePasskey not yet implemented in AuthRepository")
+            Result.failure(UnsupportedOperationException("Passkey validation not yet implemented"))
         } catch (e: Exception) {
             Timber.e(e, "ValidatePasskeyUseCase: Unhandled error during passkey validation")
             Result.failure(e)
@@ -63,24 +52,38 @@ class ValidatePasskeyUseCase @Inject constructor(
      * Creates a WebAuthn credential via Google Credential Manager
      * and stores the credential ID on Cloudflare Edge Workers.
      *
+     * @param response The CreatePublicKeyCredentialResponse from CredentialManager.
      * @return [Result] containing the credential ID on success.
      */
-    suspend fun registerPasskey(): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun registerPasskey(
+        registrationResponseJson: String
+    ): Result<String> = withContext(Dispatchers.IO) {
         try {
             Timber.d("ValidatePasskeyUseCase: Registering new passkey")
 
-            val result = authRepository.registerPasskey()
+            val authResult = authRepository.registerPasskeyWithBackend(registrationResponseJson).first()
 
-            result.fold(
-                onSuccess = { credentialId ->
-                    Timber.d("ValidatePasskeyUseCase: Passkey registered, id=%s", credentialId.take(8))
+            when (authResult) {
+                is AuthResult.Success -> {
+                    val credentialId = authResult.user.passkeyCredentialId ?: ""
+                    Timber.d(
+                        "ValidatePasskeyUseCase: Passkey registered, id=%s",
+                        credentialId.take(8)
+                    )
                     Result.success(credentialId)
-                },
-                onFailure = { error ->
-                    Timber.e(error, "ValidatePasskeyUseCase: Passkey registration failed")
-                    Result.failure(error)
                 }
-            )
+                is AuthResult.Error -> {
+                    Timber.e(
+                        "ValidatePasskeyUseCase: Passkey registration failed: %s",
+                        authResult.message
+                    )
+                    Result.failure(Exception(authResult.message))
+                }
+                is AuthResult.Loading -> {
+                    Timber.w("ValidatePasskeyUseCase: Passkey registration still loading")
+                    Result.failure(IllegalStateException("Registration still loading"))
+                }
+            }
         } catch (e: Exception) {
             Timber.e(e, "ValidatePasskeyUseCase: Unhandled error during passkey registration")
             Result.failure(e)
@@ -92,7 +95,7 @@ class ValidatePasskeyUseCase @Inject constructor(
      */
     suspend fun hasPasskey(): Boolean = withContext(Dispatchers.IO) {
         try {
-            authRepository.hasPasskey()
+            authRepository.isPasskeyRegistered().first()
         } catch (e: Exception) {
             Timber.e(e, "ValidatePasskeyUseCase: Failed to check passkey status")
             false
@@ -104,9 +107,12 @@ class ValidatePasskeyUseCase @Inject constructor(
      */
     suspend fun deletePasskey(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            authRepository.deletePasskey()
-            Timber.d("ValidatePasskeyUseCase: Passkey deleted")
-            Result.success(Unit)
+            // TODO: AuthRepository does not expose a deletePasskey() method yet.
+            //  Implement passkey deletion in the repository
+            //  (e.g., fun deletePasskey(): Flow<Result<Unit>>)
+            //  and update this use case to delegate to it.
+            Timber.w("ValidatePasskeyUseCase: deletePasskey not yet implemented in AuthRepository")
+            Result.failure(UnsupportedOperationException("Passkey deletion not yet implemented"))
         } catch (e: Exception) {
             Timber.e(e, "ValidatePasskeyUseCase: Passkey deletion failed")
             Result.failure(e)

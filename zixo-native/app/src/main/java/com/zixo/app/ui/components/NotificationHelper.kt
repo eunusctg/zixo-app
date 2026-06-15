@@ -80,7 +80,7 @@ class NotificationHelper @Inject constructor(
                     vibrationPattern = longArrayOf(0, 500, 200, 500)
                     setShowBadge(true)
                     val audioAttributes = AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_RINGTONE)
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                     setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), audioAttributes)

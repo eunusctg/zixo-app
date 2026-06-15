@@ -18,7 +18,7 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         maven("https://jitpack.io")
-        maven("https://maven.pkg.github.com/livekit/client-sdk-android")
+        // LiveKit removed — using pure WebRTC
     }
 }
 

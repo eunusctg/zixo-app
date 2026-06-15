@@ -1,23 +1,19 @@
 package com.zixo.app.domain.model
 
 /**
- * Type aliases for backward compatibility.
+ * Backward-compatibility type aliases.
  *
- * The primary chat models (ChatThreadModel, MessageModel, ThreadType, etc.)
- * are defined in MessageModel.kt. The legacy ChatThread and Message classes
- * that were previously defined here are superseded by those richer models.
+ * The primary chat models are defined in MessageModel.kt.
+ * These aliases exist for gradual migration from legacy names.
  *
- * Any code still referencing the old types should migrate to:
- *   - ChatThread  → ChatThreadModel
- *   - Message     → MessageModel
- *   - MessageType → MessageContentType
+ * Prefer using the primary names directly:
+ *   - ChatThreadModel  (in MessageModel.kt)
+ *   - MessageModel     (in MessageModel.kt)
+ *   - MessageContentType (in MessageModel.kt)
  */
 
 /** @suppress Backward-compatibility alias. Use [ChatThreadModel] instead. */
 typealias ChatThread = ChatThreadModel
-
-/** @suppress Backward-compatibility alias. Use [MessageModel] instead. */
-typealias Message = MessageModel
 
 /** @suppress Backward-compatibility alias. Use [MessageContentType] instead. */
 typealias MessageType = MessageContentType

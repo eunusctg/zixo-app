@@ -5,7 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,7 +53,7 @@ import javax.inject.Inject
  * - Sets content with [ZixoTheme] → [ZixoNavigation]
  */
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     @Inject
     lateinit var preferencesDataStore: PreferencesDataStore
@@ -141,16 +141,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        // Silently handle notification permission result
-        // The app functions correctly regardless of the notification permission state
     }
 
     // ──────────────────────────────────────────────────────

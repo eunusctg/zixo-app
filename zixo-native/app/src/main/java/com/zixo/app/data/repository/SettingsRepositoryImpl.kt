@@ -299,28 +299,34 @@ class SettingsRepositoryImpl @Inject constructor(
 
     // ── Profile Mutations ─────────────────────────────────────────────────────
 
-    override suspend fun updateProfileDisplayName(name: String) = withContext(Dispatchers.IO) {
-        try {
-            val uid = firebaseAuthService.getCurrentUser()?.uid
-                ?: throw IllegalStateException("No authenticated user")
-            firestoreService.updateUserProfile(uid, mapOf("displayName" to name))
-        } catch (e: Exception) { Timber.e(e, "Failed to update display name") }
+    override suspend fun updateProfileDisplayName(name: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val uid = firebaseAuthService.getCurrentUser()?.uid
+                    ?: throw IllegalStateException("No authenticated user")
+                firestoreService.updateUserProfile(uid, mapOf("displayName" to name))
+            } catch (e: Exception) { Timber.e(e, "Failed to update display name") }
+        }
     }
 
-    override suspend fun updateProfileBio(bio: String) = withContext(Dispatchers.IO) {
-        try {
-            val uid = firebaseAuthService.getCurrentUser()?.uid
-                ?: throw IllegalStateException("No authenticated user")
-            firestoreService.updateUserProfile(uid, mapOf("bio" to bio))
-        } catch (e: Exception) { Timber.e(e, "Failed to update bio") }
+    override suspend fun updateProfileBio(bio: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val uid = firebaseAuthService.getCurrentUser()?.uid
+                    ?: throw IllegalStateException("No authenticated user")
+                firestoreService.updateUserProfile(uid, mapOf("bio" to bio))
+            } catch (e: Exception) { Timber.e(e, "Failed to update bio") }
+        }
     }
 
-    override suspend fun updateProfileAvatarUrl(url: String) = withContext(Dispatchers.IO) {
-        try {
-            val uid = firebaseAuthService.getCurrentUser()?.uid
-                ?: throw IllegalStateException("No authenticated user")
-            firestoreService.updateUserProfile(uid, mapOf("photoUrl" to url))
-        } catch (e: Exception) { Timber.e(e, "Failed to update avatar URL") }
+    override suspend fun updateProfileAvatarUrl(url: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                val uid = firebaseAuthService.getCurrentUser()?.uid
+                    ?: throw IllegalStateException("No authenticated user")
+                firestoreService.updateUserProfile(uid, mapOf("photoUrl" to url))
+            } catch (e: Exception) { Timber.e(e, "Failed to update avatar URL") }
+        }
     }
 
     // ── Storage Analytics ─────────────────────────────────────────────────────

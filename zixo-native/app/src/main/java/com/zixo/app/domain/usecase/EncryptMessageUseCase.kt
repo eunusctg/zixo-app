@@ -4,7 +4,7 @@ import com.zixo.app.domain.model.AesGcmResult
 import com.zixo.app.domain.model.EncryptedPayload
 import com.zixo.app.domain.model.EncryptionKeyPair
 import com.zixo.app.domain.model.EncryptionState
-import com.zixo.app.domain.model.MessageType
+import com.zixo.app.domain.model.EncryptionMessageType
 import com.zixo.app.domain.model.PreKeyBundle
 import com.zixo.app.domain.model.aesGcmDecrypt
 import com.zixo.app.domain.model.aesGcmEncrypt
@@ -70,7 +70,7 @@ class EncryptMessageUseCase @Inject constructor(
     suspend fun encrypt(
         plainText: String,
         recipientId: String,
-        messageType: MessageType
+        messageType: EncryptionMessageType
     ): Result<EncryptedPayload> = withContext(Dispatchers.IO) {
         try {
             _encryptionState.value = EncryptionState.Encrypting

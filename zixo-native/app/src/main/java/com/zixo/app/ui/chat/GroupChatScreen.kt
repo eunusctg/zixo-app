@@ -3,6 +3,7 @@ package com.zixo.app.ui.chat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -74,7 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.zixo.app.domain.model.CallState
 import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.model.MessageContentType
@@ -244,7 +245,7 @@ fun GroupChatScreen(
                             message = message,
                             isOwnMessage = isOwnMessage,
                             participants = participants,
-                            onLongClick = { viewModel.showActionMenu.value = message }
+                            onLongClick = { viewModel.showActionMenu(message) }
                         )
                     }
                 }
@@ -334,6 +335,7 @@ fun GroupChatScreen(
 
 // ── Group Top Bar ─────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GroupChatTopBar(
     groupName: String,

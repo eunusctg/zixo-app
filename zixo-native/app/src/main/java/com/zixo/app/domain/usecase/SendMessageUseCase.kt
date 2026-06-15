@@ -1,8 +1,9 @@
 package com.zixo.app.domain.usecase
 
 import com.zixo.app.domain.model.CommunicationGate
-import com.zixo.app.domain.model.Message
-import com.zixo.app.domain.model.MessageType
+import com.zixo.app.domain.model.MessageContentType
+import com.zixo.app.domain.model.MessageModel
+import com.zixo.app.domain.model.EncryptionMessageType
 import com.zixo.app.domain.repository.ChatRepository
 import com.zixo.app.domain.repository.ContactRepository
 import kotlinx.coroutines.Dispatchers
@@ -37,16 +38,16 @@ class SendMessageUseCase @Inject constructor(
      *
      * @param chatId The chat thread identifier.
      * @param content The raw message text or attachment URL.
-     * @param messageType The payload classification (TEXT, IMAGE, FILE, VOICE, VIDEO).
+     * @param contentType The payload classification (TEXT, IMAGE, FILE, AUDIO_VOICE, VIDEO).
      * @param recipientId The target user's UID for encryption key lookup.
-     * @return [Result] containing the sent [Message] on success.
+     * @return [Result] containing the sent [MessageModel] on success.
      */
     suspend operator fun invoke(
         chatId: String,
         content: String,
-        messageType: MessageType = MessageType.TEXT,
+        contentType: MessageContentType = MessageContentType.TEXT,
         recipientId: String? = null
-    ): Result<Message> = withContext(Dispatchers.IO) {
+    ): Result<MessageModel> = withContext(Dispatchers.IO) {
         try {
             // ── Step 1: Zero-trust contact verification gate ──────────────
             if (recipientId != null) {
@@ -64,19 +65,27 @@ class SendMessageUseCase @Inject constructor(
             }
 
             // ── Step 2: Attempt E2E encryption ───────────────────────────
-            val finalContent = if (recipientId != null && messageType == MessageType.TEXT) {
-                attemptEncryption(content, recipientId, messageType)
+            val encryptionType = contentType.toEncryptionMessageType()
+            val finalContent = if (recipientId != null && contentType == MessageContentType.TEXT) {
+                attemptEncryption(content, recipientId, encryptionType)
             } else {
                 content
             }
 
-            // ── Step 3: Persist message via ChatRepository ────────────────
-            val result = chatRepository.sendMessage(chatId, finalContent, messageType.code)
+            // ── Step 3: Build MessageModel and persist via ChatRepository ─
+            val messageModel = MessageModel(
+                threadId = chatId,
+                content = finalContent,
+                type = contentType,
+                timestamp = System.currentTimeMillis()
+            )
+
+            val result = chatRepository.sendMessage(chatId, messageModel).first()
             result.fold(
                 onSuccess = { message ->
                     Timber.d(
                         "SendMessageUseCase: Sent %s message to chat %s",
-                        messageType.code, chatId
+                        contentType.name, chatId
                     )
                 },
                 onFailure = { error ->
@@ -97,7 +106,7 @@ class SendMessageUseCase @Inject constructor(
     private suspend fun attemptEncryption(
         content: String,
         recipientId: String,
-        messageType: MessageType
+        messageType: EncryptionMessageType
     ): String {
         return try {
             if (encryptMessageUseCase.hasKeysForRecipient(recipientId)) {
@@ -120,5 +129,17 @@ class SendMessageUseCase @Inject constructor(
             Timber.w(e, "SendMessageUseCase: Encryption attempt threw, falling back to plain text")
             content
         }
+    }
+
+    /**
+     * Maps the domain [MessageContentType] to the encryption-layer [EncryptionMessageType].
+     */
+    private fun MessageContentType.toEncryptionMessageType(): EncryptionMessageType = when (this) {
+        MessageContentType.TEXT -> EncryptionMessageType.TEXT
+        MessageContentType.IMAGE -> EncryptionMessageType.IMAGE
+        MessageContentType.FILE -> EncryptionMessageType.FILE
+        MessageContentType.AUDIO_VOICE -> EncryptionMessageType.VOICE
+        MessageContentType.VIDEO -> EncryptionMessageType.VIDEO
+        else -> EncryptionMessageType.TEXT
     }
 }

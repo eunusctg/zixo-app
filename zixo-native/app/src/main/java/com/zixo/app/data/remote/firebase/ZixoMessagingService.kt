@@ -43,6 +43,7 @@ class ZixoMessagingService : FirebaseMessagingService() {
     companion object {
         const val CHANNEL_MESSAGES = "zixo_messages"
         const val CHANNEL_CALLS = "zixo_calls"
+        const val NOTIFICATION_ID_CALL = 20001
 
         private const val PREFS_NAME = "zixo_notification_prefs"
         private const val KEY_MESSAGE_PREVIEW_ENABLED = "message_preview_enabled"
@@ -83,7 +84,7 @@ class ZixoMessagingService : FirebaseMessagingService() {
             if (notificationManager.getNotificationChannel(CHANNEL_CALLS) == null) {
                 val callAudioAttributes = AudioAttributes.Builder()
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_EVENT)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_REQUEST)
                     .build()
 
                 val callChannel = NotificationChannel(
@@ -296,9 +297,5 @@ class ZixoMessagingService : FirebaseMessagingService() {
 
     override fun onDeletedMessages() {
         Timber.d("Messages deleted on server")
-    }
-
-    companion object NotificationIds {
-        const val NOTIFICATION_ID_CALL = 20001
     }
 }

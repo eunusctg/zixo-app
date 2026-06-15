@@ -40,7 +40,7 @@ import com.zixo.app.data.local.room.entity.UserEntity
         UserEntity::class
     ],
     version = 3,
-    exportSchema = true
+    exportSchema = false
 )
 @TypeConverters(ZixoTypeConverters::class)
 abstract class ZixoDatabase : RoomDatabase() {

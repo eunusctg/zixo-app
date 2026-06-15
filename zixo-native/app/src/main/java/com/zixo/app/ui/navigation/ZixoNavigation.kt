@@ -319,7 +319,7 @@ fun ZixoNavHost(
         // ── Edit Profile ────────────────────────────────────────
         composable(route = ZixoRoute.EditProfile.route) {
             EditProfileScreen(
-                navController = navController,
+                onBackClick = { navController.popBackStack() },
             )
         }
 

@@ -87,6 +87,7 @@ dependencies {
 
     // ── Core Platform Architecture & Persistent Engines ──
     implementation(libs.androidx.core.ktx)
+    implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
@@ -94,8 +95,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
 
     // ── Coroutines ──
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // ── Hilt Dependency Injection ──
     implementation(libs.hilt.android)
@@ -103,6 +104,9 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
     implementation(libs.hilt.work)
     ksp(libs.hilt.compiler)
+
+    // ── WorkManager (CoroutineWorker + HiltWorker support) ──
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
 
     // ── DataStore Preferences ──
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -118,7 +122,7 @@ dependencies {
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
     // ── WebRTC Android Native Library for Pure Peer-to-Peer Calling Media Engine ──
-    implementation("io.github.webrtc-sdk:android:120.0.0")
+    implementation(libs.webrtc)
 
     // ── Unified Firebase Enterprise Realtime Stack (100% Realtime Sockets Architecture) ──
     implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
@@ -136,8 +140,7 @@ dependencies {
 
     // ── Image Loading (Coil 3) ──
     implementation(libs.coil.compose)
-    implementation("io.coil-kt.coil3:coil-compose:3.0.4")
-    implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
+    implementation(libs.coil.network.okhttp)
 
     // ── Biometric Authentication ──
     implementation(libs.biometric)

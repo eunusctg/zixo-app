@@ -23,6 +23,7 @@ import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
+import org.webrtc.MediaStreamTrack
 import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
@@ -31,7 +32,7 @@ import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
-import org.webrtc.RtpTransceiver
+import org.webrtc.CameraVideoCapturer
 import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -594,11 +595,8 @@ class WebRtcClient @Inject constructor(
     fun switchCamera() {
         try {
             videoCapturer?.let { capturer ->
-                val cameraEnumerator = getCameraEnumerator()
-                if (cameraEnumerator is Camera1Enumerator) {
-                    Camera1Enumerator.switchCamera(capturer)
-                } else {
-                    Camera2Enumerator(context).switchCamera(capturer)
+                if (capturer is CameraVideoCapturer) {
+                    capturer.switchCamera(null)
                 }
             }
             Timber.d("Camera switched")
@@ -809,15 +807,13 @@ class WebRtcClient @Inject constructor(
             Timber.d("Remote track added")
         }
 
-        override fun onTrack(transceiver: RtpTransceiver?) {
-            transceiver?.let { t ->
-                if (t.isVideoType()) {
-                    val track = t.receiver.track() as? VideoTrack
-                    if (track != null) {
-                        remoteVideoTrack = track
-                        Timber.d("Remote video track received via onTrack")
-                        onRemoteVideoTrackAdded?.invoke(track)
-                    }
+        override fun onTrack(transceiver: RtpTransceiver) {
+            if (transceiver.isVideoType()) {
+                val track = transceiver.receiver.track() as? VideoTrack
+                if (track != null) {
+                    remoteVideoTrack = track
+                    Timber.d("Remote video track received via onTrack")
+                    onRemoteVideoTrackAdded?.invoke(track)
                 }
             }
         }
@@ -851,15 +847,11 @@ class WebRtcClient @Inject constructor(
 
     /**
      * Detects whether an RtpTransceiver carries video or audio.
-     * Uses RtpTransceiverType enum from the WebRTC library.
+     * Uses MediaStreamTrack.MediaType enum from the WebRTC library.
      */
-    private fun RtpTransceiver?.isVideoType(): Boolean {
+    private fun RtpTransceiver.isVideoType(): Boolean {
         return try {
-            this?.let { transceiver ->
-                val type = RtpTransceiver.RtpTransceiverType.values()
-                    .getOrElse(transceiver.mediaType) { RtpTransceiver.RtpTransceiverType.AUDIO }
-                type == RtpTransceiver.RtpTransceiverType.VIDEO
-            } ?: false
+            mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO
         } catch (_: Exception) { false }
     }
 

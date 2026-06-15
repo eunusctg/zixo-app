@@ -10,7 +10,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import androidx.work.WorkManager
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.zixo.app.data.local.PreferencesDataStore
 import com.zixo.app.data.local.room.ZixoDatabase
 import com.zixo.app.data.local.room.ZixoMigrations
@@ -88,6 +88,15 @@ object AppModule {
 
     private const val PREFERENCES_NAME = "zixo_preferences"
     private const val BASE_URL = "https://api.zixo.app/"
+
+    // ════════════════════════════════════════════════════════
+    // SharedPreferences (for legacy FCM service)
+    // ════════════════════════════════════════════════════════
+
+    @Provides
+    @Singleton
+    fun provideSharedPreferences(@ApplicationContext context: android.content.Context): android.content.SharedPreferences =
+        context.getSharedPreferences(PREFERENCES_NAME, android.content.Context.MODE_PRIVATE)
 
     // ════════════════════════════════════════════════════════
     // DataStore
@@ -263,7 +272,7 @@ object AppModule {
     fun provideUpdateStatusUseCase(
         statusRepository: StatusRepository,
         contactRepository: ContactRepository
-    ): UpdateStatusUseCase = UpdateStatusUseCase(statusRepository, contactRepository)
+    ): UpdateStatusUseCase = UpdateStatusUseCase(statusRepository)
 
     @Provides
     @Singleton

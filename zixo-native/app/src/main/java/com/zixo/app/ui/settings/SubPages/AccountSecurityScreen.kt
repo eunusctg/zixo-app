@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -612,9 +613,10 @@ private fun launchBiometricPrompt(
         }
     }
 
+    val executor = androidx.core.content.ContextCompat.getMainExecutor(context)
     val biometricPrompt = BiometricPrompt(
         context as androidx.fragment.app.FragmentActivity,
-        lifecycleOwner,
+        executor,
         callback
     )
 
@@ -1013,7 +1015,7 @@ private fun PinSetupCard(
                         },
                         label = { Text("PIN") },
                         placeholder = { Text("••••") },
-                        keyboardType = KeyboardType.NumberPassword,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         maxLength = 4,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1058,7 +1060,7 @@ private fun PinSetupCard(
                         },
                         label = { Text("Confirm PIN") },
                         placeholder = { Text("••••") },
-                        keyboardType = KeyboardType.NumberPassword,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         maxLength = 4,
                         modifier = Modifier.fillMaxWidth()
                     )

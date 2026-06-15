@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.zIndex
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -225,7 +225,8 @@ private fun VideoRenderLayer(
     callState: CallState.CONNECTED
 ) {
     // ── Remote Video (Full Screen) ──
-    val remoteSurfaceView = remember { SurfaceViewRenderer(LocalContext.current) }
+    val remoteContext = LocalContext.current
+    val remoteSurfaceView = remember { SurfaceViewRenderer(remoteContext) }
 
     DisposableEffect(remoteSurfaceView) {
         webRtcClient.initRemoteVideoRenderer(remoteSurfaceView)
@@ -249,7 +250,8 @@ private fun VideoRenderLayer(
 
     // ── Local Video (Picture-in-Picture) ──
     if (!callState.isCameraOff) {
-        val localSurfaceView = remember { SurfaceViewRenderer(LocalContext.current) }
+        val localContext = LocalContext.current
+        val localSurfaceView = remember { SurfaceViewRenderer(localContext) }
 
         DisposableEffect(localSurfaceView) {
             webRtcClient.initLocalVideoRenderer(localSurfaceView)

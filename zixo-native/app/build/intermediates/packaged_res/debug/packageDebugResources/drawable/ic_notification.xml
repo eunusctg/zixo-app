@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Zixo Notification Icon — Monochrome White Silhouette
+  Android notification icons must be white silhouettes; the system tints them.
+  This is a simplified "Z" shape matching the launcher icon foreground.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M5,4 L19,4 L19,8 L11,16 L19,16 L19,20 L5,20 L5,16 L13,8 L5,8 Z" />
+</vector>

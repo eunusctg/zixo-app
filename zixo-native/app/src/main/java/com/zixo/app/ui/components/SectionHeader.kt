@@ -5,7 +5,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.toUpperCase
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zixo.app.ui.theme.NeonMint
@@ -29,7 +28,7 @@ fun SectionHeader(
     modifier: Modifier = Modifier,
 ) {
     Text(
-        text = title.toUpperCase(Locale.getDefault()),
+        text = title.uppercase(Locale.getDefault()),
         color = NeonMint,
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,

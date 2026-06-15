@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.zixo.app.domain.model.CallState
 import com.zixo.app.domain.model.ChatThreadModel
 import com.zixo.app.domain.model.CommunicationGate
+import com.zixo.app.domain.model.ContactModel
 import com.zixo.app.domain.model.MessageActionResult
 import com.zixo.app.domain.model.MessageModel
 import com.zixo.app.domain.repository.CallRepository
@@ -71,7 +72,7 @@ class ChatViewModel @Inject constructor(
     val thread: StateFlow<ChatThreadModel?> = _thread.asStateFlow()
 
     /** Communication gate status — whether messaging is allowed with the other participant. */
-    private val _communicationGate = MutableStateFlow<CommunicationGate>(CommunicationGate.Allowed())
+    private val _communicationGate = MutableStateFlow<CommunicationGate>(CommunicationGate.Allowed(ContactModel()))
     val communicationGate: StateFlow<CommunicationGate> = _communicationGate.asStateFlow()
 
     /** Current message input text. */
@@ -547,6 +548,13 @@ class ChatViewModel @Inject constructor(
     }
 
     // ── Action Menu ───────────────────────────────────────────────────────────
+
+    /**
+     * Shows the frosted glass action menu for the given message.
+     */
+    fun showActionMenu(message: MessageModel) {
+        _showActionMenu.value = message
+    }
 
     /**
      * Dismisses the frosted glass action menu.

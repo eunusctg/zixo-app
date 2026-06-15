@@ -1,10 +1,10 @@
 package com.zixo.app.domain.usecase
 
-import com.zixo.app.domain.model.Status
-import com.zixo.app.domain.model.StatusType
-import com.zixo.app.domain.repository.ContactRepository
+import com.zixo.app.domain.model.StatusContentType
+import com.zixo.app.domain.model.StatusModel
 import com.zixo.app.domain.repository.StatusRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -24,8 +24,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class UpdateStatusUseCase @Inject constructor(
-    private val statusRepository: StatusRepository,
-    private val contactRepository: ContactRepository
+    private val statusRepository: StatusRepository
 ) {
     companion object {
         private const val STATUS_EXPIRY_HOURS = 24L
@@ -38,13 +37,13 @@ class UpdateStatusUseCase @Inject constructor(
      * @param text Optional text content for the status.
      * @param mediaUrl Optional media URL for image/video status.
      * @param type The status media classification.
-     * @return [Result] containing the created [Status] on success.
+     * @return [Result] containing the created [StatusModel] on success.
      */
     suspend operator fun invoke(
         text: String? = null,
         mediaUrl: String? = null,
-        type: StatusType = StatusType.TEXT
-    ): Result<Status> = withContext(Dispatchers.IO) {
+        type: StatusContentType = StatusContentType.TEXT
+    ): Result<StatusModel> = withContext(Dispatchers.IO) {
         try {
             if (text.isNullOrBlank() && mediaUrl.isNullOrBlank()) {
                 return@withContext Result.failure(
@@ -56,12 +55,15 @@ class UpdateStatusUseCase @Inject constructor(
 
             Timber.d("UpdateStatusUseCase: Creating %s status, expires at %d", type, expiresAt)
 
-            val result = statusRepository.postStatus(
-                text = text,
+            val statusModel = StatusModel(
+                textContent = text,
                 mediaUrl = mediaUrl,
                 type = type,
+                createdAt = System.currentTimeMillis(),
                 expiresAt = expiresAt
             )
+
+            val result = statusRepository.postStatus(statusModel).first()
 
             result.fold(
                 onSuccess = { status ->
@@ -83,9 +85,16 @@ class UpdateStatusUseCase @Inject constructor(
      */
     suspend fun deleteStatus(statusId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            statusRepository.deleteStatus(statusId)
-            Timber.d("UpdateStatusUseCase: Status deleted, id=%s", statusId)
-            Result.success(Unit)
+            val result = statusRepository.deleteStatus(statusId).first()
+            result.fold(
+                onSuccess = {
+                    Timber.d("UpdateStatusUseCase: Status deleted, id=%s", statusId)
+                },
+                onFailure = { error ->
+                    Timber.e(error, "UpdateStatusUseCase: Delete status failed")
+                }
+            )
+            result
         } catch (e: Exception) {
             Timber.e(e, "UpdateStatusUseCase: Delete status failed")
             Result.failure(e)
@@ -97,9 +106,16 @@ class UpdateStatusUseCase @Inject constructor(
      */
     suspend fun markAsViewed(statusId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            statusRepository.markStatusViewed(statusId)
-            Timber.d("UpdateStatusUseCase: Status marked as viewed, id=%s", statusId)
-            Result.success(Unit)
+            val result = statusRepository.markStatusViewed(statusId).first()
+            result.fold(
+                onSuccess = {
+                    Timber.d("UpdateStatusUseCase: Status marked as viewed, id=%s", statusId)
+                },
+                onFailure = { error ->
+                    Timber.e(error, "UpdateStatusUseCase: Mark as viewed failed")
+                }
+            )
+            result
         } catch (e: Exception) {
             Timber.e(e, "UpdateStatusUseCase: Mark as viewed failed")
             Result.failure(e)

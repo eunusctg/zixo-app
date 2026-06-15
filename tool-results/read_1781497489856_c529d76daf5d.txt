@@ -1,0 +1,921 @@
+     1→package com.zixo.app.data.repository
+     2→
+     3→import android.content.Context
+     4→import com.google.firebase.auth.FirebaseAuth
+     5→import com.google.firebase.database.FirebaseDatabase
+     6→import com.google.firebase.firestore.FirebaseFirestore
+     7→import com.google.firebase.firestore.Query
+     8→import com.zixo.app.data.remote.webrtc.FirebaseSignalingClient
+     9→import com.zixo.app.data.remote.webrtc.WebRtcClient
+    10→import com.zixo.app.data.remote.webrtc.CallForegroundService
+    11→import com.zixo.app.domain.model.CallDirection
+    12→import com.zixo.app.domain.model.CallEndReason
+    13→import com.zixo.app.domain.model.CallLogEntry
+    14→import com.zixo.app.domain.model.CallState
+    15→import com.zixo.app.domain.model.CommunicationGate
+    16→import com.zixo.app.domain.repository.CallRepository
+    17→import com.zixo.app.domain.repository.ContactRepository
+    18→import dagger.hilt.android.qualifiers.ApplicationContext
+    19→import kotlinx.coroutines.Dispatchers
+    20→import kotlinx.coroutines.GlobalScope
+    21→import kotlinx.coroutines.Job
+    22→import kotlinx.coroutines.channels.awaitClose
+    23→import kotlinx.coroutines.delay
+    24→import kotlinx.coroutines.flow.Flow
+    25→import kotlinx.coroutines.flow.MutableStateFlow
+    26→import kotlinx.coroutines.flow.StateFlow
+    27→import kotlinx.coroutines.flow.asStateFlow
+    28→import kotlinx.coroutines.flow.callbackFlow
+    29→import kotlinx.coroutines.flow.flow
+    30→import kotlinx.coroutines.flow.flowOn
+    31→import kotlinx.coroutines.isActive
+    32→import kotlinx.coroutines.launch
+    33→import kotlinx.coroutines.tasks.await
+    34→import kotlinx.coroutines.withContext
+    35→import org.webrtc.IceCandidate
+    36→import timber.log.Timber
+    37→import java.util.UUID
+    38→import javax.inject.Inject
+    39→import javax.inject.Singleton
+    40→
+    41→/**
+    42→ * Concrete implementation of [CallRepository].
+    43→ *
+    44→ * Manages WebRTC calls using pure WebRTC (io.github.webrtc-sdk:android)
+    45→ * with Firebase Realtime Database for signaling. NO LiveKit dependency.
+    46→ *
+    47→ * All WebRTC operations (PeerConnectionFactory, SDP, ICE) run on
+    48→ * [Dispatchers.IO]. The Android Main Thread is NEVER blocked by call operations.
+    49→ *
+    50→ * Zero-trust enforcement: All call initiation methods verify mutual
+    51→ * contact status through [ContactRepository.verifyMutualContact]
+    52→ * before executing. Non-contact calls are blocked at this boundary.
+    53→ */
+    54→@Singleton
+    55→class CallRepositoryImpl @Inject constructor(
+    56→    private val firestore: FirebaseFirestore,
+    57→    private val realtimeDb: FirebaseDatabase,
+    58→    private val firebaseAuth: FirebaseAuth,
+    59→    private val contactRepository: ContactRepository,
+    60→    private val webRtcClient: WebRtcClient,
+    61→    private val signalingClient: FirebaseSignalingClient,
+    62→    @ApplicationContext private val context: Context
+    63→) : CallRepository {
+    64→
+    65→    private val currentUid: String?
+    66→        get() = firebaseAuth.currentUser?.uid
+    67→
+    68→    private val _callState = MutableStateFlow<CallState>(CallState.IDLE)
+    69→    private val callState: StateFlow<CallState> = _callState.asStateFlow()
+    70→
+    71→    private val _incomingCalls = MutableStateFlow<CallState>(CallState.IDLE)
+    72→
+    73→    private var durationJob: Job? = null
+    74→    private var connectedAt: Long = 0L
+    75→
+    76→    private val callLogCollection get() = firestore.collection("call_log")
+    77→
+    78→    // ════════════════════════════════════════════════════════════════════════
+    79→    //  Firebase Realtime DB Signaling Flows — Thread-Isolated
+    80→    // ════════════════════════════════════════════════════════════════════════
+    81→
+    82→    /**
+    83→     * Observes the real-time state of a call session from Firebase Realtime DB.
+    84→     *
+    85→     * Provides a continuous [com.google.firebase.database.ValueEventListener] on
+    86→     * `/calls/{callId}/`, streaming every state change as a Map. All listener
+    87→     * operations are safely decoupled from the UI thread via [callbackFlow] on
+    88→     * [Dispatchers.IO].
+    89→     *
+    90→     * This is the primary mechanism by which the calling UI reacts to remote
+    91→     * state transitions without polling.
+    92→     */
+    93→    override fun observeCallSession(callId: String): Flow<Map<String, Any>> = callbackFlow {
+    94→        val callRef = realtimeDb.getReference("calls/$callId")
+    95→        val listener = object : com.google.firebase.database.ValueEventListener {
+    96→            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+    97→                try {
+    98→                    val data = snapshot.value as? Map<String, Any> ?: emptyMap()
+    99→                    trySend(data)
+   100→                } catch (e: Exception) {
+   101→                    Timber.e(e, "Error parsing call session data for callId: %s", callId)
+   102→                }
+   103→            }
+   104→
+   105→            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+   106→                Timber.e(error.toException(), "Call session listener cancelled for callId: %s", callId)
+   107→                close(error.toException())
+   108→            }
+   109→        }
+   110→        callRef.addValueEventListener(listener)
+   111→        awaitClose { callRef.removeEventListener(listener) }
+   112→    }.flowOn(Dispatchers.IO)
+   113→
+   114→    /**
+   115→     * Observes ICE candidates for a specific call from Firebase Realtime DB.
+   116→     *
+   117→     * Listens to `/calls/{callId}/iceCandidates/` with a [com.google.firebase.database.ChildEventListener],
+   118→     * streaming each newly added ICE candidate as it arrives from the remote peer.
+   119→     * Candidates are parsed into [IceCandidate] objects and forwarded to the
+   120→     * WebRTC engine for addition to the PeerConnection.
+   121→     */
+   122→    override fun observeIceCandidates(callId: String): Flow<IceCandidate> = callbackFlow {
+   123→        val candidatesRef = realtimeDb.getReference("calls/$callId/iceCandidates")
+   124→        val childListener = object : com.google.firebase.database.ChildEventListener {
+   125→            override fun onChildAdded(
+   126→                snapshot: com.google.firebase.database.DataSnapshot,
+   127→                previousChildName: String?
+   128→            ) {
+   129→                try {
+   130→                    val sdpMid = snapshot.child("sdpMid").getValue(String::class.java) ?: ""
+   131→                    val sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Int::class.java) ?: 0
+   132→                    val sdp = snapshot.child("sdp").getValue(String::class.java) ?: ""
+   133→                    if (sdp.isNotBlank()) {
+   134→                        trySend(IceCandidate(sdpMid, sdpMLineIndex, sdp))
+   135→                    }
+   136→                } catch (e: Exception) {
+   137→                    Timber.e(e, "Error parsing ICE candidate for callId: %s", callId)
+   138→                }
+   139→            }
+   140→
+   141→            override fun onChildChanged(
+   142→                snapshot: com.google.firebase.database.DataSnapshot,
+   143→                previousChildName: String?
+   144→            ) { /* ICE candidates are append-only */ }
+   145→
+   146→            override fun onChildRemoved(snapshot: com.google.firebase.database.DataSnapshot) {}
+   147→
+   148→            override fun onChildMoved(
+   149→                snapshot: com.google.firebase.database.DataSnapshot,
+   150→                previousChildName: String?
+   151→            ) {}
+   152→
+   153→            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+   154→                Timber.e(error.toException(), "ICE candidate listener cancelled for callId: %s", callId)
+   155→                close(error.toException())
+   156→            }
+   157→        }
+   158→        candidatesRef.addChildEventListener(childListener)
+   159→        awaitClose { candidatesRef.removeEventListener(childListener) }
+   160→    }.flowOn(Dispatchers.IO)
+   161→
+   162→    /**
+   163→     * Emits a call state update to Firebase Realtime DB.
+   164→     *
+   165→     * Writes the state string to `/calls/{callId}/callState`.
+   166→     * This operation runs on [Dispatchers.IO] and never blocks the Main Thread.
+   167→     */
+   168→    override suspend fun emitCallState(callId: String, state: String) = withContext(Dispatchers.IO) {
+   169→        try {
+   170→            realtimeDb.getReference("calls/$callId/callState").setValue(state)
+   171→            Timber.d("Call state emitted: %s for callId: %s", state, callId)
+   172→        } catch (e: Exception) {
+   173→            Timber.e(e, "Failed to emit call state: %s for callId: %s", state, callId)
+   174→        }
+   175→    }
+   176→
+   177→    // ════════════════════════════════════════════════════════════════════════
+   178→    //  Firebase Realtime DB Signaling Flows — Thread-Isolated
+   179→    // ════════════════════════════════════════════════════════════════════════
+   180→
+   181→    /**
+   182→     * Observes the real-time state of a call session from Firebase Realtime DB.
+   183→     *
+   184→     * Provides a continuous [ValueEventListener] on `/calls/{callId}/`,
+   185→     * streaming every state change as a Map. All listener operations are
+   186→     * safely decoupled from the UI thread via [callbackFlow] on [Dispatchers.IO].
+   187→     *
+   188→     * This is the primary mechanism by which the calling UI reacts to remote
+   189→     * state transitions without polling.
+   190→     */
+   191→    override fun observeCallSession(callId: String): Flow<Map<String, Any>> = callbackFlow {
+   192→        val callRef = realtimeDb.getReference("calls/$callId")
+   193→        val listener = object : com.google.firebase.database.ValueEventListener {
+   194→            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+   195→                try {
+   196→                    val data = snapshot.value as? Map<String, Any> ?: emptyMap()
+   197→                    trySend(data)
+   198→                } catch (e: Exception) {
+   199→                    Timber.e(e, "Error parsing call session data for callId: %s", callId)
+   200→                }
+   201→            }
+   202→
+   203→            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+   204→                Timber.e(error.toException(), "Call session listener cancelled for callId: %s", callId)
+   205→                close(error.toException())
+   206→            }
+   207→        }
+   208→        callRef.addValueEventListener(listener)
+   209→        awaitClose { callRef.removeEventListener(listener) }
+   210→    }.flowOn(Dispatchers.IO)
+   211→
+   212→    /**
+   213→     * Observes ICE candidates for a specific call from Firebase Realtime DB.
+   214→     *
+   215→     * Listens to `/calls/{callId}/iceCandidates/` with a [ChildEventListener],
+   216→     * streaming each newly added ICE candidate as it arrives from the remote peer.
+   217→     * Candidates are parsed into [IceCandidate] objects and forwarded to the
+   218→     * WebRTC engine for addition to the PeerConnection.
+   219→     */
+   220→    override fun observeIceCandidates(callId: String): Flow<IceCandidate> = callbackFlow {
+   221→        val candidatesRef = realtimeDb.getReference("calls/$callId/iceCandidates")
+   222→        val childListener = object : com.google.firebase.database.ChildEventListener {
+   223→            override fun onChildAdded(
+   224→                snapshot: com.google.firebase.database.DataSnapshot,
+   225→                previousChildName: String?
+   226→            ) {
+   227→                try {
+   228→                    val sdpMid = snapshot.child("sdpMid").getValue(String::class.java) ?: ""
+   229→                    val sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Int::class.java) ?: 0
+   230→                    val sdp = snapshot.child("sdp").getValue(String::class.java) ?: ""
+   231→                    if (sdp.isNotBlank()) {
+   232→                        trySend(IceCandidate(sdpMid, sdpMLineIndex, sdp))
+   233→                    }
+   234→                } catch (e: Exception) {
+   235→                    Timber.e(e, "Error parsing ICE candidate for callId: %s", callId)
+   236→                }
+   237→            }
+   238→
+   239→            override fun onChildChanged(
+   240→                snapshot: com.google.firebase.database.DataSnapshot,
+   241→                previousChildName: String?
+   242→            ) { /* ICE candidates are append-only */ }
+   243→
+   244→            override fun onChildRemoved(snapshot: com.google.firebase.database.DataSnapshot) {}
+   245→
+   246→            override fun onChildMoved(
+   247→                snapshot: com.google.firebase.database.DataSnapshot,
+   248→                previousChildName: String?
+   249→            ) {}
+   250→
+   251→            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+   252→                Timber.e(error.toException(), "ICE candidate listener cancelled for callId: %s", callId)
+   253→                close(error.toException())
+   254→            }
+   255→        }
+   256→        candidatesRef.addChildEventListener(childListener)
+   257→        awaitClose { candidatesRef.removeEventListener(childListener) }
+   258→    }.flowOn(Dispatchers.IO)
+   259→
+   260→    /**
+   261→     * Emits a call state update to Firebase Realtime DB.
+   262→     *
+   263→     * Writes the state string to `/calls/{callId}/callState`.
+   264→     * This operation runs on [Dispatchers.IO] and never blocks the Main Thread.
+   265→     */
+   266→    override suspend fun emitCallState(callId: String, state: String) = withContext(Dispatchers.IO) {
+   267→        try {
+   268→            realtimeDb.getReference("calls/$callId/callState").setValue(state)
+   269→            Timber.d("Call state emitted: %s for callId: %s", state, callId)
+   270→        } catch (e: Exception) {
+   271→            Timber.e(e, "Failed to emit call state: %s for callId: %s", state, callId)
+   272→        }
+   273→    }
+   274→
+   275→    // ── Initiate Call ─────────────────────────────────────────────────────────
+   276→
+   277→    override fun initiateCall(targetUid: String, isVideoCall: Boolean): Flow<CallState> = flow {
+   278→        val myUid = currentUid
+   279→        if (myUid == null) {
+   280→            emit(CallState.IDLE)
+   281→            return@flow
+   282→        }
+   283→
+   284→        try {
+   285→            // Zero-trust: verify mutual contact before initiating
+   286→            var gateResult: CommunicationGate? = null
+   287→            contactRepository.verifyMutualContact(targetUid).collect { gateResult = it }
+   288→
+   289→            if (gateResult !is CommunicationGate.Allowed) {
+   290→                Timber.w("Call blocked — not a mutual contact: %s", targetUid)
+   291→                emit(CallState.IDLE)
+   292→                return@flow
+   293→            }
+   294→
+   295→            val contact = (gateResult as CommunicationGate.Allowed).contact
+   296→
+   297→            // Create the call document in Firebase Realtime DB
+   298→            val callId = UUID.randomUUID().toString()
+   299→
+   300→            _callState.value = CallState.DIALING(
+   301→                callId = callId,
+   302→                targetUid = targetUid,
+   303→                targetDisplayName = contact.contactDisplayName,
+   304→                targetAvatarUrl = contact.contactAvatarUrl,
+   305→                isVideoCall = isVideoCall
+   306→            )
+   307→            emit(_callState.value)
+   308→
+   309→            // Start foreground service BEFORE WebRTC initialization
+   310→            // This guarantees Android does not terminate media streams
+   311→            CallForegroundService.start(
+   312→                context = context,
+   313→                callType = if (isVideoCall) CallForegroundService.CALL_TYPE_VIDEO else CallForegroundService.CALL_TYPE_AUDIO,
+   314→                callerName = contact.contactDisplayName,
+   315→                callId = callId
+   316→            )
+   317→
+   318→            // Create the call entry in Firebase Realtime DB with structured data
+   319→            signalingClient.createCall(callId, myUid, targetUid, isVideoCall)
+   320→
+   321→            // Initialize WebRTC peer connection on Dispatchers.IO
+   322→            // AudioManager is calibrated inside initializePeerConnection
+   323→            webRtcClient.initializePeerConnection(isVideoCall)
+   324→
+   325→            // Set up ICE candidate forwarding: local ICE → Firebase signaling
+   326→            webRtcClient.onIceCandidateGenerated = { candidate ->
+   327→                GlobalScope.launch(Dispatchers.IO) {
+   328→                    try {
+   329→                        signalingClient.sendIceCandidate(
+   330→                            callId = callId,
+   331→                            senderUid = myUid,
+   332→                            targetUid = targetUid,
+   333→                            sdpMid = candidate.sdpMid,
+   334→                            sdpMLineIndex = candidate.sdpMLineIndex,
+   335→                            sdp = candidate.sdp
+   336→                        )
+   337→                    } catch (e: Exception) {
+   338→                        Timber.e(e, "Failed to forward ICE candidate to signaling")
+   339→                    }
+   340→                }
+   341→            }
+   342→
+   343→            // Create SDP offer
+   344→            val sdpOffer = webRtcClient.createOffer()
+   345→
+   346→            // Send the offer via Firebase signaling
+   347→            signalingClient.sendOffer(callId, myUid, targetUid, sdpOffer)
+   348→
+   349→            // Update call status to ringing
+   350→            signalingClient.updateCallStatus(callId, "ringing")
+   351→
+   352→            // Observe answer and ICE candidates concurrently
+   353→            var isAnswerReceived = false
+   354→
+   355→            // Listen for answer
+   356→            signalingClient.observeAnswer(callId, myUid).collect { answerData ->
+   357→                if (answerData != null && !isAnswerReceived) {
+   358→                    isAnswerReceived = true
+   359→                    webRtcClient.setRemoteAnswer(answerData.sdp)
+   360→
+   361→                    // Update call status to connected
+   362→                    signalingClient.updateCallStatus(callId, "connected")
+   363→
+   364→                    _callState.value = CallState.CONNECTED(
+   365→                        callId = callId,
+   366→                        targetUid = targetUid,
+   367→                        targetDisplayName = contact.contactDisplayName,
+   368→                        targetAvatarUrl = contact.contactAvatarUrl,
+   369→                        isVideoCall = isVideoCall,
+   370→                        connectedAt = System.currentTimeMillis()
+   371→                    )
+   372→                    connectedAt = System.currentTimeMillis()
+   373→                    emit(_callState.value)
+   374→
+   375→                    // Start duration tracking
+   376→                    startDurationTracking(callId)
+   377→
+   378→                    // Start observing ICE candidates for this call
+   379→                    observeIceCandidates(callId, myUid)
+   380→                }
+   381→            }
+   382→        } catch (e: Exception) {
+   383→            Timber.e(e, "Failed to initiate call")
+   384→            _callState.value = CallState.IDLE
+   385→            emit(CallState.IDLE)
+   386→        }
+   387→    }.flowOn(Dispatchers.IO)
+   388→
+   389→    // ── Observe Incoming Calls ────────────────────────────────────────────────
+   390→
+   391→    override fun observeIncomingCalls(): Flow<CallState> = callbackFlow {
+   392→        val myUid = currentUid
+   393→        if (myUid == null) {
+   394→            trySend(CallState.IDLE)
+   395→            close()
+   396→            return@callbackFlow
+   397→        }
+   398→
+   399→        val callsRef = realtimeDb.getReference("calls")
+   400→        val listener = callsRef.orderByChild("calleeUid").equalTo(myUid)
+   401→            .addChildEventListener(object : com.google.firebase.database.ChildEventListener {
+   402→                override fun onChildAdded(
+   403→                    snapshot: com.google.firebase.database.DataSnapshot,
+   404→                    previousChildName: String?
+   405→                ) {
+   406→                    try {
+   407→                        val status = snapshot.child("status").getValue(String::class.java)
+   408→                        if (status == "ringing") {
+   409→                            val callId = snapshot.key ?: return
+   410→                            val callerUid = snapshot.child("callerUid").getValue(String::class.java) ?: return
+   411→                            val callerDisplayName = snapshot.child("callerDisplayName").getValue(String::class.java) ?: ""
+   412→                            val isVideoCall = snapshot.child("isVideoCall").getValue(Boolean::class.java) ?: false
+   413→
+   414→                            val incomingState = CallState.RINGING(
+   415→                                callId = callId,
+   416→                                callerUid = callerUid,
+   417→                                callerDisplayName = callerDisplayName,
+   418→                                callerAvatarUrl = "",
+   419→                                isVideoCall = isVideoCall
+   420→                            )
+   421→                            _incomingCalls.value = incomingState
+   422→                            trySend(incomingState)
+   423→                        }
+   424→                    } catch (e: Exception) {
+   425→                        Timber.e(e, "Error parsing incoming call")
+   426→                    }
+   427→                }
+   428→
+   429→                override fun onChildChanged(
+   430→                    snapshot: com.google.firebase.database.DataSnapshot,
+   431→                    previousChildName: String?
+   432→                ) { /* handled in observeCallState */ }
+   433→
+   434→                override fun onChildRemoved(snapshot: com.google.firebase.database.DataSnapshot) {}
+   435→                override fun onChildMoved(snapshot: com.google.firebase.database.DataSnapshot, previousChildName: String?) {}
+   436→                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+   437→                    Timber.e(error.toException(), "Incoming calls listener cancelled")
+   438→                }
+   439→            })
+   440→
+   441→        awaitClose { callsRef.removeEventListener(listener) }
+   442→    }.flowOn(Dispatchers.IO)
+   443→
+   444→    // ── Answer Call ───────────────────────────────────────────────────────────
+   445→
+   446→    override fun answerCall(callId: String): Flow<CallState> = flow {
+   447→        try {
+   448→            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+   449→
+   450→            // Get call data
+   451→            val callSnapshot = realtimeDb.getReference("calls").child(callId).get().await()
+   452→            val callerUid = callSnapshot.child("callerUid").getValue(String::class.java) ?: ""
+   453→            val isVideoCall = callSnapshot.child("isVideoCall").getValue(Boolean::class.java) ?: false
+   454→
+   455→            // Verify mutual contact
+   456→            var gateResult: CommunicationGate? = null
+   457→            contactRepository.verifyMutualContact(callerUid).collect { gateResult = it }
+   458→
+   459→            if (gateResult !is CommunicationGate.Allowed) {
+   460→                Timber.w("Cannot answer call — not a mutual contact")
+   461→                emit(CallState.IDLE)
+   462→                return@flow
+   463→            }
+   464→
+   465→            val contact = (gateResult as CommunicationGate.Allowed).contact
+   466→
+   467→            // Update call status
+   468→            realtimeDb.getReference("calls").child(callId).child("status")
+   469→                .setValue("connected").await()
+   470→
+   471→            // Start foreground service
+   472→            CallForegroundService.start(
+   473→                context = context,
+   474→                callType = if (isVideoCall) CallForegroundService.CALL_TYPE_VIDEO else CallForegroundService.CALL_TYPE_AUDIO,
+   475→                callerName = contact.contactDisplayName,
+   476→                callId = callId
+   477→            )
+   478→
+   479→            // Initialize WebRTC and observe offer
+   480→            webRtcClient.initializePeerConnection(isVideoCall)
+   481→
+   482→            signalingClient.observeOffer(callId).collect { offer ->
+   483→                if (offer != null) {
+   484→                    webRtcClient.setRemoteOffer(offer)
+   485→                    val sdpAnswer = webRtcClient.createAnswer()
+   486→                    signalingClient.sendAnswer(callId, myUid, sdpAnswer)
+   487→
+   488→                    _callState.value = CallState.CONNECTED(
+   489→                        callId = callId,
+   490→                        targetUid = callerUid,
+   491→                        targetDisplayName = contact.contactDisplayName,
+   492→                        targetAvatarUrl = contact.contactAvatarUrl,
+   493→                        isVideoCall = isVideoCall,
+   494→                        connectedAt = System.currentTimeMillis()
+   495→                    )
+   496→                    connectedAt = System.currentTimeMillis()
+   497→                    emit(_callState.value)
+   498→                    startDurationTracking(callId)
+   499→                }
+   500→            }
+   501→        } catch (e: Exception) {
+   502→            Timber.e(e, "Failed to answer call")
+   503→            _callState.value = CallState.IDLE
+   504→            emit(CallState.IDLE)
+   505→        }
+   506→    }.flowOn(Dispatchers.IO)
+   507→
+   508→    // ── Decline Call ──────────────────────────────────────────────────────────
+   509→
+   510→    override fun declineCall(callId: String): Flow<Result<Unit>> = flow {
+   511→        try {
+   512→            realtimeDb.getReference("calls").child(callId).child("status")
+   513→                .setValue("declined").await()
+   514→            _callState.value = CallState.ENDED(
+   515→                callId = callId,
+   516→                endReason = CallEndReason.DECLINED
+   517→            )
+   518→            emit(Result.success(Unit))
+   519→        } catch (e: Exception) {
+   520→            Timber.e(e, "Failed to decline call")
+   521→            emit(Result.failure(e))
+   522→        }
+   523→    }.flowOn(Dispatchers.IO)
+   524→
+   525→    // ── End Call ──────────────────────────────────────────────────────────────
+   526→
+   527→    override fun endCall(callId: String): Flow<Result<Unit>> = flow {
+   528→        try {
+   529→            val currentState = _callState.value
+   530→            val durationSeconds = if (currentState is CallState.CONNECTED) {
+   531→                (System.currentTimeMillis() - connectedAt) / 1000
+   532→            } else 0L
+   533→
+   534→            // Update call status in Firebase via signaling client
+   535→            signalingClient.updateCallStatus(callId, "ended")
+   536→
+   537→            // Clean up WebRTC resources (releases audio focus too)
+   538→            webRtcClient.disconnect()
+   539→
+   540→            // Clean up signaling data from Firebase Realtime DB
+   541→            signalingClient.cleanupSignalingData(callId)
+   542→
+   543→            // Stop foreground service
+   544→            CallForegroundService.stop(context)
+   545→
+   546→            // Cancel duration tracking
+   547→            durationJob?.cancel()
+   548→            durationJob = null
+   549→
+   550→            // Log the call
+   551→            logCall(callId, currentState, durationSeconds)
+   552→
+   553→            _callState.value = CallState.ENDED(
+   554→                callId = callId,
+   555→                durationSeconds = durationSeconds,
+   556→                endReason = CallEndReason.COMPLETED
+   557→            )
+   558→            emit(Result.success(Unit))
+   559→        } catch (e: Exception) {
+   560→            Timber.e(e, "Failed to end call — forcing cleanup")
+   561→            // Force cleanup even if something fails
+   562→            try { webRtcClient.disconnect() } catch (_: Exception) {}
+   563→            try { CallForegroundService.stop(context) } catch (_: Exception) {}
+   564→            try { signalingClient.cleanupSignalingData(callId) } catch (_: Exception) {}
+   565→            _callState.value = CallState.IDLE
+   566→            emit(Result.failure(e))
+   567→        }
+   568→    }.flowOn(Dispatchers.IO)
+   569→
+   570→    // ── Toggle Mute ───────────────────────────────────────────────────────────
+   571→
+   572→    override fun toggleMute(callId: String, isMuted: Boolean): Flow<Result<Unit>> = flow {
+   573→        try {
+   574→            webRtcClient.setMuted(isMuted)
+   575→            val currentState = _callState.value
+   576→            if (currentState is CallState.CONNECTED) {
+   577→                _callState.value = currentState.copy(isMuted = isMuted)
+   578→            }
+   579→            emit(Result.success(Unit))
+   580→        } catch (e: Exception) {
+   581→            Timber.e(e, "Failed to toggle mute")
+   582→            emit(Result.failure(e))
+   583→        }
+   584→    }.flowOn(Dispatchers.IO)
+   585→
+   586→    // ── Toggle Camera ─────────────────────────────────────────────────────────
+   587→
+   588→    override fun toggleCamera(callId: String, isCameraOff: Boolean): Flow<Result<Unit>> = flow {
+   589→        try {
+   590→            if (isCameraOff) {
+   591→                webRtcClient.disableCamera()
+   592→            } else {
+   593→                webRtcClient.enableCamera()
+   594→            }
+   595→            val currentState = _callState.value
+   596→            if (currentState is CallState.CONNECTED) {
+   597→                _callState.value = currentState.copy(isCameraOff = isCameraOff)
+   598→            }
+   599→            emit(Result.success(Unit))
+   600→        } catch (e: Exception) {
+   601→            Timber.e(e, "Failed to toggle camera")
+   602→            emit(Result.failure(e))
+   603→        }
+   604→    }.flowOn(Dispatchers.IO)
+   605→
+   606→    // ── Toggle Speaker ────────────────────────────────────────────────────────
+   607→
+   608→    override fun toggleSpeaker(callId: String, isSpeakerOn: Boolean): Flow<Result<Unit>> = flow {
+   609→        try {
+   610→            webRtcClient.setSpeakerOn(isSpeakerOn)
+   611→            val currentState = _callState.value
+   612→            if (currentState is CallState.CONNECTED) {
+   613→                _callState.value = currentState.copy(isSpeakerOn = isSpeakerOn)
+   614→            }
+   615→            emit(Result.success(Unit))
+   616→        } catch (e: Exception) {
+   617→            Timber.e(e, "Failed to toggle speaker")
+   618→            emit(Result.failure(e))
+   619→        }
+   620→    }.flowOn(Dispatchers.IO)
+   621→
+   622→    // ── Observe Call State ────────────────────────────────────────────────────
+   623→
+   624→    override fun observeCallState(callId: String): Flow<CallState> = flow {
+   625→        callState.collect { state ->
+   626→            if (state is CallState.IDLE ||
+   627→                (state is CallState.DIALING && state.callId == callId) ||
+   628→                (state is CallState.RINGING && state.callId == callId) ||
+   629→                (state is CallState.CONNECTED && state.callId == callId) ||
+   630→                (state is CallState.ENDED && state.callId == callId)
+   631→            ) {
+   632→                emit(state)
+   633→            }
+   634→        }
+   635→    }.flowOn(Dispatchers.IO)
+   636→
+   637→    // ── Call History ──────────────────────────────────────────────────────────
+   638→
+   639→    override fun getCallHistory(): Flow<List<CallLogEntry>> = callbackFlow {
+   640→        val myUid = currentUid
+   641→        if (myUid == null) {
+   642→            trySend(emptyList())
+   643→            close()
+   644→            return@callbackFlow
+   645→        }
+   646→
+   647→        val subscription = callLogCollection
+   648→            .whereArrayContains("participantUids", myUid)
+   649→            .orderBy("timestamp", Query.Direction.DESCENDING)
+   650→            .addSnapshotListener { snapshot, error ->
+   651→                if (error != null) {
+   652→                    Timber.e(error, "Error observing call history")
+   653→                    trySend(emptyList())
+   654→                    return@addSnapshotListener
+   655→                }
+   656→
+   657→                val calls = snapshot?.documents?.mapNotNull { doc ->
+   658→                    try {
+   659→                        mapToCallLogEntry(doc, myUid)
+   660→                    } catch (e: Exception) {
+   661→                        Timber.e(e, "Failed to map call log: %s", doc.id)
+   662→                        null
+   663→                    }
+   664→                } ?: emptyList()
+   665→
+   666→                trySend(calls)
+   667→            }
+   668→
+   669→        awaitClose { subscription.remove() }
+   670→    }.flowOn(Dispatchers.IO)
+   671→
+   672→    // ── ICE Candidate Observer ──────────────────────────────────────────────
+   673→
+   674→    /**
+   675→     * Observes remote ICE candidates from the signaling server and adds them
+   676→     * to the local PeerConnection. This runs continuously during a call to
+   677→     * ensure that new ICE candidates are processed as they arrive.
+   678→     *
+   679→     * @param callId The call ID.
+   680→     * @param localUid The local user's UID (to filter out self-sent candidates).
+   681→     */
+   682→    private fun observeIceCandidates(callId: String, localUid: String) {
+   683→        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+   684→            try {
+   685→                signalingClient.observeIceCandidates(callId, localUid).collect { candidates ->
+   686→                    for (candidate in candidates) {
+   687→                        try {
+   688→                            webRtcClient.addIceCandidate(
+   689→                                candidate.sdpMid,
+   690→                                candidate.sdpMLineIndex,
+   691→                                candidate.sdp
+   692→                            )
+   693→                        } catch (e: Exception) {
+   694→                            Timber.e(e, "Failed to add remote ICE candidate")
+   695→                        }
+   696→                    }
+   697→                }
+   698→            } catch (e: Exception) {
+   699→                Timber.e(e, "ICE candidate observer failed for call: %s", callId)
+   700→            }
+   701→        }
+   702→    }
+   703→
+   704→    // ── Internal Helpers ──────────────────────────────────────────────────────
+   705→
+   706→    private fun startDurationTracking(callId: String) {
+   707→        durationJob?.cancel()
+   708→        durationJob = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+   709→            while (isActive) {
+   710→                delay(1000)
+   711→                val currentState = _callState.value
+   712→                if (currentState is CallState.CONNECTED) {
+   713→                    val elapsed = (System.currentTimeMillis() - connectedAt) / 1000
+   714→                    _callState.value = currentState.copy(durationSeconds = elapsed)
+   715→                }
+   716→            }
+   717→        }
+   718→    }
+   719→
+   720→    private suspend fun logCall(callId: String, state: CallState, durationSeconds: Long) {
+   721→        try {
+   722→            val myUid = currentUid ?: return
+   723→            val entry = when (state) {
+   724→                is CallState.CONNECTED -> CallLogEntry(
+   725→                    id = UUID.randomUUID().toString(),
+   726→                    callId = callId,
+   727→                    callerUid = myUid,
+   728→                    calleeUid = state.targetUid,
+   729→                    callerName = firebaseAuth.currentUser?.displayName ?: "",
+   730→                    calleeName = state.targetDisplayName,
+   731→                    type = CallDirection.OUTGOING,
+   732→                    isVideoCall = state.isVideoCall,
+   733→                    callType = if (state.isVideoCall) com.zixo.app.domain.model.CallTechnology.WEBRTC_VIDEO else com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO,
+   734→                    duration = durationSeconds,
+   735→                    timestamp = System.currentTimeMillis(),
+   736→                    endReason = CallEndReason.COMPLETED
+   737→                )
+   738→                is CallState.DIALING -> CallLogEntry(
+   739→                    id = UUID.randomUUID().toString(),
+   740→                    callId = callId,
+   741→                    callerUid = myUid,
+   742→                    calleeUid = state.targetUid,
+   743→                    callerName = firebaseAuth.currentUser?.displayName ?: "",
+   744→                    calleeName = state.targetDisplayName,
+   745→                    type = CallDirection.OUTGOING,
+   746→                    isVideoCall = state.isVideoCall,
+   747→                    callType = if (state.isVideoCall) com.zixo.app.domain.model.CallTechnology.WEBRTC_VIDEO else com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO,
+   748→                    duration = 0L,
+   749→                    timestamp = System.currentTimeMillis(),
+   750→                    endReason = CallEndReason.CANCELLED
+   751→                )
+   752→                else -> return
+   753→            }
+   754→
+   755→            callLogCollection.document(entry.id).set(entryToFirestoreMap(entry)).await()
+   756→        } catch (e: Exception) {
+   757→            Timber.e(e, "Failed to log call")
+   758→        }
+   759→    }
+   760→
+   761→    private fun mapToCallLogEntry(
+   762→        doc: com.google.firebase.firestore.DocumentSnapshot,
+   763→        myUid: String
+   764→    ): CallLogEntry? {
+   765→        return try {
+   766→            val callerUid = doc.getString("callerUid") ?: return null
+   767→            val calleeUid = doc.getString("calleeUid") ?: return null
+   768→
+   769→            val direction = when {
+   770→                callerUid == myUid -> CallDirection.OUTGOING
+   771→                else -> CallDirection.INCOMING
+   772→            }
+   773→
+   774→            val endReasonStr = doc.getString("endReason") ?: "COMPLETED"
+   775→            val endReason = try { CallEndReason.valueOf(endReasonStr) }
+   776→                catch (_: Exception) { CallEndReason.COMPLETED }
+   777→
+   778→            val callTechnologyStr = doc.getString("callType") ?: "WEBRTC_AUDIO"
+   779→
+   780→            CallLogEntry(
+   781→                id = doc.id,
+   782→                callId = doc.getString("callId") ?: "",
+   783→                callerUid = callerUid,
+   784→                calleeUid = calleeUid,
+   785→                callerName = doc.getString("callerName") ?: "",
+   786→                calleeName = doc.getString("calleeName") ?: "",
+   787→                callerAvatar = doc.getString("callerAvatar"),
+   788→                calleeAvatar = doc.getString("calleeAvatar"),
+   789→                type = if (endReason == CallEndReason.MISSED) CallDirection.MISSED else direction,
+   790→                isVideoCall = doc.getBoolean("isVideoCall") ?: false,
+   791→                callType = try { com.zixo.app.domain.model.CallTechnology.valueOf(callTechnologyStr) } catch (_: Exception) { com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO },
+   792→                isGroupCall = doc.getBoolean("isGroupCall") ?: false,
+   793→                duration = doc.getLong("duration") ?: 0L,
+   794→                timestamp = doc.getLong("timestamp") ?: 0L,
+   795→                endReason = endReason,
+   796→                threadId = doc.getString("threadId") ?: "",
+   797→                isRead = doc.getBoolean("isRead") ?: false
+   798→            )
+   799→        } catch (e: Exception) {
+   800→            Timber.e(e, "Failed to map call log entry")
+   801→            null
+   802→        }
+   803→    }
+   804→
+   805→    private fun entryToFirestoreMap(entry: CallLogEntry): Map<String, Any?> = mapOf(
+   806→        "callId" to entry.callId,
+   807→        "callerUid" to entry.callerUid,
+   808→        "calleeUid" to entry.calleeUid,
+   809→        "callerName" to entry.callerName,
+   810→        "calleeName" to entry.calleeName,
+   811→        "callerAvatar" to entry.callerAvatar,
+   812→        "calleeAvatar" to entry.calleeAvatar,
+   813→        "type" to entry.type.name,
+   814→        "isVideoCall" to entry.isVideoCall,
+   815→        "callType" to entry.callType.name,
+   816→        "isGroupCall" to entry.isGroupCall,
+   817→        "duration" to entry.duration,
+   818→        "timestamp" to entry.timestamp,
+   819→        "endReason" to entry.endReason.name,
+   820→        "participantUids" to listOf(entry.callerUid, entry.calleeUid),
+   821→        "threadId" to entry.threadId,
+   822→        "isRead" to entry.isRead
+   823→    )
+   824→
+   825→    // ── Get All Calls ────────────────────────────────────────────────────────
+   826→
+   827→    override fun getAllCalls(): Flow<List<CallLogEntry>> = callbackFlow {
+   828→        val myUid = currentUid
+   829→        if (myUid == null) {
+   830→            trySend(emptyList())
+   831→            close()
+   832→            return@callbackFlow
+   833→        }
+   834→
+   835→        val subscription = callLogCollection
+   836→            .whereArrayContains("participantUids", myUid)
+   837→            .orderBy("timestamp", Query.Direction.DESCENDING)
+   838→            .addSnapshotListener { snapshot, error ->
+   839→                if (error != null) {
+   840→                    Timber.e(error, "Error observing call history")
+   841→                    trySend(emptyList())
+   842→                    return@addSnapshotListener
+   843→                }
+   844→
+   845→                val calls = snapshot?.documents?.mapNotNull { doc ->
+   846→                    try {
+   847→                        mapToCallLogEntry(doc)
+   848→                    } catch (e: Exception) {
+   849→                        Timber.e(e, "Failed to map call log: %s", doc.id)
+   850→                        null
+   851→                    }
+   852→                } ?: emptyList()
+   853→
+   854→                trySend(calls)
+   855→            }
+   856→
+   857→        awaitClose { subscription.remove() }
+   858→    }.flowOn(Dispatchers.IO)
+   859→
+   860→    // ── Clear Call History ────────────────────────────────────────────────────
+   861→
+   862→    override fun clearCallHistory(): Flow<Result<Unit>> = flow {
+   863→        try {
+   864→            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+   865→
+   866→            val snapshot = callLogCollection
+   867→                .whereArrayContains("participantUids", myUid)
+   868→                .get()
+   869→                .await()
+   870→
+   871→            val batch = firestore.batch()
+   872→            for (doc in snapshot.documents) {
+   873→                batch.delete(doc.reference)
+   874→            }
+   875→            batch.commit().await()
+   876→
+   877→            Timber.d("Call history cleared: %d entries removed", snapshot.size())
+   878→            emit(Result.success(Unit))
+   879→        } catch (e: Exception) {
+   880→            Timber.e(e, "Failed to clear call history")
+   881→            emit(Result.failure(e))
+   882→        }
+   883→    }.flowOn(Dispatchers.IO)
+   884→
+   885→    // ── Mapping Helper ────────────────────────────────────────────────────────
+   886→
+   887→    private fun mapToCallLogEntry(
+   888→        doc: com.google.firebase.firestore.DocumentSnapshot
+   889→    ): CallLogEntry? {
+   890→        return try {
+   891→            val typeStr = doc.getString("type") ?: "OUTGOING"
+   892→            val endReasonStr = doc.getString("endReason") ?: "COMPLETED"
+   893→            val callTechnologyStr = doc.getString("callType") ?: "WEBRTC_AUDIO"
+   894→            val isVideo = doc.getBoolean("isVideoCall") ?: false
+   895→
+   896→            CallLogEntry(
+   897→                id = doc.id,
+   898→                callId = doc.getString("callId") ?: "",
+   899→                callerUid = doc.getString("callerUid") ?: "",
+   900→                calleeUid = doc.getString("calleeUid") ?: "",
+   901→                callerName = doc.getString("callerName") ?: "",
+   902→                calleeName = doc.getString("calleeName") ?: "",
+   903→                callerAvatar = doc.getString("callerAvatar"),
+   904→                calleeAvatar = doc.getString("calleeAvatar"),
+   905→                type = try { CallDirection.valueOf(typeStr) } catch (_: Exception) { CallDirection.OUTGOING },
+   906→                isVideoCall = isVideo,
+   907→                callType = try { com.zixo.app.domain.model.CallTechnology.valueOf(callTechnologyStr) } catch (_: Exception) { com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO },
+   908→                isGroupCall = doc.getBoolean("isGroupCall") ?: false,
+   909→                duration = doc.getLong("duration") ?: 0L,
+   910→                timestamp = doc.getLong("timestamp") ?: 0L,
+   911→                endReason = try { CallEndReason.valueOf(endReasonStr) } catch (_: Exception) { CallEndReason.COMPLETED },
+   912→                threadId = doc.getString("threadId") ?: "",
+   913→                isRead = doc.getBoolean("isRead") ?: false
+   914→            )
+   915→        } catch (e: Exception) {
+   916→            Timber.e(e, "Failed to map CallLogEntry from document: %s", doc.id)
+   917→            null
+   918→        }
+   919→    }
+   920→}
+   921→

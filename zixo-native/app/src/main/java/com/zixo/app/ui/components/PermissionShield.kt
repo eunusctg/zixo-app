@@ -194,7 +194,7 @@ class PermissionShieldState(
     }
 
     /** Marks that a permission request is in progress. */
-    fun setRequesting(requesting: Boolean) {
+    fun updateRequesting(requesting: Boolean) {
         isRequesting = requesting
     }
 
@@ -204,7 +204,7 @@ class PermissionShieldState(
     }
 
     /** Marks that the user has permanently denied a permission (checked "Don't ask again"). */
-    fun setPermanentlyDenied(denied: Boolean) {
+    fun updatePermanentlyDenied(denied: Boolean) {
         isPermanentlyDenied = denied
     }
 
@@ -270,7 +270,7 @@ fun PermissionGate(
     ) { results ->
         val allResultsGranted = results.values.all { it }
         state.updateGroup(requiredPermission, allResultsGranted)
-        state.setRequesting(false)
+        state.updateRequesting(false)
 
         val denied = results.filter { !it.value }.keys.toList()
         state.setDenied(denied)
@@ -278,12 +278,13 @@ fun PermissionGate(
         // Check if any permission was permanently denied
         // (user checked "Don't ask again" and still denied)
         if (!allResultsGranted && denied.isNotEmpty()) {
+            val activity = context as? android.app.Activity
             val permanentlyDenied = denied.any { perm ->
-                !context.shouldShowRequestPermissionRationale(perm) &&
+                activity?.shouldShowRequestPermissionRationale(perm) == false &&
                         ContextCompat.checkSelfPermission(context, perm) !=
                         PackageManager.PERMISSION_GRANTED
             }
-            state.setPermanentlyDenied(permanentlyDenied)
+            state.updatePermanentlyDenied(permanentlyDenied)
         }
 
         onPermissionsResult(allResultsGranted)
@@ -313,14 +314,15 @@ fun PermissionGate(
             isRequesting = state.isRequesting,
             onRequestPermission = {
                 // Check if we should show rationale first
+                val activity = context as? android.app.Activity
                 val shouldShowRationale = requiredPermission.permissions.any { perm ->
-                    context.shouldShowRequestPermissionRationale(perm)
+                    activity?.shouldShowRequestPermissionRationale(perm) == true
                 }
 
                 if (shouldShowRationale) {
                     showRationaleDialog = true
                 } else {
-                    state.setRequesting(true)
+                    state.updateRequesting(true)
                     val ungranted = requiredPermission.ungrantedPermissions(context)
                     if (ungranted.isNotEmpty()) {
                         launcher.launch(ungranted.toTypedArray())
@@ -338,7 +340,7 @@ fun PermissionGate(
                 permissionGroup = requiredPermission,
                 onConfirm = {
                     showRationaleDialog = false
-                    state.setRequesting(true)
+                    state.updateRequesting(true)
                     val ungranted = requiredPermission.ungrantedPermissions(context)
                     if (ungranted.isNotEmpty()) {
                         launcher.launch(ungranted.toTypedArray())
@@ -390,7 +392,7 @@ fun PermissionShield(
     ) { results ->
         val allResultsGranted = results.values.all { it }
         state.updateGroup(requiredPermissions, allResultsGranted)
-        state.setRequesting(false)
+        state.updateRequesting(false)
 
         val denied = results.filter { !it.value }.keys.toList()
         state.setDenied(denied)
@@ -403,7 +405,7 @@ fun PermissionShield(
     } else {
         LaunchedEffect(requiredPermissions) {
             if (!state.isRequesting) {
-                state.setRequesting(true)
+                state.updateRequesting(true)
                 val ungranted = requiredPermissions.ungrantedPermissions(context)
                 if (ungranted.isNotEmpty()) {
                     launcher.launch(ungranted.toTypedArray())

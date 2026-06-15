@@ -66,14 +66,14 @@ class ZixoAudioManager @Inject constructor(
     suspend fun configureForCall(isVideoCall: Boolean) = withContext(Dispatchers.IO) {
         try {
             previousAudioMode = audioManager.mode
-            wasSpeakerOn = audioManager.isSpeakerOn
+            wasSpeakerOn = audioManager.isSpeakerphoneOn
             wasBluetoothScoOn = audioManager.isBluetoothScoOn
 
             audioManager.mode = AndroidAudioManager.MODE_IN_COMMUNICATION
 
             requestAudioFocus()
 
-            audioManager.isSpeakerOn = isVideoCall
+            audioManager.isSpeakerphoneOn = isVideoCall
 
             isInCall = true
             Timber.d("ZixoAudioManager: Configured for %s call, mode=MODE_IN_COMMUNICATION",
@@ -89,7 +89,7 @@ class ZixoAudioManager @Inject constructor(
      */
     fun switchAudioOutput(isSpeakerOn: Boolean) {
         try {
-            audioManager.isSpeakerOn = isSpeakerOn
+            audioManager.isSpeakerphoneOn = isSpeakerOn
             Timber.d("ZixoAudioManager: Audio output switched to %s",
                 if (isSpeakerOn) "speaker" else "earpiece")
         } catch (e: Exception) {
@@ -120,7 +120,7 @@ class ZixoAudioManager @Inject constructor(
             }
 
             audioManager.mode = previousAudioMode
-            audioManager.isSpeakerOn = wasSpeakerOn
+            audioManager.isSpeakerphoneOn = wasSpeakerOn
 
             if (wasBluetoothScoOn) {
                 stopBluetoothSco()

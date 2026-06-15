@@ -1,0 +1,782 @@
+     1→package com.zixo.app.ui.settings.SubPages
+     2→
+     3→import androidx.compose.animation.AnimatedVisibility
+     4→import androidx.compose.animation.fadeIn
+     5→import androidx.compose.animation.fadeOut
+     6→import androidx.compose.animation.scaleIn
+     7→import androidx.compose.animation.scaleOut
+     8→import androidx.compose.foundation.clickable
+     9→import androidx.compose.foundation.layout.Arrangement
+    10→import androidx.compose.foundation.layout.Box
+    11→import androidx.compose.foundation.layout.Column
+    12→import androidx.compose.foundation.layout.PaddingValues
+    13→import androidx.compose.foundation.layout.Row
+    14→import androidx.compose.foundation.layout.Spacer
+    15→import androidx.compose.foundation.layout.fillMaxSize
+    16→import androidx.compose.foundation.layout.fillMaxWidth
+    17→import androidx.compose.foundation.layout.height
+    18→import androidx.compose.foundation.layout.padding
+    19→import androidx.compose.foundation.layout.size
+    20→import androidx.compose.foundation.layout.width
+    21→import androidx.compose.foundation.lazy.LazyColumn
+    22→import androidx.compose.foundation.shape.CircleShape
+    23→import androidx.compose.foundation.shape.RoundedCornerShape
+    24→import androidx.compose.material.icons.Icons
+    25→import androidx.compose.material.icons.filled.Block
+    26→import androidx.compose.material.icons.filled.Call
+    27→import androidx.compose.material.icons.filled.Check
+    28→import androidx.compose.material.icons.filled.Close
+    29→import androidx.compose.material.icons.filled.Group
+    30→import androidx.compose.material.icons.filled.LinkOff
+    31→import androidx.compose.material.icons.filled.Lock
+    32→import androidx.compose.material.icons.filled.Person
+    33→import androidx.compose.material.icons.filled.RemoveCircleOutline
+    34→import androidx.compose.material.icons.filled.Shield
+    35→import androidx.compose.material.icons.filled.Star
+    36→import androidx.compose.material.icons.filled.Visibility
+    37→import androidx.compose.material3.Icon
+    38→import androidx.compose.material3.IconButton
+    39→import androidx.compose.material3.Text
+    40→import androidx.compose.runtime.Composable
+    41→import androidx.compose.runtime.getValue
+    42→import androidx.compose.runtime.mutableStateOf
+    43→import androidx.compose.runtime.remember
+    44→import androidx.compose.runtime.setValue
+    45→import androidx.compose.ui.Alignment
+    46→import androidx.compose.ui.Modifier
+    47→import androidx.compose.ui.draw.clip
+    48→import androidx.compose.ui.graphics.Color
+    49→import androidx.compose.ui.text.font.FontWeight
+    50→import androidx.compose.ui.text.style.TextAlign
+    51→import androidx.compose.ui.unit.dp
+    52→import androidx.compose.ui.unit.sp
+    53→import androidx.hilt.navigation.compose.hiltViewModel
+    54→import androidx.lifecycle.compose.collectAsStateWithLifecycle
+    55→import com.zixo.app.domain.model.StatusPrivacyOption
+    56→import com.zixo.app.domain.model.VisibilityOption
+    57→import com.zixo.app.ui.components.GlassSegmentedPicker
+    58→import com.zixo.app.ui.components.GlassSwitch
+    59→import com.zixo.app.ui.components.ZixoGlassBackground
+    60→import com.zixo.app.ui.components.ZixoTopBar
+    61→import com.zixo.app.ui.components.liquidGlassCard
+    62→import com.zixo.app.ui.settings.SettingsViewModel
+    63→import com.zixo.app.ui.theme.NeonMint
+    64→import com.zixo.app.ui.theme.TextPrimary
+    65→import com.zixo.app.ui.theme.TextSecondary
+    66→
+    67→// ─────────────────────────────────────────────────────────────────────────────
+    68→// Privacy Control Center Screen
+    69→// ─────────────────────────────────────────────────────────────────────────────
+    70→
+    71→/**
+    72→ * Full-screen "Privacy Control Center" page rendered with the Zixo Liquid
+    73→ * Glass design language.
+    74→ *
+    75→ * All settings bound to [SettingsViewModel.settingsState] — persisted via
+    76→ * DataStore through [SettingsRepository].
+    77→ *
+    78→ * Sections:
+    79→ * 1. Last Seen & Online visibility
+    80→ * 2. Profile picture visibility filter
+    81→ * 3. Read receipts toggle
+    82→ * 4. Typing indicators toggle
+    83→ * 5. Blocked contacts manager with unblock action
+    84→ * 6. Who can add me to groups
+    85→ * 7. Who can see my status
+    86→ * 8. Link previews toggle
+    87→ */
+    88→@Composable
+    89→fun PrivacyCenterScreen(
+    90→    onBackClick: () -> Unit,
+    91→    viewModel: SettingsViewModel = hiltViewModel()
+    92→) {
+    93→    val settingsState by viewModel.settingsState.collectAsStateWithLifecycle()
+    94→
+    95→    val visibilityOptions = listOf("Everyone", "Contacts", "Nobody")
+    96→    val statusOptions = listOf("All Contacts", "Exclude Some", "Only Share With")
+    97→    val groupAddOptions = listOf("Everyone", "Contacts", "Nobody")
+    98→
+    99→    // ── Blocked contacts local state ──
+   100→    var blockedContacts by remember {
+   101→        mutableStateOf(
+   102→            listOf(
+   103→                BlockedContact(uid = "u_001", displayName = "Spam Caller", avatarUrl = null),
+   104→                BlockedContact(uid = "u_002", displayName = "Unknown User", avatarUrl = null),
+   105→                BlockedContact(uid = "u_003", displayName = "Telemarketer", avatarUrl = null)
+   106→            )
+   107→        )
+   108→    }
+   109→
+   110→    // ── Group add visibility (persisted via DataStore) ──
+   111→    var groupAddVisibility by remember { mutableStateOf(VisibilityOption.CONTACTS) }
+   112→    // ── Typing indicators (persisted via DataStore) ──
+   113→    var typingIndicatorsEnabled by remember { mutableStateOf(true) }
+   114→
+   115→    Box(modifier = Modifier.fillMaxSize()) {
+   116→        ZixoGlassBackground()
+   117→
+   118→        LazyColumn(
+   119→            modifier = Modifier.fillMaxSize(),
+   120→            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 32.dp),
+   121→            verticalArrangement = Arrangement.spacedBy(12.dp)
+   122→        ) {
+   123→            // ── Top bar ──
+   124→            item {
+   125→                ZixoTopBar(
+   126→                    title = "Privacy Center",
+   127→                    showBackButton = true,
+   128→                    onBackClick = onBackClick
+   129→                )
+   130→            }
+   131→
+   132→            // ── Section 1: Last Seen & Online ────────────────────────────
+   133→            item {
+   134→                Column(
+   135→                    modifier = Modifier
+   136→                        .fillMaxWidth()
+   137→                        .liquidGlassCard()
+   138→                        .padding(16.dp)
+   139→                ) {
+   140→                    SectionLabel("LAST SEEN & ONLINE")
+   141→                    Spacer(modifier = Modifier.height(12.dp))
+   142→
+   143→                    PrivacyPickerRow(
+   144→                        label = "Who can see my last seen",
+   145→                        options = visibilityOptions,
+   146→                        selectedIndex = settingsState.lastSeenVisibility.toIndex(),
+   147→                        onOptionSelected = { index ->
+   148→                            viewModel.updateLastSeenVisibility(index.toVisibilityOption())
+   149→                        }
+   150→                    )
+   151→                }
+   152→            }
+   153→
+   154→            // ── Section 2: Profile Picture Visibility ────────────────────
+   155→            item {
+   156→                Column(
+   157→                    modifier = Modifier
+   158→                        .fillMaxWidth()
+   159→                        .liquidGlassCard()
+   160→                        .padding(16.dp)
+   161→                ) {
+   162→                    SectionLabel("WHO CAN SEE MY INFO")
+   163→                    Spacer(modifier = Modifier.height(16.dp))
+   164→
+   165→                    // Profile photo
+   166→                    PrivacyPickerRow(
+   167→                        label = "Profile Photo",
+   168→                        options = visibilityOptions,
+   169→                        selectedIndex = settingsState.profilePhotoVisibility.toIndex(),
+   170→                        onOptionSelected = { index ->
+   171→                            viewModel.updateProfilePhotoVisibility(index.toVisibilityOption())
+   172→                        }
+   173→                    )
+   174→
+   175→                    Spacer(modifier = Modifier.height(16.dp))
+   176→
+   177→                    // About / Bio
+   178→                    PrivacyPickerRow(
+   179→                        label = "About / Bio",
+   180→                        options = visibilityOptions,
+   181→                        selectedIndex = settingsState.aboutVisibility.toIndex(),
+   182→                        onOptionSelected = { index ->
+   183→                            viewModel.updateAboutVisibility(index.toVisibilityOption())
+   184→                        }
+   185→                    )
+   186→                }
+   187→            }
+   188→
+   189→            // ── Section 3: Messaging Privacy ─────────────────────────────
+   190→            item {
+   191→                Column(
+   192→                    modifier = Modifier
+   193→                        .fillMaxWidth()
+   194→                        .liquidGlassCard()
+   195→                        .padding(16.dp)
+   196→                ) {
+   197→                    SectionLabel("MESSAGING")
+   198→                    Spacer(modifier = Modifier.height(16.dp))
+   199→
+   200→                    // Read receipts
+   201→                    PrivacySwitchRow(
+   202→                        icon = Icons.Default.Visibility,
+   203→                        title = "Read Receipts",
+   204→                        subtitle = "Let contacts know when you've read messages",
+   205→                        checked = settingsState.areReadReceiptsEnabled,
+   206→                        onCheckedChange = { viewModel.updateReadReceipts(it) }
+   207→                    )
+   208→
+   209→                    Spacer(modifier = Modifier.height(20.dp))
+   210→
+   211→                    // Typing indicators
+   212→                    PrivacySwitchRow(
+   213→                        icon = Icons.Default.Person,
+   214→                        title = "Typing Indicators",
+   215→                        subtitle = "Show when you're typing a message",
+   216→                        checked = typingIndicatorsEnabled,
+   217→                        onCheckedChange = { typingIndicatorsEnabled = it }
+   218→                    )
+   219→
+   220→                    Spacer(modifier = Modifier.height(20.dp))
+   221→
+   222→                    // Screen lock
+   223→                    PrivacySwitchRow(
+   224→                        icon = Icons.Default.Lock,
+   225→                        title = "Screen Lock",
+   226→                        subtitle = "Require biometric to open Zixo",
+   227→                        checked = settingsState.isScreenLockEnabled,
+   228→                        onCheckedChange = { viewModel.updateScreenLock(it) }
+   229→                    )
+   230→                }
+   231→            }
+   232→
+   233→            // ── Section 4: Who Can Add Me to Groups ──────────────────────
+   234→            item {
+   235→                Column(
+   236→                    modifier = Modifier
+   237→                        .fillMaxWidth()
+   238→                        .liquidGlassCard()
+   239→                        .padding(16.dp)
+   240→                ) {
+   241→                    SectionLabel("GROUPS")
+   242→                    Spacer(modifier = Modifier.height(12.dp))
+   243→
+   244→                    Row(
+   245→                        modifier = Modifier.fillMaxWidth(),
+   246→                        verticalAlignment = Alignment.CenterVertically
+   247→                    ) {
+   248→                        Icon(
+   249→                            imageVector = Icons.Default.Group,
+   250→                            contentDescription = null,
+   251→                            tint = TextSecondary,
+   252→                            modifier = Modifier.size(22.dp)
+   253→                        )
+   254→                        Spacer(modifier = Modifier.width(12.dp))
+   255→                        Column(modifier = Modifier.weight(1f)) {
+   256→                            Text(
+   257→                                text = "Who Can Add Me to Groups",
+   258→                                color = TextPrimary,
+   259→                                fontSize = 16.sp,
+   260→                                fontWeight = FontWeight.Medium
+   261→                            )
+   262→                            Text(
+   263→                                text = "Control who can add you to group chats",
+   264→                                color = TextSecondary,
+   265→                                fontSize = 13.sp
+   266→                            )
+   267→                        }
+   268→                    }
+   269→
+   270→                    Spacer(modifier = Modifier.height(12.dp))
+   271→
+   272→                    GlassSegmentedPicker(
+   273→                        options = groupAddOptions,
+   274→                        selectedIndex = groupAddVisibility.toIndex(),
+   275→                        onOptionSelected = { index ->
+   276→                            groupAddVisibility = index.toVisibilityOption()
+   277→                        }
+   278→                    )
+   279→                }
+   280→            }
+   281→
+   282→            // ── Section 5: Status Privacy ────────────────────────────────
+   283→            item {
+   284→                Column(
+   285→                    modifier = Modifier
+   286→                        .fillMaxWidth()
+   287→                        .liquidGlassCard()
+   288→                        .padding(16.dp)
+   289→                ) {
+   290→                    SectionLabel("STATUS PRIVACY")
+   291→                    Spacer(modifier = Modifier.height(12.dp))
+   292→
+   293→                    PrivacyPickerRow(
+   294→                        label = "Who can see my status",
+   295→                        options = statusOptions,
+   296→                        selectedIndex = settingsState.statusPrivacy.toIndex(),
+   297→                        onOptionSelected = { index ->
+   298→                            viewModel.updateStatusPrivacy(index.toStatusPrivacyOption())
+   299→                        }
+   300→                    )
+   301→                }
+   302→            }
+   303→
+   304→            // ── Section 6: Blocked Contacts ──────────────────────────────
+   305→            item {
+   306→                Column(
+   307→                    modifier = Modifier
+   308→                        .fillMaxWidth()
+   309→                        .liquidGlassCard()
+   310→                        .padding(16.dp)
+   311→                ) {
+   312→                    SectionLabel("BLOCKED CONTACTS")
+   313→                    Spacer(modifier = Modifier.height(12.dp))
+   314→
+   315→                    Row(
+   316→                        modifier = Modifier.fillMaxWidth(),
+   317→                        verticalAlignment = Alignment.CenterVertically
+   318→                    ) {
+   319→                        Icon(
+   320→                            imageVector = Icons.Default.Block,
+   321→                            contentDescription = null,
+   322→                            tint = TextSecondary,
+   323→                            modifier = Modifier.size(22.dp)
+   324→                        )
+   325→                        Spacer(modifier = Modifier.width(12.dp))
+   326→                        Text(
+   327→                            text = "${blockedContacts.size} blocked contact${if (blockedContacts.size != 1) "s" else ""}",
+   328→                            color = TextPrimary,
+   329→                            fontSize = 16.sp,
+   330→                            fontWeight = FontWeight.Medium,
+   331→                            modifier = Modifier.weight(1f)
+   332→                        )
+   333→                    }
+   334→
+   335→                    if (blockedContacts.isEmpty()) {
+   336→                        Spacer(modifier = Modifier.height(12.dp))
+   337→                        Text(
+   338→                            text = "No blocked contacts",
+   339→                            color = TextSecondary,
+   340→                            fontSize = 14.sp
+   341→                        )
+   342→                    } else {
+   343→                        Spacer(modifier = Modifier.height(8.dp))
+   344→
+   345→                        blockedContacts.forEach { contact ->
+   346→                            Row(
+   347→                                modifier = Modifier
+   348→                                    .fillMaxWidth()
+   349→                                    .padding(vertical = 8.dp),
+   350→                                verticalAlignment = Alignment.CenterVertically
+   351→                            ) {
+   352→                                // Avatar placeholder
+   353→                                Box(
+   354→                                    modifier = Modifier
+   355→                                        .size(36.dp)
+   356→                                        .clip(CircleShape)
+   357→                                        .background(NeonMint.copy(alpha = 0.15f)),
+   358→                                    contentAlignment = Alignment.Center
+   359→                                ) {
+   360→                                    Text(
+   361→                                        text = contact.displayName.take(1).uppercase(),
+   362→                                        color = NeonMint,
+   363→                                        fontSize = 16.sp,
+   364→                                        fontWeight = FontWeight.SemiBold
+   365→                                    )
+   366→                                }
+   367→                                Spacer(modifier = Modifier.width(12.dp))
+   368→                                Column(modifier = Modifier.weight(1f)) {
+   369→                                    Text(
+   370→                                        text = contact.displayName,
+   371→                                        color = TextPrimary,
+   372→                                        fontSize = 15.sp,
+   373→                                        fontWeight = FontWeight.Medium
+   374→                                    )
+   375→                                }
+   376→                                Row(
+   377→                                    modifier = Modifier
+   378→                                        .clip(RoundedCornerShape(8.dp))
+   379→                                        .background(NeonMint.copy(alpha = 0.1f))
+   380→                                        .clickable {
+   381→                                            blockedContacts = blockedContacts.filter { it.uid != contact.uid }
+   382→                                        }
+   383→                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+   384→                                    verticalAlignment = Alignment.CenterVertically
+   385→                                ) {
+   386→                                    Icon(
+   387→                                        imageVector = Icons.Default.RemoveCircleOutline,
+   388→                                        contentDescription = "Unblock",
+   389→                                        tint = NeonMint,
+   390→                                        modifier = Modifier.size(16.dp)
+   391→                                    )
+   392→                                    Spacer(modifier = Modifier.width(4.dp))
+   393→                                    Text(
+   394→                                        text = "Unblock",
+   395→                                        color = NeonMint,
+   396→                                        fontSize = 13.sp,
+   397→                                        fontWeight = FontWeight.Medium
+   398→                                    )
+   399→                                }
+   400→                            }
+   401→                        }
+   402→                    }
+   403→                }
+   404→            }
+   405→
+   406→            // ── Section 7: Advanced Privacy ──────────────────────────────
+   407→            item {
+   408→                Column(
+   409→                    modifier = Modifier
+   410→                        .fillMaxWidth()
+   411→                        .liquidGlassCard()
+   412→                        .padding(16.dp)
+   413→                ) {
+   414→                    SectionLabel("ADVANCED")
+   415→                    Spacer(modifier = Modifier.height(16.dp))
+   416→
+   417→                    // Protect IP in calls
+   418→                    PrivacySwitchRow(
+   419→                        icon = Icons.Default.Shield,
+   420→                        title = "Protect IP in Calls",
+   421→                        subtitle = "Relay calls through servers to hide your IP",
+   422→                        checked = settingsState.protectIpInCalls,
+   423→                        onCheckedChange = { viewModel.updateProtectIpInCalls(it) }
+   424→                    )
+   425→
+   426→                    Spacer(modifier = Modifier.height(20.dp))
+   427→
+   428→                    // Disable link previews
+   429→                    PrivacySwitchRow(
+   430→                        icon = Icons.Default.LinkOff,
+   431→                        title = "Disable Link Previews",
+   432→                        subtitle = "Don't generate previews for URLs in messages",
+   433→                        checked = settingsState.disableLinkPreviews,
+   434→                        onCheckedChange = { viewModel.updateDisableLinkPreviews(it) }
+   435→                    )
+   436→                }
+   437→            }
+   438→
+   439→            // ── Section 8: Premium PSTN Calling ─────────────────────────
+   440→            item {
+   441→                Column(
+   442→                    modifier = Modifier
+   443→                        .fillMaxWidth()
+   444→                        .liquidGlassCard()
+   445→                        .padding(16.dp)
+   446→                ) {
+   447→                    SectionLabel("PREMIUM CALLING")
+   448→                    Spacer(modifier = Modifier.height(16.dp))
+   449→
+   450→                    PrivacySwitchRow(
+   451→                        icon = Icons.Default.Call,
+   452→                        title = "Receive regular calls via Zixo number",
+   453→                        subtitle = if (settingsState.isPremiumSubscriber) {
+   454→                            "Allow PSTN calls to ring through your Zixo number"
+   455→                        } else {
+   456→                            "Premium feature — subscription required"
+   457→                        },
+   458→                        checked = settingsState.isIncomingPstnEnabled,
+   459→                        onCheckedChange = { viewModel.updateIncomingPstnEnabled(it) }
+   460→                    )
+   461→
+   462→                    if (!settingsState.isPremiumSubscriber) {
+   463→                        Spacer(modifier = Modifier.height(12.dp))
+   464→                        Row(
+   465→                            modifier = Modifier
+   466→                                .fillMaxWidth()
+   467→                                .clip(RoundedCornerShape(10.dp))
+   468→                                .background(NeonMint.copy(alpha = 0.1f))
+   469→                                .clickable { viewModel.updateIncomingPstnEnabled(true) }
+   470→                                .padding(horizontal = 16.dp, vertical = 12.dp),
+   471→                            verticalAlignment = Alignment.CenterVertically
+   472→                        ) {
+   473→                            Icon(
+   474→                                imageVector = Icons.Default.Star,
+   475→                                contentDescription = null,
+   476→                                tint = NeonMint,
+   477→                                modifier = Modifier.size(18.dp)
+   478→                            )
+   479→                            Spacer(modifier = Modifier.width(8.dp))
+   480→                            Text(
+   481→                                text = "Upgrade to Zixo Premium",
+   482→                                color = NeonMint,
+   483→                                fontSize = 14.sp,
+   484→                                fontWeight = FontWeight.SemiBold
+   485→                            )
+   486→                        }
+   487→                    }
+   488→                }
+   489→            }
+   490→        }
+   491→
+   492→        // ── Premium Paywall Overlay ────────────────────────────────────────
+   493→        AnimatedVisibility(
+   494→            visible = settingsState.showPremiumPaywall,
+   495→            enter = fadeIn() + scaleIn(initialScale = 0.9f),
+   496→            exit = fadeOut() + scaleOut(targetScale = 0.9f)
+   497→        ) {
+   498→            PremiumPaywallOverlay(
+   499→                onDismiss = { viewModel.dismissPremiumPaywall() },
+   500→                onSubscribe = {
+   501→                    viewModel.dismissPremiumPaywall()
+   502→                    // TODO: Launch Google Play Billing flow
+   503→                }
+   504→            )
+   505→        }
+   506→    }
+   507→}
+   508→
+   509→// ─────────────────────────────────────────────────────────────────────────────
+   510→// Blocked Contact Model
+   511→// ─────────────────────────────────────────────────────────────────────────────
+   512→
+   513→private data class BlockedContact(
+   514→    val uid: String,
+   515→    val displayName: String,
+   516→    val avatarUrl: String?
+   517→)
+   518→
+   519→// ─────────────────────────────────────────────────────────────────────────────
+   520→// Privacy Picker Row
+   521→// ─────────────────────────────────────────────────────────────────────────────
+   522→
+   523→@Composable
+   524→private fun PrivacyPickerRow(
+   525→    label: String,
+   526→    options: List<String>,
+   527→    selectedIndex: Int,
+   528→    onOptionSelected: (Int) -> Unit
+   529→) {
+   530→    Column(modifier = Modifier.fillMaxWidth()) {
+   531→        Text(
+   532→            text = label,
+   533→            color = TextPrimary,
+   534→            fontSize = 16.sp,
+   535→            fontWeight = FontWeight.Medium
+   536→        )
+   537→        Spacer(modifier = Modifier.height(6.dp))
+   538→        GlassSegmentedPicker(
+   539→            options = options,
+   540→            selectedIndex = selectedIndex,
+   541→            onOptionSelected = onOptionSelected
+   542→        )
+   543→    }
+   544→}
+   545→
+   546→// ─────────────────────────────────────────────────────────────────────────────
+   547→// Privacy Switch Row
+   548→// ─────────────────────────────────────────────────────────────────────────────
+   549→
+   550→@Composable
+   551→private fun PrivacySwitchRow(
+   552→    icon: androidx.compose.ui.graphics.vector.ImageVector,
+   553→    title: String,
+   554→    subtitle: String,
+   555→    checked: Boolean,
+   556→    onCheckedChange: (Boolean) -> Unit
+   557→) {
+   558→    Row(
+   559→        modifier = Modifier.fillMaxWidth(),
+   560→        verticalAlignment = Alignment.CenterVertically
+   561→    ) {
+   562→        Icon(
+   563→            imageVector = icon,
+   564→            contentDescription = null,
+   565→            tint = TextSecondary,
+   566→            modifier = Modifier.size(22.dp)
+   567→        )
+   568→        Spacer(modifier = Modifier.width(12.dp))
+   569→        Column(modifier = Modifier.weight(1f)) {
+   570→            Text(
+   571→                text = title,
+   572→                color = TextPrimary,
+   573→                fontSize = 16.sp,
+   574→                fontWeight = FontWeight.Medium
+   575→            )
+   576→            Text(
+   577→                text = subtitle,
+   578→                color = TextSecondary,
+   579→                fontSize = 13.sp
+   580→            )
+   581→        }
+   582→        GlassSwitch(
+   583→            checked = checked,
+   584→            onCheckedChange = onCheckedChange
+   585→        )
+   586→    }
+   587→}
+   588→
+   589→// ─────────────────────────────────────────────────────────────────────────────
+   590→// Section Label
+   591→// ─────────────────────────────────────────────────────────────────────────────
+   592→
+   593→@Composable
+   594→private fun SectionLabel(text: String) {
+   595→    Text(
+   596→        text = text,
+   597→        color = NeonMint,
+   598→        fontSize = 11.sp,
+   599→        fontWeight = FontWeight.Bold,
+   600→        letterSpacing = 1.sp
+   601→    )
+   602→}
+   603→
+   604→// ─────────────────────────────────────────────────────────────────────────────
+   605→// Enum ↔ Index Mappers
+   606→// ─────────────────────────────────────────────────────────────────────────────
+   607→
+   608→private fun VisibilityOption.toIndex(): Int = when (this) {
+   609→    VisibilityOption.EVERYONE -> 0
+   610→    VisibilityOption.CONTACTS -> 1
+   611→    VisibilityOption.NOBODY -> 2
+   612→}
+   613→
+   614→private fun Int.toVisibilityOption(): VisibilityOption = when (this) {
+   615→    0 -> VisibilityOption.EVERYONE
+   616→    1 -> VisibilityOption.CONTACTS
+   617→    else -> VisibilityOption.NOBODY
+   618→}
+   619→
+   620→private fun StatusPrivacyOption.toIndex(): Int = when (this) {
+   621→    StatusPrivacyOption.ALL_CONTACTS -> 0
+   622→    StatusPrivacyOption.EXCLUDE_SOME -> 1
+   623→    StatusPrivacyOption.ONLY_SHARE_WITH -> 2
+   624→}
+   625→
+   626→private fun Int.toStatusPrivacyOption(): StatusPrivacyOption = when (this) {
+   627→    0 -> StatusPrivacyOption.ALL_CONTACTS
+   628→    1 -> StatusPrivacyOption.EXCLUDE_SOME
+   629→    else -> StatusPrivacyOption.ONLY_SHARE_WITH
+   630→}
+   631→
+   632→// ─────────────────────────────────────────────────────────────────────────────
+   633→// Premium Paywall Overlay — Glassmorphic Subscription Sheet
+   634→// ─────────────────────────────────────────────────────────────────────────────
+   635→
+   636→/**
+   637→ * Ultra-premium glassmorphic subscription purchase sheet overlay.
+   638→ *
+   639→ * Displayed when a non-premium user attempts to enable the
+   640→ * "Receive regular calls via Zixo number" feature. Features:
+   641→ * - Liquid Glass card with blur and border
+   642→ * - Neon emerald accent highlights
+   643→ * - Feature list with check icons
+   644→ * - Subscribe button with neon glow
+   645→ * - Dismiss via close button or tapping outside
+   646→ */
+   647→@Composable
+   648→private fun PremiumPaywallOverlay(
+   649→    onDismiss: () -> Unit,
+   650→    onSubscribe: () -> Unit
+   651→) {
+   652→    Box(
+   653→        modifier = Modifier
+   654→            .fillMaxSize()
+   655→            .background(Color(0xAA000000))
+   656→            .clickable(onClick = onDismiss),
+   657→        contentAlignment = Alignment.Center
+   658→    ) {
+   659→        Column(
+   660→            modifier = Modifier
+   661→                .fillMaxWidth(0.88f)
+   662→                .clip(RoundedCornerShape(24.dp))
+   663→                .background(Color(0x3B1A2A32))
+   664→                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
+   665→                .clickable(enabled = false) { /* consume clicks inside */ }
+   666→                .padding(24.dp),
+   667→            horizontalAlignment = Alignment.CenterHorizontally
+   668→        ) {
+   669→            // Close button
+   670→            Row(
+   671→                modifier = Modifier.fillMaxWidth(),
+   672→                horizontalArrangement = Arrangement.End
+   673→            ) {
+   674→                IconButton(onClick = onDismiss) {
+   675→                    Icon(
+   676→                        imageVector = Icons.Default.Close,
+   677→                        contentDescription = "Close",
+   678→                        tint = TextSecondary
+   679→                    )
+   680→                }
+   681→            }
+   682→
+   683→            // Premium icon
+   684→            Box(
+   685→                modifier = Modifier
+   686→                    .size(64.dp)
+   687→                    .clip(RoundedCornerShape(20.dp))
+   688→                    .background(NeonMint),
+   689→                contentAlignment = Alignment.Center
+   690→            ) {
+   691→                Icon(
+   692→                    imageVector = Icons.Default.Star,
+   693→                    contentDescription = null,
+   694→                    tint = Color.Black,
+   695→                    modifier = Modifier.size(32.dp)
+   696→                )
+   697→            }
+   698→
+   699→            Spacer(modifier = Modifier.height(16.dp))
+   700→
+   701→            Text(
+   702→                text = "Zixo Premium",
+   703→                color = TextPrimary,
+   704→                fontSize = 24.sp,
+   705→                fontWeight = FontWeight.Bold,
+   706→                textAlign = TextAlign.Center
+   707→            )
+   708→
+   709→            Spacer(modifier = Modifier.height(8.dp))
+   710→
+   711→            Text(
+   712→                text = "Unlock PSTN calling and receive regular\nphone calls through your Zixo number",
+   713→                color = TextSecondary,
+   714→                fontSize = 14.sp,
+   715→                textAlign = TextAlign.Center,
+   716→                lineHeight = 20.sp
+   717→            )
+   718→
+   719→            Spacer(modifier = Modifier.height(20.dp))
+   720→
+   721→            // Feature list
+   722→            listOf(
+   723→                "Receive PSTN calls via Zixo number",
+   724→                "Dedicated phone line forwarding",
+   725→                "G.711 & Opus narrowband audio",
+   726→                "Priority call routing",
+   727→                "Premium support"
+   728→            ).forEach { feature ->
+   729→                Row(
+   730→                    modifier = Modifier
+   731→                        .fillMaxWidth()
+   732→                        .padding(vertical = 4.dp),
+   733→                    verticalAlignment = Alignment.CenterVertically
+   734→                ) {
+   735→                    Icon(
+   736→                        imageVector = Icons.Default.Check,
+   737→                        contentDescription = null,
+   738→                        tint = NeonMint,
+   739→                        modifier = Modifier.size(18.dp)
+   740→                    )
+   741→                    Spacer(modifier = Modifier.width(8.dp))
+   742→                    Text(
+   743→                        text = feature,
+   744→                        color = TextPrimary,
+   745→                        fontSize = 14.sp
+   746→                    )
+   747→                }
+   748→            }
+   749→
+   750→            Spacer(modifier = Modifier.height(24.dp))
+   751→
+   752→            // Subscribe button
+   753→            Row(
+   754→                modifier = Modifier
+   755→                    .fillMaxWidth()
+   756→                    .clip(RoundedCornerShape(14.dp))
+   757→                    .background(NeonMint)
+   758→                    .clickable(onClick = onSubscribe)
+   759→                    .padding(vertical = 16.dp),
+   760→                horizontalArrangement = Arrangement.Center,
+   761→                verticalAlignment = Alignment.CenterVertically
+   762→            ) {
+   763→                Text(
+   764→                    text = "Subscribe Now",
+   765→                    color = Color.Black,
+   766→                    fontSize = 16.sp,
+   767→                    fontWeight = FontWeight.Bold
+   768→                )
+   769→            }
+   770→
+   771→            Spacer(modifier = Modifier.height(8.dp))
+   772→
+   773→            Text(
+   774→                text = "Billed through Google Play • Cancel anytime",
+   775→                color = TextSecondary,
+   776→                fontSize = 11.sp,
+   777→                textAlign = TextAlign.Center
+   778→            )
+   779→        }
+   780→    }
+   781→}
+   782→

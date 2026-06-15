@@ -63,6 +63,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -436,5 +437,5 @@ fun AuthScreen(
 
 // ── Offset helper (suppressed - used for blob positioning) ──────
 @Suppress("unused")
-private fun Modifier.offset(x: Int = 0, y: Int = 0): Modifier =
-    this.then(Modifier.padding(start = x.dp, top = y.dp))
+private fun Modifier.offset(x: Dp = 0.dp, y: Dp = 0.dp): Modifier =
+    this.then(Modifier.padding(start = x, top = y))

@@ -78,10 +78,7 @@ data class PasskeyCredentialDescriptor(
 @Serializable
 data class VerifyPasskeyRequest(
     val uid: String,
-    val credentialId: String,
-    val authenticatorData: String,
-    val clientDataJSON: String,
-    val signature: String
+    val registrationResponseJson: String
 )
 
 @Serializable
@@ -145,7 +142,7 @@ class CloudflareApiService @Inject constructor(
      * The backend validates the token with Google and returns user info
      * including the system-minted username and Zixo Number.
      */
-    fun verifyGoogleToken(idToken: String): VerifyGoogleTokenResponse {
+    suspend fun verifyGoogleToken(idToken: String): VerifyGoogleTokenResponse {
         return try {
             api.verifyGoogleToken(authHeader(), VerifyGoogleTokenRequest(idToken = idToken))
         } catch (e: Exception) {
@@ -188,20 +185,14 @@ class CloudflareApiService @Inject constructor(
      * Verify a passkey registration with the Cloudflare backend.
      * Called after CredentialManager successfully creates a passkey credential.
      */
-    fun verifyPasskeyRegistration(
-        credentialId: String,
-        authenticatorData: String,
-        clientDataJSON: String,
-        signature: String
+    suspend fun verifyPasskeyRegistration(
+        uid: String,
+        registrationResponseJson: String
     ): VerifyPasskeyResponse {
-        val uid = "" // Will be populated from auth state in the repository
         return try {
             val request = VerifyPasskeyRequest(
                 uid = uid,
-                credentialId = credentialId,
-                authenticatorData = authenticatorData,
-                clientDataJSON = clientDataJSON,
-                signature = signature
+                registrationResponseJson = registrationResponseJson
             )
             api.verifyPasskeyRegistration(authHeader(), request)
         } catch (e: Exception) {

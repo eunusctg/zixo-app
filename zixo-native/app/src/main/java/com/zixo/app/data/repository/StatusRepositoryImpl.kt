@@ -96,10 +96,10 @@ class StatusRepositoryImpl @Inject constructor(
 
     // ── Get Contact Statuses ──────────────────────────────────────────────────
 
-    override fun getContactStatuses(): Flow<List<StatusGroupModel>> = callbackFlow {
+    override fun getContactStatuses(): Flow<List<StatusGroupModel>> = callbackFlow<StatusFeedData?> {
         val myUid = currentUid
         if (myUid == null) {
-            trySend(emptyList())
+            trySend(null)
             close()
             return@callbackFlow
         }
@@ -109,7 +109,7 @@ class StatusRepositoryImpl @Inject constructor(
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Timber.e(error, "Error observing status feed")
-                    trySend(emptyList())
+                    trySend(null)
                     return@addSnapshotListener
                 }
 

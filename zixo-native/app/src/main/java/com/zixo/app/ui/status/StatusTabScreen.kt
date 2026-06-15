@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -83,8 +84,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.zixo.app.domain.model.StatusContentType
 import com.zixo.app.domain.model.StatusGroupModel
 import com.zixo.app.domain.model.StatusModel
@@ -1091,12 +1093,16 @@ private fun TextStatusComposer(
             // Separator
             item {
                 Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(24.dp)
-                        .background(GlassBorder)
-                        .align(Alignment.CenterVertically)
-                )
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(24.dp)
+                            .background(GlassBorder)
+                    )
+                }
             }
 
             // 3D Emoji options
@@ -1720,4 +1726,4 @@ private fun parseHexColor(hex: String): Color {
 }
 
 private val DestructiveText = Color(0xFFFF5252)
-private fun Modifier.zIndex(z: Float): Modifier = this.graphicsLayer { translationZ = z }
+private fun Modifier.zIndex(z: Float): Modifier = this.graphicsLayer { shadowElevation = z }

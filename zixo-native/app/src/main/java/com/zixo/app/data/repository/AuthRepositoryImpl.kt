@@ -1,16 +1,17 @@
 package com.zixo.app.data.repository
 
-import android.credentials.CreatePublicKeyCredentialResponse
 import com.zixo.app.data.remote.cloudflare.CloudflareApiService
 import com.zixo.app.data.remote.firebase.FirebaseAuthService
 import com.zixo.app.data.remote.firebase.FirestoreService
-import com.zixo.app.domain.model.AuthResult
-import com.zixo.app.domain.model.AuthState
+import com.zixo.app.domain.repository.AuthResult
+import com.zixo.app.domain.repository.AuthState
 import com.zixo.app.domain.model.User
 import com.zixo.app.domain.repository.AuthRepository
+import com.google.firebase.auth.AuthResult as FirebaseAuthResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
@@ -51,8 +52,8 @@ class AuthRepositoryImpl @Inject constructor(
             }
 
             // Authenticate with Firebase using the verified credential
-            val authResult = firebaseAuthService.signInWithGoogle(idToken)
-            val firebaseUser = authResult.user
+            val firebaseResult: FirebaseAuthResult = firebaseAuthService.signInWithGoogle(idToken).first()
+            val firebaseUser = firebaseResult.user
                 ?: throw IllegalStateException("Authentication succeeded but user is null")
 
             // Fetch or create the user profile in Firestore
@@ -83,7 +84,7 @@ class AuthRepositoryImpl @Inject constructor(
 
     // ── WebAuthn Passkey ──────────────────────────────────────────────────────
 
-    override fun registerPasskeyWithBackend(response: CreatePublicKeyCredentialResponse): Flow<AuthResult> = flow {
+    override fun registerPasskeyWithBackend(registrationResponseJson: String): Flow<AuthResult> = flow {
         emit(AuthResult.Loading)
         try {
             val currentUser = cachedUser
@@ -91,10 +92,8 @@ class AuthRepositoryImpl @Inject constructor(
 
             // Verify the passkey registration with Cloudflare backend
             val verifyResponse = cloudflareApiService.verifyPasskeyRegistration(
-                credentialId = response.credentialId,
-                authenticatorData = response.authenticatorData,
-                clientDataJSON = response.clientDataJSON,
-                signature = response.signature
+                uid = currentUser.uid,
+                registrationResponseJson = registrationResponseJson
             )
 
             if (!verifyResponse.verified) {

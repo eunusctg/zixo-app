@@ -2,6 +2,7 @@ package com.zixo.app.ui.screens.chats
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -74,7 +75,8 @@ fun ChatsScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
-    ZixoGlassBackground {
+    Box(modifier = Modifier.fillMaxSize()) {
+        ZixoGlassBackground()
         Column(modifier = Modifier.fillMaxSize()) {
             // ── Search Bar ─────────────────────────────
             SearchBar(
@@ -175,8 +177,8 @@ private fun ThreadItem(
         val displayName = getThreadDisplayName(thread)
 
         AvatarComponent(
-            avatarUrl = avatarUrl,
-            displayName = displayName,
+            imageUrl = avatarUrl,
+            name = displayName,
             size = 48.dp,
             isOnline = thread.participantProfiles.values.any { it.isOnline }
         )
@@ -311,7 +313,3 @@ private fun formatTimestamp(timestamp: Long): String {
     }
 }
 
-private fun Modifier.background(color: androidx.compose.ui.graphics.Color) =
-    this.then(androidx.compose.foundation.background(color))
-
-import androidx.compose.foundation.background

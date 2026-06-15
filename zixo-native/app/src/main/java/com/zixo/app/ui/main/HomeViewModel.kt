@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -67,18 +68,23 @@ class HomeViewModel @Inject constructor(
     private fun loadCurrentUser() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                authRepository.getCurrentUser().fold(
-                    onSuccess = { profile ->
-                        _uiState.update { it.copy(currentUser = profile, isLoading = false) }
-                        Timber.d("HomeViewModel: Current user loaded — %s", profile.displayName)
-                    },
-                    onFailure = { error ->
-                        Timber.e(error, "HomeViewModel: Failed to load current user")
-                        _uiState.update { it.copy(isLoading = false, error = error.localizedMessage) }
-                    }
-                )
+                val user = authRepository.getCurrentUser().first()
+                val profile = user?.let {
+                    UserProfile(
+                        displayName = it.displayName,
+                        username = it.username,
+                        zixoNumber = it.zixoNumber,
+                        avatarUrl = it.photoUrl ?: "",
+                        bio = it.bio ?: "",
+                        phoneNumber = it.phoneNumber ?: ""
+                    )
+                }
+                _uiState.update { it.copy(currentUser = profile, isLoading = false) }
+                if (profile != null) {
+                    Timber.d("HomeViewModel: Current user loaded — %s", profile.displayName)
+                }
             } catch (e: Exception) {
-                Timber.e(e, "HomeViewModel: Unhandled error loading user")
+                Timber.e(e, "HomeViewModel: Failed to load current user")
                 _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
             }
         }

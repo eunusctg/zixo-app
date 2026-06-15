@@ -9,11 +9,12 @@ import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
-import com.zixo.app.domain.model.AuthResult
+import com.zixo.app.domain.repository.AuthResult
 import com.zixo.app.domain.repository.AuthRepository
 import com.zixo.app.domain.repository.AuthState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,6 +22,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -86,6 +89,7 @@ class AuthViewModel @Inject constructor(
      * Used by the navigation layer to determine if the user is authenticated.
      */
     val authState: StateFlow<AuthState> = authRepository.observeAuthState()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AuthState.Unauthenticated)
 
     // ── Google Sign-In ────────────────────────────────────────────────────────
 
@@ -106,7 +110,7 @@ class AuthViewModel @Inject constructor(
             try {
                 val credentialManager = CredentialManager.create(activity)
 
-                val googleIdOption = com.google.android.libraries.identity.googleid.GoogleIdTokenCredentialOptions.Builder()
+                val googleIdOption = GetGoogleIdOption.Builder()
                     .setFilterByAuthorizedAccounts(false)
                     .setServerClientId("809372450511-lqm5bvb2m2us2av2qc2t6c0hva3gq5fm.apps.googleusercontent.com")
                     .build()

@@ -3,9 +3,9 @@ package com.zixo.app.ui.chat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.zixo.app.domain.model.CallState
-import com.zixo.app.domain.model.Message
-import com.zixo.app.domain.model.MessageType
+import com.zixo.app.domain.model.MessageContentType
+import com.zixo.app.domain.model.MessageModel
+import com.zixo.app.domain.model.ParticipantRole
 import com.zixo.app.domain.repository.ChatRepository
 import com.zixo.app.domain.repository.ContactRepository
 import com.zixo.app.domain.usecase.SendMessageUseCase
@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -47,7 +48,7 @@ class GroupChatViewModel @Inject constructor(
 
     data class GroupChatUiState(
         val chatId: String = "",
-        val messages: List<Message> = emptyList(),
+        val messages: List<MessageModel> = emptyList(),
         val groupName: String = "",
         val groupDescription: String = "",
         val groupAvatarUrl: String = "",
@@ -80,25 +81,27 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _uiState.update { it.copy(isLoading = true) }
-                val chatThread = chatRepository.getChatThread(chatId)
-                chatThread.fold(
-                    onSuccess = { thread ->
-                        _uiState.update { state ->
-                            state.copy(
-                                groupName = thread.name ?: "Group Chat",
-                                groupDescription = thread.description ?: "",
-                                groupAvatarUrl = thread.avatarUrl ?: "",
-                                isMuted = thread.isMuted,
-                                isLoading = false
-                            )
-                        }
-                        Timber.d("GroupChatViewModel: Group details loaded — %s", thread.name)
-                    },
-                    onFailure = { error ->
+                chatRepository.getChatThread(chatId)
+                    .catch { error ->
                         Timber.e(error, "GroupChatViewModel: Failed to load group details")
                         _uiState.update { it.copy(isLoading = false, error = error.localizedMessage) }
                     }
-                )
+                    .collect { thread ->
+                        if (thread != null) {
+                            _uiState.update { state ->
+                                state.copy(
+                                    groupName = thread.groupName ?: "Group Chat",
+                                    groupDescription = thread.groupDescription ?: "",
+                                    groupAvatarUrl = thread.groupAvatarUrl ?: "",
+                                    isMuted = thread.isMuted,
+                                    isLoading = false
+                                )
+                            }
+                            Timber.d("GroupChatViewModel: Group details loaded — %s", thread.groupName)
+                        } else {
+                            _uiState.update { it.copy(isLoading = false, error = "Group not found") }
+                        }
+                    }
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Unhandled error loading group")
                 _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
@@ -109,24 +112,29 @@ class GroupChatViewModel @Inject constructor(
     fun loadMembers(chatId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val membersList = chatRepository.getGroupMembers(chatId).getOrElse { emptyList() }
-                val memberInfos = membersList.map { member ->
-                    GroupMemberInfo(
-                        uid = member.uid,
-                        displayName = member.displayName,
-                        avatarUrl = member.avatarUrl,
-                        isAdmin = member.role == "admin",
-                        isOnline = member.isOnline,
-                        joinedAt = member.joinedAt
-                    )
-                }
-                _uiState.update { state ->
-                    state.copy(
-                        members = memberInfos,
-                        memberCount = memberInfos.size
-                    )
-                }
-                Timber.d("GroupChatViewModel: Loaded %d members", memberInfos.size)
+                chatRepository.getGroupMembers(chatId)
+                    .catch { error ->
+                        Timber.e(error, "GroupChatViewModel: Failed to load members")
+                    }
+                    .collect { membersList ->
+                        val memberInfos = membersList.map { member ->
+                            GroupMemberInfo(
+                                uid = member.uid,
+                                displayName = member.displayName,
+                                avatarUrl = member.avatarUrl,
+                                isAdmin = member.role == ParticipantRole.ADMIN,
+                                isOnline = member.isOnline,
+                                joinedAt = member.joinedAt
+                            )
+                        }
+                        _uiState.update { state ->
+                            state.copy(
+                                members = memberInfos,
+                                memberCount = memberInfos.size
+                            )
+                        }
+                        Timber.d("GroupChatViewModel: Loaded %d members", memberInfos.size)
+                    }
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to load members")
             }
@@ -145,13 +153,28 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
-    fun sendMessage(content: String, type: MessageType = MessageType.TEXT) {
+    fun sendMessage(content: String, type: MessageContentType = MessageContentType.TEXT) {
         val chatId = _uiState.value.chatId
         if (chatId.isEmpty() || content.isBlank()) return
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                sendMessageUseCase(chatId, content, type)
+                val message = MessageModel(
+                    threadId = chatId,
+                    content = content,
+                    type = type
+                )
+                chatRepository.sendMessage(chatId, message)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to send message")
+                        _uiState.update { it.copy(error = e.localizedMessage) }
+                    }
+                    .collect { result ->
+                        result.onFailure { e ->
+                            Timber.e(e, "GroupChatViewModel: Failed to send message")
+                            _uiState.update { it.copy(error = e.localizedMessage) }
+                        }
+                    }
                 _messageText.value = ""
                 Timber.d("GroupChatViewModel: Message sent to group %s", chatId)
             } catch (e: Exception) {
@@ -170,6 +193,10 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.updateGroupName(chatId, name)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to update group name")
+                    }
+                    .collect { }
                 _uiState.update { it.copy(groupName = name) }
                 Timber.d("GroupChatViewModel: Group name updated to %s", name)
             } catch (e: Exception) {
@@ -183,6 +210,10 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.updateGroupDescription(chatId, description)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to update description")
+                    }
+                    .collect { }
                 _uiState.update { it.copy(groupDescription = description) }
                 Timber.d("GroupChatViewModel: Group description updated")
             } catch (e: Exception) {
@@ -194,7 +225,11 @@ class GroupChatViewModel @Inject constructor(
     fun promoteToAdmin(userId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                chatRepository.updateMemberRole(_uiState.value.chatId, userId, "admin")
+                chatRepository.updateMemberRole(_uiState.value.chatId, userId, ParticipantRole.ADMIN)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to promote member")
+                    }
+                    .collect { }
                 loadMembers(_uiState.value.chatId)
                 Timber.d("GroupChatViewModel: Promoted %s to admin", userId)
             } catch (e: Exception) {
@@ -206,7 +241,11 @@ class GroupChatViewModel @Inject constructor(
     fun demoteFromAdmin(userId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                chatRepository.updateMemberRole(_uiState.value.chatId, userId, "member")
+                chatRepository.updateMemberRole(_uiState.value.chatId, userId, ParticipantRole.MEMBER)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to demote member")
+                    }
+                    .collect { }
                 loadMembers(_uiState.value.chatId)
                 Timber.d("GroupChatViewModel: Demoted %s from admin", userId)
             } catch (e: Exception) {
@@ -219,6 +258,10 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.removeGroupMember(_uiState.value.chatId, userId)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to remove member")
+                    }
+                    .collect { }
                 loadMembers(_uiState.value.chatId)
                 Timber.d("GroupChatViewModel: Removed member %s", userId)
             } catch (e: Exception) {
@@ -232,6 +275,10 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.leaveGroup(chatId)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to leave group")
+                    }
+                    .collect { }
                 Timber.d("GroupChatViewModel: Left group %s", chatId)
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to leave group")
@@ -244,6 +291,10 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.toggleMuteChat(chatId, isMuted)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Failed to toggle mute")
+                    }
+                    .collect { }
                 _uiState.update { it.copy(isMuted = isMuted) }
                 Timber.d("GroupChatViewModel: Mute toggled to %b", isMuted)
             } catch (e: Exception) {

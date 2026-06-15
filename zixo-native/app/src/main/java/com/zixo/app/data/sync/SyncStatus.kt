@@ -10,17 +10,13 @@ sealed class SyncStatus {
     data object Idle : SyncStatus()
 
     /** A sync operation is in progress with estimated completion percentage. */
-    data class Syncing(val progress: Float) : SyncStatus() {
-        fun isSyncing(): Boolean = true
-    }
+    data class Syncing(val progress: Float) : SyncStatus()
 
     /** Sync completed successfully with a timestamp. */
     data class Completed(val syncedAt: Long) : SyncStatus()
 
     /** Sync encountered a non-recoverable error. */
-    data class Error(val message: String) : SyncStatus() {
-        fun isError(): Boolean = true
-    }
+    data class Error(val message: String) : SyncStatus()
 
     /** One or more conflicts were resolved using server-wins strategy. */
     data class ConflictResolved(val count: Int) : SyncStatus()

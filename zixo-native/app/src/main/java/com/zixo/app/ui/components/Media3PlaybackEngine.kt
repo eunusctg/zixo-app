@@ -6,6 +6,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -150,7 +151,7 @@ fun AudioPlaybackEngine(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0x3B1A2A32), RoundedCornerShape(16.dp))
-            .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+            .glassBorder(1, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
             .padding(12.dp)
     ) {
         Row(
@@ -299,8 +300,8 @@ private fun formatDuration(ms: Long): String {
     return String.format(Locale.getDefault(), "%d:%02d", minutes, remainingSeconds)
 }
 
-private fun Modifier.border(
-    width: dp: Int,
+private fun Modifier.glassBorder(
+    width: Int,
     color: Color,
     shape: RoundedCornerShape
 ): Modifier = this.then(

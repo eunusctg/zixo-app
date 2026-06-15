@@ -197,7 +197,10 @@ private fun Modifier.liquidGlass(
  * ```
  */
 @Composable
-fun ZixoGlassBackground(modifier: Modifier = Modifier) {
+fun ZixoGlassBackground(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit = {}
+) {
     val infiniteTransition = rememberInfiniteTransition(label = "glass_bg_transition")
 
     // ── Blob 1: Mint / Emerald – slow top-left drift ──
@@ -281,8 +284,8 @@ fun ZixoGlassBackground(modifier: Modifier = Modifier) {
         )
 
         // ── Blob 1: Mint / Emerald ──
-        val blob1OffsetX = (blob1X * 0.35f + 0.02f) * widthPx
-        val blob1OffsetY = (blob1Y * 0.30f + 0.02f) * heightPx
+        val blob1OffsetX = widthPx * (blob1X * 0.35f + 0.02f)
+        val blob1OffsetY = heightPx * (blob1Y * 0.30f + 0.02f)
         Box(
             modifier = Modifier
                 .offset(x = blob1OffsetX, y = blob1OffsetY)
@@ -293,8 +296,8 @@ fun ZixoGlassBackground(modifier: Modifier = Modifier) {
         }
 
         // ── Blob 2: Teal / Cyan ──
-        val blob2OffsetX = (blob2X * 0.35f + 0.55f) * widthPx
-        val blob2OffsetY = (blob2Y * 0.30f + 0.50f) * heightPx
+        val blob2OffsetX = widthPx * (blob2X * 0.35f + 0.55f)
+        val blob2OffsetY = heightPx * (blob2Y * 0.30f + 0.50f)
         Box(
             modifier = Modifier
                 .offset(x = blob2OffsetX, y = blob2OffsetY)
@@ -305,8 +308,8 @@ fun ZixoGlassBackground(modifier: Modifier = Modifier) {
         }
 
         // ── Blob 3: Purple / Indigo ──
-        val blob3OffsetX = (blob3X * 0.40f + 0.25f) * widthPx
-        val blob3OffsetY = (blob3Y * 0.35f + 0.25f) * heightPx
+        val blob3OffsetX = widthPx * (blob3X * 0.40f + 0.25f)
+        val blob3OffsetY = heightPx * (blob3Y * 0.35f + 0.25f)
         Box(
             modifier = Modifier
                 .offset(x = blob3OffsetX, y = blob3OffsetY)
@@ -315,6 +318,9 @@ fun ZixoGlassBackground(modifier: Modifier = Modifier) {
         ) {
             BlobCanvas(color = BlobPurpleTint, radiusFraction = 1f)
         }
+
+        // Content rendered on top of the glass background
+        content()
     }
 }
 

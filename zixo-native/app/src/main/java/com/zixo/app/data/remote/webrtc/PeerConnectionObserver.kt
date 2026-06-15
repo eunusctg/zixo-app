@@ -8,6 +8,7 @@ import org.webrtc.IceCandidate
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.RtpReceiver
+import org.webrtc.MediaStreamTrack
 import org.webrtc.RtpTransceiver
 import org.webrtc.VideoTrack
 import timber.log.Timber
@@ -132,7 +133,7 @@ class PeerConnectionObserver : PeerConnection.Observer {
         Timber.d("PeerConnectionObserver: onTrack — mediaType=%s", transceiver.mediaType)
         try {
             val track = transceiver.receiver.track()
-            if (track is VideoTrack && transceiver.mediaType == RtpTransceiver.RtpTransceiverType.VIDEO) {
+            if (track is VideoTrack && transceiver.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) {
                 Timber.d("PeerConnectionObserver: Remote video track added via onTrack")
                 _remoteVideoTrack.value = track
             }

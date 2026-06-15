@@ -481,8 +481,9 @@ fun ChatConfigScreen(
                                     .height(48.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(
-                                        if (color == Color.Transparent) AmoledBlack
-                                        else if (name.contains("Gradient")) {
+                                        if (color == Color.Transparent) {
+                                            Brush.horizontalGradient(listOf(AmoledBlack, AmoledBlack))
+                                        } else if (name.contains("Gradient")) {
                                             Brush.horizontalGradient(
                                                 colors = listOf(NeonMint.copy(alpha = 0.3f), AmoledBlack)
                                             )

@@ -93,6 +93,11 @@ class SettingsViewModel @Inject constructor(
     private val _errorMessage = MutableStateFlow<String?>(null)
     private val _isLoading = MutableStateFlow(false)
 
+    // ── Local overlay state for premium/paywall ──────────────────────────────
+
+    private val _showPremiumPaywall = MutableStateFlow(false)
+    private val _isPremiumSubscriberLocal = MutableStateFlow(false)
+
     // ── Primary settings state ──────────────────────────────────────────────
 
     /**
@@ -102,11 +107,15 @@ class SettingsViewModel @Inject constructor(
     val settingsState: StateFlow<AppSettingsState> = combine(
         settingsRepository.settingsFlow,
         _isLoading,
-        _errorMessage
-    ) { settings, loading, error ->
+        _errorMessage,
+        _showPremiumPaywall,
+        _isPremiumSubscriberLocal
+    ) { settings, loading, error, paywall, isPremium ->
         settings.copy(
             isLoading = loading,
-            errorMessage = error
+            errorMessage = error,
+            showPremiumPaywall = paywall,
+            isPremiumSubscriber = isPremium
         )
     }.catch { throwable ->
         Log.e(TAG, "Fatal error in settingsFlow combine", throwable)
@@ -333,29 +342,23 @@ class SettingsViewModel @Inject constructor(
      */
     fun updateIncomingPstnEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            if (enabled && !_settingsState.value.isPremiumSubscriber) {
+            if (enabled && !_isPremiumSubscriberLocal.value) {
                 // Intercept: freeze toggle, show paywall
-                _settingsState.update { it.copy(showPremiumPaywall = true) }
+                _showPremiumPaywall.value = true
                 return@launch
             }
-            _settingsState.update { it.copy(isIncomingPstnEnabled = enabled) }
             try {
                 settingsRepository.updateIncomingPstnEnabled(enabled)
             } catch (e: Exception) {
                 // Revert on failure
-                _settingsState.update {
-                    it.copy(
-                        isIncomingPstnEnabled = !enabled,
-                        errorMessage = e.localizedMessage ?: "Failed to update PSTN setting"
-                    )
-                }
+                _errorMessage.value = e.localizedMessage ?: "Failed to update PSTN setting"
             }
         }
     }
 
     /** Dismisses the premium subscription paywall overlay. */
     fun dismissPremiumPaywall() {
-        _settingsState.update { it.copy(showPremiumPaywall = false) }
+        _showPremiumPaywall.value = false
     }
 
     /** Simulates a premium subscription check against the server. */
@@ -363,7 +366,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val isPremium = settingsRepository.isPremiumSubscriber()
-                _settingsState.update { it.copy(isPremiumSubscriber = isPremium) }
+                _isPremiumSubscriberLocal.value = isPremium
             } catch (_: Exception) {
                 // Silently handle — defaults to non-premium
             }
@@ -483,7 +486,8 @@ class SettingsViewModel @Inject constructor(
                 val credentialManager = CredentialManager.create(context)
                 val request = CreatePublicKeyCredentialRequest(requestJson = requestJson)
                 val response = credentialManager.createCredential(context, request)
-                authRepository.registerPasskeyWithBackend(response).collect { result ->
+                val registrationJson = (response.data?.getString("androidx.credentials.BUNDLE_KEY_REGISTRATION_RESPONSE_JSON")) ?: ""
+                authRepository.registerPasskeyWithBackend(registrationJson).collect { result ->
                     when (result) {
                         is AuthResult.Success -> {
                             _isPasskeyRegistered.value = true

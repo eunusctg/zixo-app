@@ -41,13 +41,13 @@ interface AuthRepository {
 
     /**
      * Registers a WebAuthn passkey for the currently authenticated user.
-     * The [response] is the result of the CredentialManager create flow,
-     * which is verified against the Cloudflare backend.
+     * The [registrationResponseJson] is the JSON result from the CredentialManager
+     * create flow, which is verified against the Cloudflare backend.
      *
-     * @param response The CreatePublicKeyCredentialResponse from CredentialManager.
+     * @param registrationResponseJson The registration response JSON from CredentialManager.
      * @return A flow emitting [AuthResult] transitions.
      */
-    fun registerPasskeyWithBackend(response: android.credentials.CreatePublicKeyCredentialResponse): Flow<AuthResult>
+    fun registerPasskeyWithBackend(registrationResponseJson: String): Flow<AuthResult>
 
     /**
      * Checks whether the current user has registered a WebAuthn passkey.

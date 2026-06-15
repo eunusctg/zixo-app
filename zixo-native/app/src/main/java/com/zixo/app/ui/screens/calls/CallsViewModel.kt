@@ -124,7 +124,7 @@ class CallsViewModel @Inject constructor(
      */
     fun initiateAudioCall(targetUserId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(activeCallState = CallState.DIALING(targetUserId, false)) }
+            _uiState.update { it.copy(activeCallState = CallState.DIALING(targetUid = targetUserId, isVideoCall = false)) }
             try {
                 initiateCallUseCase.invokeWithVerification(targetUserId, isVideoCall = false)
                     .onSuccess { callState ->
@@ -159,7 +159,7 @@ class CallsViewModel @Inject constructor(
      */
     fun initiateVideoCall(targetUserId: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(activeCallState = CallState.DIALING(targetUserId, true)) }
+            _uiState.update { it.copy(activeCallState = CallState.DIALING(targetUid = targetUserId, isVideoCall = true)) }
             try {
                 initiateCallUseCase.invokeWithVerification(targetUserId, isVideoCall = true)
                     .onSuccess { callState ->

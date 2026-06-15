@@ -1,0 +1,868 @@
+     1→package com.zixo.app.data.remote.webrtc
+     2→
+     3→import android.content.Context
+     4→import android.media.AudioAttributes
+     5→import android.media.AudioFocusRequest
+     6→import android.media.AudioManager
+     7→import android.os.Build
+     8→import kotlinx.coroutines.Dispatchers
+     9→import kotlinx.coroutines.suspendCancellableCoroutine
+    10→import kotlinx.coroutines.withContext
+    11→import org.webrtc.AudioSource
+    12→import org.webrtc.AudioTrack
+    13→import org.webrtc.Camera1Enumerator
+    14→import org.webrtc.Camera2Enumerator
+    15→import org.webrtc.CameraEnumerator
+    16→import org.webrtc.DataChannel
+    17→import org.webrtc.DefaultVideoDecoderFactory
+    18→import org.webrtc.DefaultVideoEncoderFactory
+    19→import org.webrtc.EglBase
+    20→import org.webrtc.IceCandidate
+    21→import org.webrtc.MediaConstraints
+    22→import org.webrtc.MediaStream
+    23→import org.webrtc.PeerConnection
+    24→import org.webrtc.PeerConnectionFactory
+    25→import org.webrtc.RtpReceiver
+    26→import org.webrtc.MediaType
+    27→import org.webrtc.SdpObserver
+    28→import org.webrtc.SessionDescription
+    29→import org.webrtc.SurfaceTextureHelper
+    30→import org.webrtc.SurfaceViewRenderer
+    31→import org.webrtc.VideoCapturer
+    32→import org.webrtc.VideoSource
+    33→import org.webrtc.VideoTrack
+    34→import org.webrtc.CameraVideoCapturer
+    35→import timber.log.Timber
+    36→import javax.inject.Inject
+    37→import javax.inject.Singleton
+    38→import kotlin.coroutines.resume
+    39→import kotlin.coroutines.resumeWithException
+    40→
+    41→/**
+    42→ * Core WebRTC Client — Crash-Proof Pure WebRTC Implementation (NO LiveKit).
+    43→ *
+    44→ * ## Rigid Native WebRTC Processing Guardrails:
+    45→ *
+    46→ * 1. **All Media Isolated on Dispatchers.IO:**
+    47→ *    PeerConnectionFactory, PeerConnection, SDP generation, and ICE candidate
+    48→ *    discovery are handled exclusively on background thread scopes.
+    49→ *    The Android Main Thread is NEVER blocked by WebRTC operations.
+    50→ *
+    51→ * 2. **Mandatory Foreground Service:**
+    52→ *    CallForegroundService (FOREGROUND_SERVICE_TYPE_CAMERA | MICROPHONE | PHONE_CALL)
+    53→ *    wraps every WebRTC session so Android does not terminate media streams
+    54→ *    when the user backgrounds the application.
+    55→ *
+    56→ * 3. **Hardware Acoustic Echo & Routing Calibration:**
+    57→ *    AudioManager.MODE_IN_COMMUNICATION + AudioFocusRequest(USAGE_VOICE_COMMUNICATION)
+    58→ *    eliminates system echo feedback loops and fixes audio routing to
+    59→ *    speakerphone or Bluetooth accessories.
+    60→ *
+    61→ * 4. **EglBase Singleton Scope Preservation:**
+    62→ *    The hardware-accelerated root EglBase context is created ONCE as a
+    63→ *    DI Singleton and NEVER re-initialized on Composable recomposition.
+    64→ *    Re-creating EglBase during recomposition triggers an uncatchable SIGABRT.
+    65→ *    SurfaceViewRenderer instances are wrapped inside AndroidView.
+    66→ *
+    67→ * 5. **Structured try-catch Boundaries:**
+    68→ *    Every WebRTC operation has a precise try-catch boundary preventing
+    69→ *    any native crash from propagating as an unhandled exception.
+    70→ */
+    71→@Singleton
+    72→class WebRtcClient @Inject constructor(
+    73→    private val context: Context
+    74→) {
+    75→
+    76→    // ════════════════════════════════════════════════════════════════
+    77→    // EglBase — DI Singleton, NEVER re-created on recomposition
+    78→    // ════════════════════════════════════════════════════════════════
+    79→
+    80→    /**
+    81→     * The root EglBase instance. Created lazily once and retained for the
+    82→     * entire application lifecycle. Re-creating this on Composable
+    83→     * recomposition triggers an uncatchable SIGABRT crash in the native
+    84→     * WebRTC layer, so it MUST be a singleton.
+    85→     */
+    86→    private val _eglBase: EglBase by lazy {
+    87→        try {
+    88→            EglBase.create().also {
+    89→                Timber.d("EglBase created (singleton)")
+    90→            }
+    91→        } catch (e: Exception) {
+    92→            Timber.e(e, "FATAL: Failed to create EglBase")
+    93→            throw e
+    94→        }
+    95→    }
+    96→
+    97→    val eglBaseContext: EglBase.Context get() = _eglBase.eglBaseContext
+    98→
+    99→    // ════════════════════════════════════════════════════════════════
+   100→    // PeerConnection & Media State
+   101→    // ════════════════════════════════════════════════════════════════
+   102→
+   103→    private var peerConnectionFactory: PeerConnectionFactory? = null
+   104→    private var peerConnection: PeerConnection? = null
+   105→    private var localAudioSource: AudioSource? = null
+   106→    private var localAudioTrack: AudioTrack? = null
+   107→    private var localVideoSource: VideoSource? = null
+   108→    private var localVideoTrack: VideoTrack? = null
+   109→    private var videoCapturer: VideoCapturer? = null
+   110→    private var surfaceTextureHelper: SurfaceTextureHelper? = null
+   111→
+   112→    // Remote video track for rendering in the call overlay
+   113→    private var remoteVideoTrack: VideoTrack? = null
+   114→
+   115→    // Audio focus request for proper audio routing
+   116→    private var audioFocusRequest: AudioFocusRequest? = null
+   117→    private var isAudioFocusHeld = false
+   118→
+   119→    // Call state flags
+   120→    @Volatile private var isMuted = false
+   121→    @Volatile private var isCameraOff = false
+   122→    @Volatile private var isSpeakerOn = false
+   123→
+   124→    // ICE callback for signaling
+   125→    var onIceCandidateGenerated: ((IceCandidate) -> Unit)? = null
+   126→
+   127→    // Remote video track callback for UI rendering
+   128→    var onRemoteVideoTrackAdded: ((VideoTrack) -> Unit)? = null
+   129→
+   130→    // ICE servers for WebRTC connection
+   131→    private val iceServers = listOf(
+   132→        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+   133→        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+   134→        PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
+   135→        PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer(),
+   136→        PeerConnection.IceServer.builder("stun:stun4.l.google.com:19302").createIceServer()
+   137→    )
+   138→
+   139→    // ════════════════════════════════════════════════════════════════
+   140→    // Initialization — Dispatchers.IO Only
+   141→    // ════════════════════════════════════════════════════════════════
+   142→
+   143→    /**
+   144→     * Initializes the PeerConnectionFactory on Dispatchers.IO.
+   145→     * Must be called before any other WebRTC operation.
+   146→     *
+   147→     * This method is idempotent — calling it multiple times is safe.
+   148→     */
+   149→    suspend fun initialize() = withContext(Dispatchers.IO) {
+   150→        if (peerConnectionFactory != null) {
+   151→            Timber.d("PeerConnectionFactory already initialized, skipping")
+   152→            return@withContext
+   153→        }
+   154→
+   155→        try {
+   156→            val initializationOptions = PeerConnectionFactory.InitializationOptions
+   157→                .builder(context.applicationContext)
+   158→                .setEnableInternalTracer(false)
+   159→                .createInitializationOptions()
+   160→
+   161→            PeerConnectionFactory.initialize(initializationOptions)
+   162→
+   163→            val encoderFactory = DefaultVideoEncoderFactory(_eglBase.eglBaseContext, true, true)
+   164→            val decoderFactory = DefaultVideoDecoderFactory(_eglBase.eglBaseContext)
+   165→
+   166→            peerConnectionFactory = PeerConnectionFactory.builder()
+   167→                .setVideoEncoderFactory(encoderFactory)
+   168→                .setVideoDecoderFactory(decoderFactory)
+   169→                .createPeerConnectionFactory()
+   170→
+   171→            Timber.d("PeerConnectionFactory initialized successfully on IO thread")
+   172→        } catch (e: Exception) {
+   173→            Timber.e(e, "CRITICAL: Failed to initialize PeerConnectionFactory")
+   174→            throw e
+   175→        }
+   176→    }
+   177→
+   178→    /**
+   179→     * Creates a PeerConnection with STUN/TURN servers and initializes
+   180→     * local media tracks (audio and optionally video).
+   181→     *
+   182→     * Also configures the hardware audio pipeline:
+   183→     * - AudioManager.MODE_IN_COMMUNICATION
+   184→     * - AudioFocusRequest with USAGE_VOICE_COMMUNICATION
+   185→     *
+   186→     * @param isVideoCall Whether to include video tracks.
+   187→     */
+   188→    suspend fun initializePeerConnection(isVideoCall: Boolean) = withContext(Dispatchers.IO) {
+   189→        try {
+   190→            initialize()
+   191→            disconnect() // Clean up any existing connection
+   192→
+   193→            val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+   194→                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+   195→                continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+   196→            }
+   197→
+   198→            peerConnection = peerConnectionFactory?.createPeerConnection(
+   199→                rtcConfig,
+   200→                createPeerConnectionObserver()
+   201→            )
+   202→
+   203→            if (peerConnection == null) {
+   204→                throw IllegalStateException("Failed to create PeerConnection — factory returned null")
+   205→            }
+   206→
+   207→            // Add audio track
+   208→            createAudioTrack()
+   209→
+   210→            // Add video track if video call
+   211→            if (isVideoCall) {
+   212→                createVideoTrack()
+   213→            }
+   214→
+   215→            // Configure hardware audio pipeline
+   216→            configureAudioForCall()
+   217→
+   218→            Timber.d("PeerConnection created (video=%s) with audio calibration", isVideoCall)
+   219→        } catch (e: Exception) {
+   220→            Timber.e(e, "CRITICAL: Failed to create PeerConnection")
+   221→            throw e
+   222→        }
+   223→    }
+   224→
+   225→    // ════════════════════════════════════════════════════════════════
+   226→    // Hardware Acoustic Echo & Audio Routing Calibration
+   227→    // ════════════════════════════════════════════════════════════════
+   228→
+   229→    /**
+   230→     * Configures the Android audio system for a WebRTC call.
+   231→     *
+   232→     * This method applies the following critical settings:
+   233→     * - **AudioManager.MODE_IN_COMMUNICATION**: Optimizes the audio path for
+   234→     *   two-way voice communication, enabling echo cancellation and noise
+   235→     *   suppression at the hardware level.
+   236→     * - **AudioFocusRequest with USAGE_VOICE_COMMUNICATION**: Requests
+   237→     *   permanent audio focus for voice communication, which ensures proper
+   238→     *   audio routing and prevents other apps from interrupting the call.
+   239→     * - **Speakerphone default OFF**: Routes audio to the earpiece by default
+   240→     *   for audio calls, speaker for video calls.
+   241→     *
+   242→     * This eliminates system echo feedback loops and fixes audio routing
+   243→     * to speakerphone or Bluetooth accessories flawlessly.
+   244→     */
+   245→    private fun configureAudioForCall() {
+   246→        try {
+   247→            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+   248→            if (audioManager == null) {
+   249→                Timber.w("AudioManager not available, skipping audio calibration")
+   250→                return
+   251→            }
+   252→
+   253→            // Set communication mode — enables AEC (Acoustic Echo Cancellation)
+   254→            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+   255→
+   256→            // Request audio focus for voice communication
+   257→            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+   258→                val playbackAttributes = AudioAttributes.Builder()
+   259→                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+   260→                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+   261→                    .build()
+   262→
+   263→                audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+   264→                    .setAudioAttributes(playbackAttributes)
+   265→                    .setOnAudioFocusChangeListener { focusChange ->
+   266→                        Timber.d("Audio focus changed: %d", focusChange)
+   267→                    }
+   268→                    .build()
+   269→
+   270→                val result = audioManager.requestAudioFocus(audioFocusRequest!!)
+   271→                isAudioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+   272→                Timber.d("Audio focus request result: %s (granted=%s)", result, isAudioFocusHeld)
+   273→            } else {
+   274→                @Suppress("DEPRECATION")
+   275→                val result = audioManager.requestAudioFocus(
+   276→                    null,
+   277→                    AudioManager.STREAM_VOICE_CALL,
+   278→                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+   279→                )
+   280→                isAudioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+   281→                Timber.d("Audio focus request (legacy) result: %s", result)
+   282→            }
+   283→
+   284→            // Default: earpiece for audio, speaker for video
+   285→            audioManager.isSpeakerphoneOn = false
+   286→            audioManager.isBluetoothScoOn = false
+   287→
+   288→            Timber.d("Audio calibrated: MODE_IN_COMMUNICATION, USAGE_VOICE_COMMUNICATION")
+   289→        } catch (e: Exception) {
+   290→            Timber.e(e, "Failed to configure audio for call — audio may have echo issues")
+   291→        }
+   292→    }
+   293→
+   294→    /**
+   295→     * Releases audio focus and restores the audio manager to normal mode.
+   296→     * Must be called when a call ends.
+   297→     */
+   298→    private fun releaseAudioFromCall() {
+   299→        try {
+   300→            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+   301→            if (audioManager == null) return
+   302→
+   303→            // Restore normal audio mode
+   304→            audioManager.mode = AudioManager.MODE_NORMAL
+   305→            audioManager.isSpeakerphoneOn = false
+   306→            audioManager.isBluetoothScoOn = false
+   307→
+   308→            // Release audio focus
+   309→            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+   310→                audioManager.abandonAudioFocusRequest(audioFocusRequest!!)
+   311→            } else {
+   312→                @Suppress("DEPRECATION")
+   313→                audioManager.abandonAudioFocus(null)
+   314→            }
+   315→            isAudioFocusHeld = false
+   316→
+   317→            Timber.d("Audio released: MODE_NORMAL, focus abandoned")
+   318→        } catch (e: Exception) {
+   319→            Timber.e(e, "Failed to release audio from call")
+   320→        }
+   321→    }
+   322→
+   323→    // ════════════════════════════════════════════════════════════════
+   324→    // SDP Operations — Dispatchers.IO Only
+   325→    // ════════════════════════════════════════════════════════════════
+   326→
+   327→    /**
+   328→     * Creates an SDP offer for initiating a call.
+   329→     * Uses suspendCancellableCoroutine for clean async handling.
+   330→     * Must be called on Dispatchers.IO.
+   331→     *
+   332→     * @return The SDP offer string, or null on failure.
+   333→     */
+   334→    suspend fun createOffer(): String? = withContext(Dispatchers.IO) {
+   335→        try {
+   336→            val connection = peerConnection
+   337→                ?: throw IllegalStateException("No PeerConnection available for createOffer")
+   338→
+   339→            val constraints = MediaConstraints().apply {
+   340→                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+   341→                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+   342→            }
+   343→
+   344→            suspendCancellableCoroutine { cont ->
+   345→                connection.createOffer(object : SdpObserver {
+   346→                    override fun onCreateSuccess(description: SessionDescription) {
+   347→                        connection.setLocalDescription(SimpleSdpObserver(), description)
+   348→                        cont.resume(description.description)
+   349→                    }
+   350→
+   351→                    override fun onSetSuccess() {}
+   352→                    override fun onCreateFailure(error: String) {
+   353→                        Timber.e("Create offer failed: %s", error)
+   354→                        cont.resume(null)
+   355→                    }
+   356→
+   357→                    override fun onSetFailure(error: String) {
+   358→                        Timber.e("Set local description failed: %s", error)
+   359→                        cont.resume(null)
+   360→                    }
+   361→                }, constraints)
+   362→            }
+   363→        } catch (e: Exception) {
+   364→            Timber.e(e, "CRITICAL: Failed to create offer")
+   365→            null
+   366→        }
+   367→    }
+   368→
+   369→    /**
+   370→     * Creates an SDP answer for responding to a call.
+   371→     * Uses suspendCancellableCoroutine for clean async handling.
+   372→     * Must be called on Dispatchers.IO.
+   373→     *
+   374→     * @return The SDP answer string, or null on failure.
+   375→     */
+   376→    suspend fun createAnswer(): String? = withContext(Dispatchers.IO) {
+   377→        try {
+   378→            val connection = peerConnection
+   379→                ?: throw IllegalStateException("No PeerConnection available for createAnswer")
+   380→
+   381→            val constraints = MediaConstraints().apply {
+   382→                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
+   383→                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
+   384→            }
+   385→
+   386→            suspendCancellableCoroutine { cont ->
+   387→                connection.createAnswer(object : SdpObserver {
+   388→                    override fun onCreateSuccess(description: SessionDescription) {
+   389→                        connection.setLocalDescription(SimpleSdpObserver(), description)
+   390→                        cont.resume(description.description)
+   391→                    }
+   392→
+   393→                    override fun onSetSuccess() {}
+   394→                    override fun onCreateFailure(error: String) {
+   395→                        Timber.e("Create answer failed: %s", error)
+   396→                        cont.resume(null)
+   397→                    }
+   398→
+   399→                    override fun onSetFailure(error: String) {
+   400→                        Timber.e("Set local description failed: %s", error)
+   401→                        cont.resume(null)
+   402→                    }
+   403→                }, constraints)
+   404→            }
+   405→        } catch (e: Exception) {
+   406→            Timber.e(e, "CRITICAL: Failed to create answer")
+   407→            null
+   408→        }
+   409→    }
+   410→
+   411→    /**
+   412→     * Sets the remote SDP offer on the PeerConnection.
+   413→     */
+   414→    suspend fun setRemoteOffer(sdp: String) = withContext(Dispatchers.IO) {
+   415→        try {
+   416→            val connection = peerConnection ?: throw IllegalStateException("No PeerConnection")
+   417→            val description = SessionDescription(SessionDescription.Type.OFFER, sdp)
+   418→            connection.setRemoteDescription(SimpleSdpObserver(), description)
+   419→            Timber.d("Remote offer set successfully")
+   420→        } catch (e: Exception) {
+   421→            Timber.e(e, "Failed to set remote offer")
+   422→        }
+   423→    }
+   424→
+   425→    /**
+   426→     * Sets the remote SDP answer on the PeerConnection.
+   427→     */
+   428→    suspend fun setRemoteAnswer(sdp: String) = withContext(Dispatchers.IO) {
+   429→        try {
+   430→            val connection = peerConnection ?: throw IllegalStateException("No PeerConnection")
+   431→            val description = SessionDescription(SessionDescription.Type.ANSWER, sdp)
+   432→            connection.setRemoteDescription(SimpleSdpObserver(), description)
+   433→            Timber.d("Remote answer set successfully")
+   434→        } catch (e: Exception) {
+   435→            Timber.e(e, "Failed to set remote answer")
+   436→        }
+   437→    }
+   438→
+   439→    /**
+   440→     * Adds an ICE candidate received from the signaling server.
+   441→     */
+   442→    suspend fun addIceCandidate(sdpMid: String, sdpMLineIndex: Int, sdp: String) =
+   443→        withContext(Dispatchers.IO) {
+   444→            try {
+   445→                val connection = peerConnection ?: throw IllegalStateException("No PeerConnection")
+   446→                val candidate = IceCandidate(sdpMid, sdpMLineIndex, sdp)
+   447→                connection.addIceCandidate(candidate)
+   448→                Timber.d("ICE candidate added")
+   449→            } catch (e: Exception) {
+   450→                Timber.e(e, "Failed to add ICE candidate")
+   451→            }
+   452→        }
+   453→
+   454→    // ════════════════════════════════════════════════════════════════
+   455→    // Video Rendering — EglBase Singleton Preservation
+   456→    // ════════════════════════════════════════════════════════════════
+   457→
+   458→    /**
+   459→     * Initializes a [SurfaceViewRenderer] for displaying the local video preview.
+   460→     *
+   461→     * **CRITICAL**: This must be called from the UI thread. The [SurfaceViewRenderer]
+   462→     * is initialized with the singleton [EglBase.Context] which is NEVER re-created.
+   463→     * The SurfaceViewRenderer itself should be created once and retained using
+   464→     * `remember` in the Composable, wrapped inside an [AndroidView].
+   465→     *
+   466→     * @param surfaceView The SurfaceViewRenderer to initialize.
+   467→     */
+   468→    fun initLocalVideoRenderer(surfaceView: SurfaceViewRenderer) {
+   469→        try {
+   470→            surfaceView.init(_eglBase.eglBaseContext, null)
+   471→            surfaceView.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+   472→            surfaceView.setMirror(true) // Mirror local camera
+   473→            surfaceView.setEnableHardwareScaler(true)
+   474→            localVideoTrack?.addSink(surfaceView)
+   475→            Timber.d("Local video renderer initialized")
+   476→        } catch (e: Exception) {
+   477→            Timber.e(e, "Failed to initialize local video renderer")
+   478→        }
+   479→    }
+   480→
+   481→    /**
+   482→     * Initializes a [SurfaceViewRenderer] for displaying the remote video track.
+   483→     *
+   484→     * **CRITICAL**: Same singleton EglBase rules apply. Never re-create EglBase
+   485→     * on recomposition — wrap the SurfaceViewRenderer in AndroidView with remember.
+   486→     *
+   487→     * @param surfaceView The SurfaceViewRenderer to initialize.
+   488→     */
+   489→    fun initRemoteVideoRenderer(surfaceView: SurfaceViewRenderer) {
+   490→        try {
+   491→            surfaceView.init(_eglBase.eglBaseContext, null)
+   492→            surfaceView.setScalingType(org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+   493→            surfaceView.setMirror(false) // Don't mirror remote video
+   494→            surfaceView.setEnableHardwareScaler(true)
+   495→            remoteVideoTrack?.addSink(surfaceView)
+   496→            Timber.d("Remote video renderer initialized")
+   497→        } catch (e: Exception) {
+   498→            Timber.e(e, "Failed to initialize remote video renderer")
+   499→        }
+   500→    }
+   501→
+   502→    /**
+   503→     * Releases a video renderer, removing it from the video track's sink list.
+   504→     * Must be called when the Composable leaves the composition.
+   505→     *
+   506→     * @param surfaceView The SurfaceViewRenderer to release.
+   507→     * @param isLocal Whether this is the local (preview) renderer.
+   508→     */
+   509→    fun releaseVideoRenderer(surfaceView: SurfaceViewRenderer, isLocal: Boolean) {
+   510→        try {
+   511→            if (isLocal) {
+   512→                localVideoTrack?.removeSink(surfaceView)
+   513→            } else {
+   514→                remoteVideoTrack?.removeSink(surfaceView)
+   515→            }
+   516→            surfaceView.release()
+   517→            Timber.d("Video renderer released (local=%s)", isLocal)
+   518→        } catch (e: Exception) {
+   519→            Timber.e(e, "Failed to release video renderer")
+   520→        }
+   521→    }
+   522→
+   523→    // ════════════════════════════════════════════════════════════════
+   524→    // Media Controls
+   525→    // ════════════════════════════════════════════════════════════════
+   526→
+   527→    /**
+   528→     * Mutes or unmutes the local audio track.
+   529→     */
+   530→    fun setMuted(muted: Boolean) {
+   531→        try {
+   532→            isMuted = muted
+   533→            localAudioTrack?.setEnabled(!muted)
+   534→            Timber.d("Audio muted: %s", muted)
+   535→        } catch (e: Exception) {
+   536→            Timber.e(e, "Failed to set mute state")
+   537→        }
+   538→    }
+   539→
+   540→    /**
+   541→     * Enables the local camera track.
+   542→     */
+   543→    fun enableCamera() {
+   544→        try {
+   545→            isCameraOff = false
+   546→            localVideoTrack?.setEnabled(true)
+   547→            videoCapturer?.startCapture(640, 480, 30)
+   548→            Timber.d("Camera enabled")
+   549→        } catch (e: Exception) {
+   550→            Timber.e(e, "Failed to enable camera")
+   551→        }
+   552→    }
+   553→
+   554→    /**
+   555→     * Disables the local camera track.
+   556→     */
+   557→    fun disableCamera() {
+   558→        try {
+   559→            isCameraOff = true
+   560→            localVideoTrack?.setEnabled(false)
+   561→            videoCapturer?.stopCapture()
+   562→            Timber.d("Camera disabled")
+   563→        } catch (e: Exception) {
+   564→            Timber.e(e, "Failed to disable camera")
+   565→        }
+   566→    }
+   567→
+   568→    /**
+   569→     * Toggles speaker on/off with proper AudioManager routing.
+   570→     *
+   571→     * When speaker is ON: audio routes through the loudspeaker.
+   572→     * When speaker is OFF: audio routes through the earpiece or Bluetooth.
+   573→     */
+   574→    fun setSpeakerOn(speakerOn: Boolean) {
+   575→        try {
+   576→            isSpeakerOn = speakerOn
+   577→            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+   578→            audioManager?.isSpeakerphoneOn = speakerOn
+   579→
+   580→            // If turning speaker off, try Bluetooth SCO if available
+   581→            if (!speakerOn) {
+   582→                audioManager?.isBluetoothScoOn = false
+   583→            }
+   584→
+   585→            Timber.d("Speaker on: %s", speakerOn)
+   586→        } catch (e: Exception) {
+   587→            Timber.e(e, "Failed to set speaker state")
+   588→        }
+   589→    }
+   590→
+   591→    /**
+   592→     * Switches between front and back camera.
+   593→     */
+   594→    fun switchCamera() {
+   595→        try {
+   596→            videoCapturer?.let { capturer ->
+   597→                if (capturer is CameraVideoCapturer) {
+   598→                    capturer.switchCamera(null)
+   599→                }
+   600→            }
+   601→            Timber.d("Camera switched")
+   602→        } catch (e: Exception) {
+   603→            Timber.e(e, "Failed to switch camera")
+   604→        }
+   605→    }
+   606→
+   607→    // ════════════════════════════════════════════════════════════════
+   608→    // Disconnect — Clean Resource Release
+   609→    // ════════════════════════════════════════════════════════════════
+   610→
+   611→    /**
+   612→     * Disconnects the PeerConnection and releases all WebRTC resources.
+   613→     *
+   614→     * This method is safe to call from any thread. All cleanup operations
+   615→     * are wrapped in individual try-catch blocks to ensure that a failure
+   616→     * in releasing one resource does not prevent others from being released.
+   617→     *
+   618→     * Also releases audio focus and restores the AudioManager to normal mode.
+   619→     *
+   620→     * **IMPORTANT**: Does NOT dispose the EglBase singleton. The EglBase
+   621→     * lives for the entire application lifecycle and must never be destroyed
+   622→     * during a call disconnect.
+   623→     */
+   624→    fun disconnect() {
+   625→        try {
+   626→            videoCapturer?.tryStopCapture()
+   627→        } catch (_: Exception) {}
+   628→
+   629→        try {
+   630→            videoCapturer?.dispose()
+   631→        } catch (_: Exception) {}
+   632→        videoCapturer = null
+   633→
+   634→        try {
+   635→            localVideoSource?.dispose()
+   636→        } catch (_: Exception) {}
+   637→        localVideoSource = null
+   638→
+   639→        try {
+   640→            localAudioSource?.dispose()
+   641→        } catch (_: Exception) {}
+   642→        localAudioSource = null
+   643→
+   644→        try {
+   645→            localVideoTrack?.dispose()
+   646→        } catch (_: Exception) {}
+   647→        localVideoTrack = null
+   648→
+   649→        try {
+   650→            localAudioTrack?.dispose()
+   651→        } catch (_: Exception) {}
+   652→        localAudioTrack = null
+   653→
+   654→        try {
+   655→            remoteVideoTrack?.dispose()
+   656→        } catch (_: Exception) {}
+   657→        remoteVideoTrack = null
+   658→
+   659→        try {
+   660→            surfaceTextureHelper?.dispose()
+   661→        } catch (_: Exception) {}
+   662→        surfaceTextureHelper = null
+   663→
+   664→        try {
+   665→            peerConnection?.close()
+   666→        } catch (_: Exception) {}
+   667→
+   668→        try {
+   669→            peerConnection?.dispose()
+   670→        } catch (_: Exception) {}
+   671→        peerConnection = null
+   672→
+   673→        // Release audio focus and restore normal mode
+   674→        releaseAudioFromCall()
+   675→
+   676→        // Reset state flags
+   677→        isMuted = false
+   678→        isCameraOff = false
+   679→        isSpeakerOn = false
+   680→        onIceCandidateGenerated = null
+   681→        onRemoteVideoTrackAdded = null
+   682→
+   683→        Timber.d("WebRTC disconnected and all resources released (EglBase preserved)")
+   684→    }
+   685→
+   686→    // ════════════════════════════════════════════════════════════════
+   687→    // Internal Helpers
+   688→    // ════════════════════════════════════════════════════════════════
+   689→
+   690→    private fun createAudioTrack() {
+   691→        try {
+   692→            val factory = peerConnectionFactory ?: return
+   693→            localAudioSource = factory.createAudioSource(MediaConstraints())
+   694→            localAudioTrack = factory.createAudioTrack(AUDIO_TRACK_ID, localAudioSource)
+   695→            localAudioTrack?.setEnabled(true)
+   696→            peerConnection?.addTrack(localAudioTrack)
+   697→            Timber.d("Audio track created and added to PeerConnection")
+   698→        } catch (e: Exception) {
+   699→            Timber.e(e, "Failed to create audio track")
+   700→        }
+   701→    }
+   702→
+   703→    private fun createVideoTrack() {
+   704→        try {
+   705→            val factory = peerConnectionFactory ?: return
+   706→            val enumerator = getCameraEnumerator()
+   707→            val deviceNames = enumerator.deviceNames
+   708→
+   709→            // Try to find front camera first
+   710→            var capturer: VideoCapturer? = null
+   711→            for (name in deviceNames) {
+   712→                if (enumerator.isFrontFacing(name)) {
+   713→                    try {
+   714→                        capturer = enumerator.createCapturer(name, null)
+   715→                        break
+   716→                    } catch (e: Exception) {
+   717→                        Timber.w(e, "Failed to create front camera capturer, trying next")
+   718→                    }
+   719→                }
+   720→            }
+   721→            if (capturer == null && deviceNames.isNotEmpty()) {
+   722→                try {
+   723→                    capturer = enumerator.createCapturer(deviceNames[0], null)
+   724→                } catch (e: Exception) {
+   725→                    Timber.e(e, "Failed to create any camera capturer")
+   726→                }
+   727→            }
+   728→
+   729→            capturer?.let { vc ->
+   730→                videoCapturer = vc
+   731→                surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", _eglBase.eglBaseContext)
+   732→                localVideoSource = factory.createVideoSource(vc.isScreencast)
+   733→                vc.initialize(surfaceTextureHelper, context.applicationContext, localVideoSource?.capturerObserver)
+   734→                vc.startCapture(640, 480, 30)
+   735→
+   736→                localVideoTrack = factory.createVideoTrack(VIDEO_TRACK_ID, localVideoSource)
+   737→                localVideoTrack?.setEnabled(true)
+   738→                peerConnection?.addTrack(localVideoTrack)
+   739→                Timber.d("Video track created and added to PeerConnection")
+   740→            }
+   741→        } catch (e: Exception) {
+   742→            Timber.e(e, "Failed to create video track")
+   743→        }
+   744→    }
+   745→
+   746→    /**
+   747→     * Creates the PeerConnection observer that handles all WebRTC events.
+   748→     *
+   749→     * ICE candidates are forwarded to the signaling layer via
+   750→     * [onIceCandidateGenerated] callback. Remote video tracks are
+   751→     * forwarded via [onRemoteVideoTrackAdded] callback.
+   752→     */
+   753→    private fun createPeerConnectionObserver() = object : PeerConnection.Observer {
+   754→        override fun onSignalingChange(state: PeerConnection.SignalingState?) {
+   755→            Timber.d("Signaling state: %s", state)
+   756→        }
+   757→
+   758→        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+   759→            Timber.d("ICE connection state: %s", state)
+   760→            when (state) {
+   761→                PeerConnection.IceConnectionState.CONNECTED -> {
+   762→                    Timber.d("WebRTC ICE connected")
+   763→                }
+   764→                PeerConnection.IceConnectionState.DISCONNECTED -> {
+   765→                    Timber.w("WebRTC ICE disconnected")
+   766→                }
+   767→                PeerConnection.IceConnectionState.FAILED -> {
+   768→                    Timber.e("WebRTC ICE connection failed")
+   769→                }
+   770→                else -> {}
+   771→            }
+   772→        }
+   773→
+   774→        override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+   775→
+   776→        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
+   777→            Timber.d("ICE gathering state: %s", state)
+   778→        }
+   779→
+   780→        override fun onIceCandidate(candidate: IceCandidate?) {
+   781→            candidate?.let {
+   782→                Timber.d("Local ICE candidate generated: %s", it.sdp)
+   783→                onIceCandidateGenerated?.invoke(it)
+   784→            }
+   785→        }
+   786→
+   787→        override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {
+   788→            Timber.d("ICE candidates removed: %d", candidates?.size ?: 0)
+   789→        }
+   790→
+   791→        override fun onAddStream(stream: MediaStream?) {
+   792→            Timber.d("Remote stream added with %d video tracks", stream?.videoTracks?.size ?: 0)
+   793→        }
+   794→
+   795→        override fun onRemoveStream(stream: MediaStream?) {
+   796→            Timber.d("Remote stream removed")
+   797→        }
+   798→
+   799→        override fun onDataChannel(channel: DataChannel?) {}
+   800→
+   801→        override fun onRenegotiationNeeded() {
+   802→            Timber.d("Renegotiation needed")
+   803→        }
+   804→
+   805→        override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+   806→            Timber.d("Remote track added")
+   807→        }
+   808→
+   809→        override fun onTrack(transceiver: RtpTransceiver?) {
+   810→            transceiver?.let { t ->
+   811→                if (t.isVideoType()) {
+   812→                    val track = t.receiver.track() as? VideoTrack
+   813→                    if (track != null) {
+   814→                        remoteVideoTrack = track
+   815→                        Timber.d("Remote video track received via onTrack")
+   816→                        onRemoteVideoTrackAdded?.invoke(track)
+   817→                    }
+   818→                }
+   819→            }
+   820→        }
+   821→    }
+   822→
+   823→    private fun getCameraEnumerator(): CameraEnumerator {
+   824→        return if (Camera2Enumerator.isSupported(context.applicationContext)) {
+   825→            Camera2Enumerator(context.applicationContext)
+   826→        } else {
+   827→            Camera1Enumerator(false)
+   828→        }
+   829→    }
+   830→
+   831→    /** Safe stopCapture that catches any exception. */
+   832→    private fun VideoCapturer.tryStopCapture() {
+   833→        try {
+   834→            stopCapture()
+   835→        } catch (_: Exception) {}
+   836→    }
+   837→
+   838→    private class SimpleSdpObserver : SdpObserver {
+   839→        override fun onCreateSuccess(description: SessionDescription) {}
+   840→        override fun onSetSuccess() {}
+   841→        override fun onCreateFailure(error: String) {
+   842→            Timber.e("SDP error: %s", error)
+   843→        }
+   844→        override fun onSetFailure(error: String) {
+   845→            Timber.e("SDP set error: %s", error)
+   846→        }
+   847→    }
+   848→
+   849→    /**
+   850→     * Detects whether an RtpTransceiver carries video or audio.
+   851→     * Uses MediaType enum from the WebRTC library.
+   852→     */
+   853→    private fun RtpTransceiver?.isVideoType(): Boolean {
+   854→        return try {
+   855→            this?.let { transceiver ->
+   856→                transceiver.mediaType == MediaType.VIDEO
+   857→            } ?: false
+   858→        } catch (_: Exception) { false }
+   859→    }
+   860→
+   861→    companion object {
+   862→        private const val AUDIO_TRACK_ID = "zixo_audio_track"
+   863→        private const val VIDEO_TRACK_ID = "zixo_video_track"
+   864→    }
+   865→}
+   866→
+   867→
+   868→
