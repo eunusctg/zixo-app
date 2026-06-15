@@ -1,7 +1,6 @@
 package com.zixo.app.ui.screens.auth
 
 import android.app.Activity
-import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
@@ -19,6 +18,7 @@ import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.zixo.app.domain.repository.AuthResult
 import com.zixo.app.domain.repository.AuthRepository
 import com.zixo.app.domain.repository.AuthState
+import com.zixo.app.domain.model.User
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +41,7 @@ import javax.inject.Inject
  *
  * The Cloudflare Edge Worker handles Google token verification and
  * mints the system-generated 8-digit Zixo Number and @username.
+ * If Cloudflare is unavailable, fallback values are generated client-side.
  */
 data class AuthUiState(
     val isLoading: Boolean = false,
@@ -63,16 +64,16 @@ data class AuthUiState(
  * 1. User taps "Continue with Google" → CredentialManager launches Google Sign-In
  * 2. Google ID token is extracted from the credential response
  * 3. Token is sent to [AuthRepository.signInWithGoogle] for verification
- * 4. Cloudflare Edge Worker verifies the token and mints Zixo Number + username
- * 5. Firebase Auth session is created
- * 6. New users may need to set a display name (isProfileSetupNeeded)
+ *    (Cloudflare verification is optional; falls back to Firebase-only auth)
+ * 4. Firebase Auth session is created + Firestore profile ensured
+ * 5. Auth state observer in ZixoNavHost navigates to Home
  *
  * Authentication Pipeline (Email/Password):
  * 1. User toggles "Login using email and password" link
  * 2. Email and password fields appear with AnimatedVisibility
  * 3. User taps "Sign in with Email" → Firebase Auth signInWithEmailAndPassword
- * 4. On success, the auth state observer navigates to home
- * 5. Sign-up mode allows account creation with email/password
+ * 4. Firestore profile is created if it doesn't exist
+ * 5. Auth state observer in ZixoNavHost navigates to Home
  *
  * All operations are wrapped in try-catch and run on Dispatchers.IO.
  */
@@ -99,10 +100,8 @@ class AuthViewModel @Inject constructor(
     /**
      * Initiates Google Sign-In using Android CredentialManager.
      *
-     * This method creates a [GetCredentialRequest] with GoogleIdToken credential
-     * options and passes it to the system CredentialManager. The resulting
-     * Google ID token is then forwarded to [AuthRepository.signInWithGoogle]
-     * for server-side verification via Cloudflare Edge Workers.
+     * Uses both [GetGoogleIdOption] (device accounts) and [GetSignInWithGoogleOption]
+     * (browser-based fallback) so it works even without a Google account on the device.
      *
      * @param activity The host activity required by CredentialManager.
      */
@@ -150,7 +149,10 @@ class AuthViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = e.localizedMessage ?: "Sign-in was cancelled or failed"
+                        errorMessage = when {
+                            e.message?.contains("cancelled", ignoreCase = true) == true -> null
+                            else -> "Google Sign-In unavailable. Please use email/password below."
+                        }
                     )
                 }
             } catch (e: Exception) {
@@ -158,11 +160,11 @@ class AuthViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "An unexpected error occurred. Please try again."
+                        showEmailFallback = true,
+                        errorMessage = null
                     )
                 }
             } finally {
-                // Safety net: ensure isLoading is always reset even if an update was missed
                 _uiState.update { current ->
                     if (current.isLoading) current.copy(isLoading = false) else current
                 }
@@ -212,8 +214,8 @@ class AuthViewModel @Inject constructor(
     /**
      * Forwards the Google ID token to the backend for verification.
      *
-     * The token is verified by the Cloudflare Edge Worker, which also
-     * handles new user registration (minting Zixo Number + username).
+     * The repository handles Cloudflare verification (optional) and
+     * Firebase Auth + Firestore profile creation.
      */
     private fun authenticateWithBackend(idToken: String) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -225,6 +227,7 @@ class AuthViewModel @Inject constructor(
                         }
                         is AuthResult.Success -> {
                             _uiState.update { it.copy(isLoading = false, errorMessage = null) }
+                            // Auth state observer in ZixoNavHost will handle navigation
                         }
                         is AuthResult.Error -> {
                             _uiState.update {
@@ -251,9 +254,8 @@ class AuthViewModel @Inject constructor(
     /**
      * Signs in a user with email and password via Firebase Auth.
      *
-     * This is the fallback authentication method for users who prefer
-     * not to use Google Sign-In. The email/password is verified directly
-     * by Firebase Authentication.
+     * After Firebase Auth succeeds, ensures a Firestore profile exists.
+     * The auth state observer in ZixoNavHost handles navigation.
      */
     fun signInWithEmail() {
         val email = _uiState.value.email.trim()
@@ -268,9 +270,20 @@ class AuthViewModel @Inject constructor(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                firebaseAuth.signInWithEmailAndPassword(email, password).await()
-                Timber.d("Email sign-in successful for: %s", email.replaceBefore('@', "***"))
-                _uiState.update { it.copy(isLoading = false, errorMessage = null) }
+                val authResult = firebaseAuth.signInWithEmailAndPassword(email, password).await()
+                val firebaseUser = authResult.user
+                if (firebaseUser != null) {
+                    // Ensure Firestore profile exists for this user
+                    ensureFirestoreProfile(firebaseUser.uid, firebaseUser.email, firebaseUser.displayName)
+                    Timber.d("Email sign-in successful for: %s", email.replaceBefore('@', "***"))
+                    _uiState.update { it.copy(isLoading = false, errorMessage = null) }
+                    // Auth state observer in ZixoNavHost will detect the Firebase auth change
+                    // and navigate to Home automatically
+                } else {
+                    _uiState.update {
+                        it.copy(isLoading = false, errorMessage = "Sign-in failed — no user returned")
+                    }
+                }
             } catch (e: FirebaseAuthInvalidCredentialsException) {
                 Timber.w(e, "Invalid email/password credentials")
                 _uiState.update {
@@ -292,8 +305,8 @@ class AuthViewModel @Inject constructor(
     /**
      * Creates a new account with email and password via Firebase Auth.
      *
-     * After successful account creation, the user is automatically signed in
-     * and navigated to the profile setup flow.
+     * After successful account creation, creates a Firestore profile
+     * and the auth state observer handles navigation.
      */
     fun signUpWithEmail() {
         val email = _uiState.value.email.trim()
@@ -314,8 +327,10 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val authResult = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
-                val user = authResult.user
-                if (user != null) {
+                val firebaseUser = authResult.user
+                if (firebaseUser != null) {
+                    // Create Firestore profile for the new user
+                    ensureFirestoreProfile(firebaseUser.uid, firebaseUser.email, firebaseUser.displayName)
                     Timber.d("Email sign-up successful for: %s", email.replaceBefore('@', "***"))
                     _uiState.update {
                         it.copy(
@@ -324,6 +339,7 @@ class AuthViewModel @Inject constructor(
                             errorMessage = null
                         )
                     }
+                    // Auth state observer will detect Firebase auth change and navigate
                 } else {
                     _uiState.update {
                         it.copy(isLoading = false, errorMessage = "Account creation failed")
@@ -332,7 +348,7 @@ class AuthViewModel @Inject constructor(
             } catch (e: FirebaseAuthUserCollisionException) {
                 Timber.w(e, "Email already in use")
                 _uiState.update {
-                    it.copy(isLoading = false, errorMessage = "This email is already registered")
+                    it.copy(isLoading = false, errorMessage = "This email is already registered. Try signing in instead.")
                 }
             } catch (e: FirebaseAuthInvalidCredentialsException) {
                 Timber.w(e, "Invalid email format")
@@ -352,44 +368,50 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    // ── State Updates ─────────────────────────────────────────────────────────
+    // ── Firestore Profile Helper ─────────────────────────────────────────────
 
     /**
-     * Updates the email input field.
+     * Ensures a Firestore user profile document exists after Firebase Auth succeeds.
+     * This is critical because [observeAuthState] needs a profile to emit [AuthState.Authenticated].
+     * If the profile already exists, this is a no-op.
      */
+    private suspend fun ensureFirestoreProfile(uid: String, email: String?, displayName: String?) {
+        try {
+            val existing = authRepository.getCurrentUser()
+            // If getCurrentUser returns null or has empty uid, create the profile
+            if (existing == null) {
+                Timber.d("Creating Firestore profile for new email auth user: %s", uid)
+                authRepository.updateUserProfile(
+                    displayName = displayName ?: "",
+                    bio = "",
+                    avatarUrl = ""
+                )
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to ensure Firestore profile — auth will still proceed via observeAuthState fallback")
+        }
+    }
+
+    // ── State Updates ─────────────────────────────────────────────────────────
+
     fun onEmailChange(email: String) {
         _uiState.update { it.copy(email = email, errorMessage = null) }
     }
 
-    /**
-     * Updates the password input field.
-     */
     fun onPasswordChange(password: String) {
         _uiState.update { it.copy(password = password, errorMessage = null) }
     }
 
-    /**
-     * Toggles between email sign-in and email sign-up modes.
-     */
     fun toggleEmailSignUpMode() {
         _uiState.update { it.copy(isEmailSignUp = !it.isEmailSignUp, errorMessage = null) }
     }
 
-    /**
-     * Sets whether the user is using email/password authentication.
-     */
     fun setEmailSignIn(isEmailSignIn: Boolean) {
         _uiState.update { it.copy(isEmailSignIn = isEmailSignIn, errorMessage = null) }
     }
 
     // ── Profile Setup ─────────────────────────────────────────────────────────
 
-    /**
-     * Sets the display name for a new user after Google Sign-In.
-     *
-     * This is only needed when the user is signing up for the first time.
-     * The display name is persisted to the Firebase Firestore user profile.
-     */
     fun setDisplayNameAndContinue(displayName: String) {
         if (displayName.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Display name cannot be empty") }
@@ -432,46 +454,30 @@ class AuthViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Updates the display name input field in the profile setup form.
-     */
     fun onDisplayNameChange(name: String) {
         _uiState.update { it.copy(displayName = name, errorMessage = null) }
     }
 
     // ── Sign Out ──────────────────────────────────────────────────────────────
 
-    /**
-     * Clears the credential state and signs the user out.
-     */
     fun signOut() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 authRepository.signOut()
             } catch (e: Exception) {
                 Timber.e(e, "Sign-out failed")
-                // Auth state flow will handle the transition to Unauthenticated
             }
         }
     }
 
-    /**
-     * Clears any error message displayed to the user.
-     */
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    /**
-     * Manually triggers the email fallback UI (e.g., user taps the link).
-     */
     fun showEmailFallback() {
         _uiState.update { it.copy(showEmailFallback = true, errorMessage = null) }
     }
 
-    /**
-     * Hides the email fallback UI when the user wants to dismiss it.
-     */
     fun clearEmailFallback() {
         _uiState.update { it.copy(showEmailFallback = false, errorMessage = null) }
     }

@@ -67,12 +67,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.zixo.app.domain.repository.AuthState
 import com.zixo.app.ui.theme.AmoledBlack
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
-import kotlinx.coroutines.launch
 
 /**
  * Kinetic Auth Page — iOS Liquid Glass Design Overhaul.
@@ -95,10 +93,8 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun AuthScreen(
-    onAuthSuccess: () -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel()
 ) {
-    val authState by viewModel.authState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -111,12 +107,8 @@ fun AuthScreen(
     // Auto-show email fields when Google Sign-In fallback is triggered
     val showEmailFields = uiState.showEmailFallback
 
-    // Auto-navigate on successful auth
-    LaunchedEffect(authState) {
-        if (authState is AuthState.Authenticated) {
-            onAuthSuccess()
-        }
-    }
+    // NOTE: Navigation is handled by ZixoNavHost's LaunchedEffect(authState).
+    // We do NOT call onAuthSuccess here to avoid duplicate navigation.
 
     // Show error from UiState
     LaunchedEffect(uiState.errorMessage) {

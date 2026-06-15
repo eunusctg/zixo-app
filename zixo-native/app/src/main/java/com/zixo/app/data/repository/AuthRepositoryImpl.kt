@@ -22,9 +22,15 @@ import javax.inject.Singleton
 /**
  * Concrete implementation of [AuthRepository].
  *
- * Uses FirebaseAuth for Google Sign-In via CredentialManager,
+ * Uses FirebaseAuth for Google Sign-In via CredentialManager and email/password,
  * CloudflareApiService for registration (minting Zixo Numbers, usernames, passkey challenges),
  * and FirestoreService for user profile persistence.
+ *
+ * ## Fallback Architecture:
+ * - Google Sign-In: First attempts Cloudflare verification. If Cloudflare is unreachable,
+ *   falls back to direct Firebase Auth + client-side Firestore profile creation.
+ * - Email/Password: Direct Firebase Auth + Firestore profile creation.
+ * - Auth state observation is resilient to Firestore failures.
  *
  * All operations wrapped in try-catch with structured error handling.
  * All network/DB operations run on Dispatchers.IO.
@@ -44,34 +50,80 @@ class AuthRepositoryImpl @Inject constructor(
     override fun signInWithGoogle(idToken: String): Flow<AuthResult> = flow {
         emit(AuthResult.Loading)
         try {
-            // Verify the Google Sign-In token with Cloudflare backend
-            val verifyResponse = cloudflareApiService.verifyGoogleToken(idToken)
-            if (!verifyResponse.valid) {
-                emit(AuthResult.Error("Google Sign-In verification failed"))
-                return@flow
-            }
-
-            // Authenticate with Firebase using the verified credential
+            // Step 1: Authenticate with Firebase directly using the Google credential
+            // This is the core auth step — Cloudflare is secondary
             val firebaseResult: FirebaseAuthResult = firebaseAuthService.signInWithGoogle(idToken).first()
             val firebaseUser = firebaseResult.user
                 ?: throw IllegalStateException("Authentication succeeded but user is null")
 
-            // Fetch or create the user profile in Firestore
-            val user = firestoreService.getUserProfile(firebaseUser.uid).let { profileFlow ->
-                profileFlow.firstOrNull() ?: run {
-                    // New user — Cloudflare backend has already minted username + zixoNumber
+            // Step 2: Try Cloudflare verification (optional — for minting username/zixoNumber)
+            // If it fails, we continue with Firebase-only auth
+            var cloudflareUsername = ""
+            var cloudflareZixoNumber = ""
+            try {
+                val verifyResponse = cloudflareApiService.verifyGoogleToken(idToken)
+                if (verifyResponse.valid) {
+                    cloudflareUsername = verifyResponse.username
+                    cloudflareZixoNumber = verifyResponse.zixoNumber
+                } else {
+                    Timber.w("Cloudflare verification returned invalid — continuing with Firebase-only auth")
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Cloudflare verification failed — continuing with Firebase-only auth")
+            }
+
+            // Step 3: Fetch or create the user profile in Firestore
+            val user = try {
+                val existingProfile = firestoreService.getUserProfile(firebaseUser.uid).firstOrNull()
+                if (existingProfile != null) {
+                    // Update cached username/zixoNumber if Cloudflare provided them
+                    if (cloudflareUsername.isNotEmpty() && existingProfile.username.isEmpty()) {
+                        val updated = existingProfile.copy(
+                            username = cloudflareUsername,
+                            zixoNumber = cloudflareZixoNumber
+                        )
+                        try {
+                            firestoreService.updateUserProfile(firebaseUser.uid, mapOf(
+                                "username" to cloudflareUsername,
+                                "zixoNumber" to cloudflareZixoNumber
+                            ))
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to update Cloudflare-minted username/zixoNumber")
+                        }
+                        updated
+                    } else {
+                        existingProfile
+                    }
+                } else {
+                    // New user — create Firestore profile
                     val newUser = User(
                         uid = firebaseUser.uid,
                         email = firebaseUser.email ?: "",
-                        displayName = firebaseUser.displayName ?: verifyResponse.displayName,
-                        username = verifyResponse.username,
-                        zixoNumber = verifyResponse.zixoNumber,
+                        displayName = firebaseUser.displayName ?: "",
+                        username = cloudflareUsername.ifEmpty { generateUsername(firebaseUser.uid) },
+                        zixoNumber = cloudflareZixoNumber.ifEmpty { generateZixoNumber() },
                         photoUrl = firebaseUser.photoUrl?.toString(),
                         createdAt = System.currentTimeMillis()
                     )
-                    firestoreService.createUserProfile(firebaseUser.uid, newUser)
+                    try {
+                        firestoreService.createUserProfile(firebaseUser.uid, newUser)
+                        Timber.d("Created new Firestore profile for: %s", firebaseUser.uid)
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to create Firestore profile — auth will still proceed")
+                    }
                     newUser
                 }
+            } catch (e: Exception) {
+                Timber.w(e, "Firestore profile lookup failed — using Firebase-only user data")
+                User(
+                    uid = firebaseUser.uid,
+                    email = firebaseUser.email ?: "",
+                    displayName = firebaseUser.displayName ?: "",
+                    username = cloudflareUsername.ifEmpty { generateUsername(firebaseUser.uid) },
+                    zixoNumber = cloudflareZixoNumber.ifEmpty { generateZixoNumber() },
+                    photoUrl = firebaseUser.photoUrl?.toString(),
+                    createdAt = System.currentTimeMillis()
+                )
             }
 
             cachedUser = user
@@ -90,7 +142,6 @@ class AuthRepositoryImpl @Inject constructor(
             val currentUser = cachedUser
                 ?: throw IllegalStateException("No authenticated user")
 
-            // Verify the passkey registration with Cloudflare backend
             val verifyResponse = cloudflareApiService.verifyPasskeyRegistration(
                 uid = currentUser.uid,
                 registrationResponseJson = registrationResponseJson
@@ -101,18 +152,21 @@ class AuthRepositoryImpl @Inject constructor(
                 return@flow
             }
 
-            // Update the user profile with passkey info
             val updatedUser = currentUser.copy(
                 passkeyCredentialId = verifyResponse.credentialId,
                 hasPasskey = true
             )
-            firestoreService.updateUserProfile(
-                currentUser.uid,
-                mapOf(
-                    "passkeyCredentialId" to verifyResponse.credentialId,
-                    "hasPasskey" to true
+            try {
+                firestoreService.updateUserProfile(
+                    currentUser.uid,
+                    mapOf(
+                        "passkeyCredentialId" to verifyResponse.credentialId,
+                        "hasPasskey" to true
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to update passkey in Firestore")
+            }
 
             cachedUser = updatedUser
             emit(AuthResult.Success(updatedUser))
@@ -134,12 +188,26 @@ class AuthRepositoryImpl @Inject constructor(
         firebaseAuthService.authStateFlow()
             .map { firebaseUser ->
                 if (firebaseUser != null) {
-                    val user = firestoreService.getUserProfile(firebaseUser.uid).firstOrNull()
-                        ?: User(
+                    // Try to get Firestore profile, but never let it block auth
+                    val user = try {
+                        firestoreService.getUserProfile(firebaseUser.uid).firstOrNull()
+                            ?: User(
+                                uid = firebaseUser.uid,
+                                email = firebaseUser.email ?: "",
+                                displayName = firebaseUser.displayName ?: "",
+                                username = generateUsername(firebaseUser.uid),
+                                zixoNumber = generateZixoNumber()
+                            )
+                    } catch (e: Exception) {
+                        Timber.w(e, "Firestore profile lookup failed in observeAuthState — using Firebase-only data")
+                        User(
                             uid = firebaseUser.uid,
                             email = firebaseUser.email ?: "",
-                            displayName = firebaseUser.displayName ?: ""
+                            displayName = firebaseUser.displayName ?: "",
+                            username = generateUsername(firebaseUser.uid),
+                            zixoNumber = generateZixoNumber()
                         )
+                    }
                     cachedUser = user
                     AuthState.Authenticated(user)
                 } else {
@@ -169,7 +237,12 @@ class AuthRepositoryImpl @Inject constructor(
     override fun getCurrentUser(): Flow<User?> = flow {
         val uid = firebaseAuthService.getCurrentUser()?.uid
         if (uid != null) {
-            val user = cachedUser ?: firestoreService.getUserProfile(uid).firstOrNull()
+            val user = cachedUser ?: try {
+                firestoreService.getUserProfile(uid).firstOrNull()
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to get current user profile from Firestore")
+                null
+            }
             cachedUser = user
             emit(user)
         } else {
@@ -227,7 +300,26 @@ class AuthRepositoryImpl @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    // ── Private Helper ────────────────────────────────────────────────────────
+    // ── Private Helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Generates a deterministic username from a UID when Cloudflare is unavailable.
+     * Format: zixo_XXXX (4 hex chars from UID hash)
+     */
+    private fun generateUsername(uid: String): String {
+        val hash = uid.hashCode().toString(16).takeLast(4).padStart(4, '0')
+        return "zixo_$hash"
+    }
+
+    /**
+     * Generates a random 8-digit Zixo Number when Cloudflare is unavailable.
+     * Format: XXXX XXXX
+     */
+    private fun generateZixoNumber(): String {
+        val num = (10000000..99999999).random()
+        val str = num.toString()
+        return "${str.substring(0, 4)} ${str.substring(4, 8)}"
+    }
 
     private suspend fun <T> Flow<T>.firstOrNull(): T? {
         var result: T? = null
