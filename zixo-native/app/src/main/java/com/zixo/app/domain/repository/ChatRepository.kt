@@ -197,4 +197,15 @@ interface ChatRepository {
      * @return A flow emitting Result success or failure.
      */
     fun toggleMuteChat(chatId: String, isMuted: Boolean): Flow<Result<Unit>>
+
+    /**
+     * Gets or creates a 1-on-1 direct thread with another user.
+     * If a thread already exists between the two users, returns it.
+     * If not, creates a new thread and returns it.
+     * Verifies mutual contact status before creating.
+     *
+     * @param otherUserId The UID of the other user.
+     * @return A flow emitting the [ChatThreadModel] or an error.
+     */
+    fun getOrCreateDirectThread(otherUserId: String): Flow<Result<ChatThreadModel>>
 }

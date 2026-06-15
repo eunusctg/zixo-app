@@ -328,6 +328,7 @@ class WebRtcClient @Inject constructor(
     /**
      * Creates an SDP offer for initiating a call.
      * Uses suspendCancellableCoroutine for clean async handling.
+     * Waits for setLocalDescription to complete before returning.
      * Must be called on Dispatchers.IO.
      *
      * @return The SDP offer string, or null on failure.
@@ -344,9 +345,21 @@ class WebRtcClient @Inject constructor(
 
             suspendCancellableCoroutine { cont ->
                 connection.createOffer(object : SdpObserver {
-                    override fun onCreateSuccess(description: SessionDescription) {
-                        connection.setLocalDescription(SimpleSdpObserver(), description)
-                        cont.resume(description.description)
+                    override fun onCreateSuccess(sdpDescription: SessionDescription) {
+                        connection.setLocalDescription(object : SdpObserver {
+                            override fun onCreateSuccess(description: SessionDescription) {}
+                            override fun onSetSuccess() {
+                                cont.resume(sdpDescription.description)
+                            }
+                            override fun onCreateFailure(error: String) {
+                                Timber.e("Create local description failed: %s", error)
+                                cont.resume(null)
+                            }
+                            override fun onSetFailure(error: String) {
+                                Timber.e("Set local description failed: %s", error)
+                                cont.resume(null)
+                            }
+                        }, sdpDescription)
                     }
 
                     override fun onSetSuccess() {}
@@ -370,6 +383,7 @@ class WebRtcClient @Inject constructor(
     /**
      * Creates an SDP answer for responding to a call.
      * Uses suspendCancellableCoroutine for clean async handling.
+     * Waits for setLocalDescription to complete before returning.
      * Must be called on Dispatchers.IO.
      *
      * @return The SDP answer string, or null on failure.
@@ -386,9 +400,21 @@ class WebRtcClient @Inject constructor(
 
             suspendCancellableCoroutine { cont ->
                 connection.createAnswer(object : SdpObserver {
-                    override fun onCreateSuccess(description: SessionDescription) {
-                        connection.setLocalDescription(SimpleSdpObserver(), description)
-                        cont.resume(description.description)
+                    override fun onCreateSuccess(sdpDescription: SessionDescription) {
+                        connection.setLocalDescription(object : SdpObserver {
+                            override fun onCreateSuccess(description: SessionDescription) {}
+                            override fun onSetSuccess() {
+                                cont.resume(sdpDescription.description)
+                            }
+                            override fun onCreateFailure(error: String) {
+                                Timber.e("Create local description failed: %s", error)
+                                cont.resume(null)
+                            }
+                            override fun onSetFailure(error: String) {
+                                Timber.e("Set local description failed: %s", error)
+                                cont.resume(null)
+                            }
+                        }, sdpDescription)
                     }
 
                     override fun onSetSuccess() {}
@@ -411,13 +437,29 @@ class WebRtcClient @Inject constructor(
 
     /**
      * Sets the remote SDP offer on the PeerConnection.
+     * Waits for setRemoteDescription to complete before returning.
      */
     suspend fun setRemoteOffer(sdp: String) = withContext(Dispatchers.IO) {
         try {
             val connection = peerConnection ?: throw IllegalStateException("No PeerConnection")
             val description = SessionDescription(SessionDescription.Type.OFFER, sdp)
-            connection.setRemoteDescription(SimpleSdpObserver(), description)
-            Timber.d("Remote offer set successfully")
+            suspendCancellableCoroutine<Unit> { cont ->
+                connection.setRemoteDescription(object : SdpObserver {
+                    override fun onCreateSuccess(description: SessionDescription) {}
+                    override fun onSetSuccess() {
+                        Timber.d("Remote offer set successfully")
+                        cont.resume(Unit)
+                    }
+                    override fun onCreateFailure(error: String) {
+                        Timber.e("Set remote offer create failure: %s", error)
+                        cont.resumeWithException(RuntimeException("Set remote offer failed: $error"))
+                    }
+                    override fun onSetFailure(error: String) {
+                        Timber.e("Set remote offer failed: %s", error)
+                        cont.resumeWithException(RuntimeException("Set remote offer failed: $error"))
+                    }
+                }, description)
+            }
         } catch (e: Exception) {
             Timber.e(e, "Failed to set remote offer")
         }
@@ -425,13 +467,29 @@ class WebRtcClient @Inject constructor(
 
     /**
      * Sets the remote SDP answer on the PeerConnection.
+     * Waits for setRemoteDescription to complete before returning.
      */
     suspend fun setRemoteAnswer(sdp: String) = withContext(Dispatchers.IO) {
         try {
             val connection = peerConnection ?: throw IllegalStateException("No PeerConnection")
             val description = SessionDescription(SessionDescription.Type.ANSWER, sdp)
-            connection.setRemoteDescription(SimpleSdpObserver(), description)
-            Timber.d("Remote answer set successfully")
+            suspendCancellableCoroutine<Unit> { cont ->
+                connection.setRemoteDescription(object : SdpObserver {
+                    override fun onCreateSuccess(description: SessionDescription) {}
+                    override fun onSetSuccess() {
+                        Timber.d("Remote answer set successfully")
+                        cont.resume(Unit)
+                    }
+                    override fun onCreateFailure(error: String) {
+                        Timber.e("Set remote answer create failure: %s", error)
+                        cont.resumeWithException(RuntimeException("Set remote answer failed: $error"))
+                    }
+                    override fun onSetFailure(error: String) {
+                        Timber.e("Set remote answer failed: %s", error)
+                        cont.resumeWithException(RuntimeException("Set remote answer failed: $error"))
+                    }
+                }, description)
+            }
         } catch (e: Exception) {
             Timber.e(e, "Failed to set remote answer")
         }

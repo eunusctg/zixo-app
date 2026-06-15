@@ -139,6 +139,7 @@ class ContactRepositoryImpl @Inject constructor(
 
             // Current user's view of the contact
             val myContactData = hashMapOf(
+                "uid" to myUid,
                 "userId" to myUid,
                 "contactUserId" to targetUid,
                 "contactDisplayName" to (contactProfile.getString("displayName") ?: ""),
@@ -157,6 +158,7 @@ class ContactRepositoryImpl @Inject constructor(
 
             // Target user's view of the current user (reverse link)
             val reverseContactData = hashMapOf(
+                "uid" to myUid,
                 "userId" to targetUid,
                 "contactUserId" to myUid,
                 "contactDisplayName" to (myProfile.getString("displayName") ?: ""),
@@ -281,6 +283,7 @@ class ContactRepositoryImpl @Inject constructor(
 
             // Current user's view of the contact
             batch.set(currentUserContactRef, hashMapOf(
+                "uid" to currentUserId,
                 "userId" to currentUserId,
                 "contactUserId" to targetUserId,
                 "contactDisplayName" to targetDisplayName,
@@ -299,6 +302,7 @@ class ContactRepositoryImpl @Inject constructor(
 
             // Target user's view of the current user (reverse link)
             batch.set(targetUserContactRef, hashMapOf(
+                "uid" to currentUserId,
                 "userId" to targetUserId,
                 "contactUserId" to currentUserId,
                 "contactDisplayName" to (myProfile.getString("displayName") ?: ""),

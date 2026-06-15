@@ -1,10 +1,15 @@
 package com.zixo.app.ui.main
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +25,9 @@ import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Contacts
 import androidx.compose.material.icons.outlined.Dialpad
+import androidx.compose.material.icons.outlined.AddAPhoto
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Lens
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -43,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -81,7 +89,7 @@ enum class HomeTab(
     val fabLabel: String
 ) {
     CHATS(0, "Chats", Icons.Outlined.Chat, Icons.Outlined.Edit, "New chat"),
-    STATUS(1, "Status", Icons.Outlined.Edit, Icons.Outlined.Edit, "New status"),
+    STATUS(1, "Status", Icons.Outlined.Lens, Icons.Outlined.AddAPhoto, "New status"),
     CALLS(2, "Calls", Icons.Outlined.Call, Icons.Outlined.Dialpad, "Dial pad"),
     CONTACTS(3, "Contacts", Icons.Outlined.Contacts, Icons.Outlined.PersonAdd, "Find contact")
 }
@@ -288,9 +296,34 @@ private fun HomeBottomNav(
                 else -> 0
             }
 
+            // ── 3D Animation: Selected icon bounce ──
+            val selectedScale by animateFloatAsState(
+                targetValue = if (isSelected) 1f else 0.85f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessLow
+                ),
+                label = "tab_selected_scale_${tab.index}"
+            )
+
+            // ── 3D Animation: Press scale effect ──
+            val interactionSource = remember { MutableInteractionSource() }
+            val isPressed by interactionSource.collectIsPressedAsState()
+            val pressScale by animateFloatAsState(
+                targetValue = if (isPressed) 0.92f else 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                ),
+                label = "tab_press_scale_${tab.index}"
+            )
+
+            val combinedScale = selectedScale * pressScale
+
             NavigationBarItem(
                 selected = isSelected,
                 onClick = { onTabSelected(tab.index) },
+                interactionSource = interactionSource,
                 icon = {
                     BadgedBox(
                         badge = {
@@ -311,7 +344,15 @@ private fun HomeBottomNav(
                         Icon(
                             imageVector = tab.icon,
                             contentDescription = tab.label,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer {
+                                    scaleX = combinedScale
+                                    scaleY = combinedScale
+                                    shadowElevation = if (isSelected) 8f else 0f
+                                    ambientShadowColor = if (isSelected) NeonMint else Color.Transparent
+                                    spotShadowColor = if (isSelected) NeonMint else Color.Transparent
+                                }
                         )
                     }
                 },
@@ -342,7 +383,7 @@ private fun HomeBottomNav(
  *
  * The icon varies based on the current tab:
  * - Chats tab: Edit (new chat)
- * - Status tab: Edit (new status)
+ * - Status tab: AddAPhoto (new status)
  * - Calls tab: Dial pad
  * - Contacts tab: Person add (find contact)
  */

@@ -14,14 +14,14 @@ service cloud.firestore {
       return isAuth() && request.auth.uid == uid;
     }
 
-    // Check if the user is a participant in a chat (for existing data)
-    function isChatParticipant(chatData) {
-      return isAuth() && chatData.participants.hasAny([request.auth.uid]);
+    // Check if the user is a participant in a thread (for existing data)
+    function isThreadParticipant(threadData) {
+      return isAuth() && threadData.participantUids.hasAny([request.auth.uid]);
     }
 
     // Check if the request data includes the user as participant (for creates)
-    function isCreatingParticipant() {
-      return isAuth() && request.resource.data.participants.hasAny([request.auth.uid]);
+    function isCreatingThreadParticipant() {
+      return isAuth() && request.resource.data.participantUids.hasAny([request.auth.uid]);
     }
 
     // ==================== USERS ====================
@@ -33,6 +33,22 @@ service cloud.firestore {
       allow create: if isOwner(uid);
       allow update: if isOwner(uid);
       allow delete: if isOwner(uid);
+
+      // Contacts subcollection - stores reverse contact links
+      // e.g. User A writes to users/B/contacts/A when adding B as a contact
+      match /contacts/{contactId} {
+        // Any authenticated user can read (needed for mutual contact verification)
+        allow read: if isAuth();
+        // Any authenticated user can create (needed for reverse-link batch write)
+        // The uid field must match the authenticated user's UID
+        allow create: if isAuth()
+          && request.resource.data.uid == request.auth.uid;
+        // Owner of the user doc OR the contact themselves can update (mutual flag)
+        allow update: if isOwner(uid)
+          || (isAuth() && request.auth.uid == contactId);
+        // Only the owner can delete their own contacts
+        allow delete: if isOwner(uid);
+      }
     }
 
     // Username mappings - anyone authenticated can read
@@ -42,49 +58,52 @@ service cloud.firestore {
       allow delete: if isAuth() && request.auth.uid == resource.data.uid;
     }
 
-    // ==================== CHATS ====================
+    // ==================== THREADS (Chat) ====================
 
-    // Chat collection - users can only access chats they participate in
-    match /chats/{chatId} {
+    // Thread collection - users can only access threads they participate in
+    match /threads/{threadId} {
 
-      // Chat metadata
-      // CREATE: user must be in the participants array of the new document
-      // READ/UPDATE: user must be in the participants array of the existing document
-      allow create: if isAuth() && isCreatingParticipant();
-      allow read: if isAuth() && isChatParticipant(resource.data);
-      allow update: if isAuth() && isChatParticipant(resource.data)
-        && isChatParticipant(request.resource.data);
-      allow delete: if isAuth() && isChatParticipant(resource.data);
+      // Thread metadata
+      // CREATE: user must be in the participantUids array of the new document
+      // READ/UPDATE: user must be in the participantUids array of the existing document
+      allow create: if isAuth() && isCreatingThreadParticipant();
+      allow read: if isAuth() && isThreadParticipant(resource.data);
+      allow update: if isAuth() && isThreadParticipant(resource.data)
+        && isThreadParticipant(request.resource.data);
+      allow delete: if isAuth() && isThreadParticipant(resource.data);
 
       // Messages subcollection
       match /messages/{messageId} {
-        allow read: if isAuth() && isChatParticipant(
-          get(/databases/$(database)/documents/chats/$(chatId)).data
+        allow read: if isAuth() && isThreadParticipant(
+          get(/databases/$(database)/documents/threads/$(threadId)).data
         );
         allow create: if isAuth()
-          && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data)
-          && request.resource.data.senderId == request.auth.uid;
+          && isThreadParticipant(get(/databases/$(database)/documents/threads/$(threadId)).data)
+          && request.resource.data.senderUid == request.auth.uid;
         allow update: if isAuth()
-          && isChatParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data)
-          && resource.data.senderId == request.auth.uid;
+          && isThreadParticipant(get(/databases/$(database)/documents/threads/$(threadId)).data)
+          && resource.data.senderUid == request.auth.uid;
         allow delete: if isAuth()
-          && resource.data.senderId == request.auth.uid;
+          && resource.data.senderUid == request.auth.uid;
       }
     }
 
     // ==================== CALLS ====================
 
     // Call records - users can read their own calls, create new ones
-    match /calls/{callId} {
+    match /call_log/{callId} {
       allow read: if isAuth()
-        && (resource.data.callerId == request.auth.uid
-          || resource.data.receiverId == request.auth.uid);
+        && (resource.data.callerUid == request.auth.uid
+          || resource.data.calleeUid == request.auth.uid);
       allow create: if isAuth()
-        && (request.resource.data.callerId == request.auth.uid
-          || request.resource.data.receiverId == request.auth.uid);
+        && (request.resource.data.callerUid == request.auth.uid
+          || request.resource.data.calleeUid == request.auth.uid);
+      allow update: if isAuth()
+        && (resource.data.callerUid == request.auth.uid
+          || resource.data.calleeUid == request.auth.uid);
       allow delete: if isAuth()
-        && (resource.data.callerId == request.auth.uid
-          || resource.data.receiverId == request.auth.uid);
+        && (resource.data.callerUid == request.auth.uid
+          || resource.data.calleeUid == request.auth.uid);
     }
 
     // ==================== CALL SIGNALING ====================
@@ -92,21 +111,42 @@ service cloud.firestore {
     // WebRTC signaling - temporary documents for call setup
     match /calls_signaling/{callId} {
       allow read: if isAuth()
-        && (resource.data.callerId == request.auth.uid
-          || resource.data.receiverId == request.auth.uid);
+        && (resource.data.callerUid == request.auth.uid
+          || resource.data.targetUid == request.auth.uid);
       allow create: if isAuth();
       allow update: if isAuth()
-        && (resource.data.callerId == request.auth.uid
-          || resource.data.receiverId == request.auth.uid);
+        && (resource.data.callerUid == request.auth.uid
+          || resource.data.targetUid == request.auth.uid);
       allow delete: if isAuth()
-        && (resource.data.callerId == request.auth.uid
-          || resource.data.receiverId == request.auth.uid);
+        && (resource.data.callerUid == request.auth.uid
+          || resource.data.targetUid == request.auth.uid);
     }
 
     // ==================== FCM TOKENS ====================
     // Store FCM tokens for push notifications
 
     match /fcmTokens/{uid} {
+      allow read: if isAuth();
+      allow write: if isOwner(uid);
+    }
+
+    // ==================== STATUSES ====================
+    // Status / stories feature
+
+    match /statuses/{statusId} {
+      allow read: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if isAuth()
+        && resource.data.uid == request.auth.uid;
+      allow delete: if isAuth()
+        && resource.data.uid == request.auth.uid;
+    }
+
+    // ==================== USER PRESENCE ====================
+    // Online / last-seen presence data
+
+    match /user_presence/{uid} {
       allow read: if isAuth();
       allow write: if isOwner(uid);
     }

@@ -18,7 +18,7 @@
       ".read": "auth != null",
       "$callId": {
         ".read": "auth != null",
-        ".write": "auth != null && (data.child('callerId').val() == auth.uid || data.child('receiverId').val() == auth.uid || newData.child('callerId').val() == auth.uid || newData.child('receiverId').val() == auth.uid)"
+        ".write": "auth != null && (data.child('callerUid').val() == auth.uid || data.child('targetUid').val() == auth.uid || newData.child('callerUid').val() == auth.uid || newData.child('targetUid').val() == auth.uid)"
       }
     },
     "notifications": {

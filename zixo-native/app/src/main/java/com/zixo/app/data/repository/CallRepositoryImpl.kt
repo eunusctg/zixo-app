@@ -218,7 +218,8 @@ class CallRepositoryImpl @Inject constructor(
             )
 
             // Create the call entry in Firebase Realtime DB with structured data
-            signalingClient.createCall(callId, myUid, targetUid, isVideoCall)
+            val callerDisplayName = firebaseAuth.currentUser?.displayName ?: ""
+            signalingClient.createCall(callId, myUid, targetUid, isVideoCall, callerDisplayName)
 
             // Initialize WebRTC peer connection on Dispatchers.IO
             // AudioManager is calibrated inside initializePeerConnection
@@ -299,39 +300,21 @@ class CallRepositoryImpl @Inject constructor(
         }
 
         val callsRef = realtimeDb.getReference("calls")
-        val listener = callsRef.orderByChild("calleeUid").equalTo(myUid)
-            .addChildEventListener(object : com.google.firebase.database.ChildEventListener {
+        val query = callsRef.orderByChild("targetUid").equalTo(myUid)
+        val listener = query.addChildEventListener(object : com.google.firebase.database.ChildEventListener {
                 override fun onChildAdded(
                     snapshot: com.google.firebase.database.DataSnapshot,
                     previousChildName: String?
                 ) {
-                    try {
-                        val status = snapshot.child("status").getValue(String::class.java)
-                        if (status == "ringing") {
-                            val callId = snapshot.key ?: return
-                            val callerUid = snapshot.child("callerUid").getValue(String::class.java) ?: return
-                            val callerDisplayName = snapshot.child("callerDisplayName").getValue(String::class.java) ?: ""
-                            val isVideoCall = snapshot.child("isVideoCall").getValue(Boolean::class.java) ?: false
-
-                            val incomingState = CallState.RINGING(
-                                callId = callId,
-                                callerUid = callerUid,
-                                callerDisplayName = callerDisplayName,
-                                callerAvatarUrl = "",
-                                isVideoCall = isVideoCall
-                            )
-                            _incomingCalls.value = incomingState
-                            trySend(incomingState)
-                        }
-                    } catch (e: Exception) {
-                        Timber.e(e, "Error parsing incoming call")
-                    }
+                    handleIncomingCallSnapshot(snapshot)?.let { trySend(it) }
                 }
 
                 override fun onChildChanged(
                     snapshot: com.google.firebase.database.DataSnapshot,
                     previousChildName: String?
-                ) { /* handled in observeCallState */ }
+                ) {
+                    handleIncomingCallSnapshot(snapshot)?.let { trySend(it) }
+                }
 
                 override fun onChildRemoved(snapshot: com.google.firebase.database.DataSnapshot) {}
                 override fun onChildMoved(snapshot: com.google.firebase.database.DataSnapshot, previousChildName: String?) {}
@@ -340,7 +323,7 @@ class CallRepositoryImpl @Inject constructor(
                 }
             })
 
-        awaitClose { callsRef.removeEventListener(listener) }
+        awaitClose { query.removeEventListener(listener) }
     }.flowOn(Dispatchers.IO)
 
     // ── Answer Call ───────────────────────────────────────────────────────────
@@ -381,7 +364,25 @@ class CallRepositoryImpl @Inject constructor(
             // Initialize WebRTC and observe offer
             webRtcClient.initializePeerConnection(isVideoCall)
 
-            signalingClient.observeOffer(callId).collect { offer ->
+            // Set up ICE candidate forwarding: local ICE → Firebase signaling
+            webRtcClient.onIceCandidateGenerated = { candidate ->
+                GlobalScope.launch(Dispatchers.IO) {
+                    try {
+                        signalingClient.sendIceCandidate(
+                            callId = callId,
+                            senderUid = myUid,
+                            targetUid = callerUid,
+                            sdpMid = candidate.sdpMid,
+                            sdpMLineIndex = candidate.sdpMLineIndex,
+                            sdp = candidate.sdp
+                        )
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to forward ICE candidate to signaling")
+                    }
+                }
+            }
+
+            signalingClient.observeOffer(callId, myUid).collect { offer ->
                 if (offer != null) {
                     webRtcClient.setRemoteOffer(offer.sdp)
                     val sdpAnswer = webRtcClient.createAnswer()
@@ -398,6 +399,9 @@ class CallRepositoryImpl @Inject constructor(
                     connectedAt = System.currentTimeMillis()
                     emit(_callState.value)
                     startDurationTracking(callId)
+
+                    // Start observing ICE candidates from the caller
+                    observeIceCandidates(callId, myUid)
                 }
             }
         } catch (e: Exception) {
@@ -604,6 +608,39 @@ class CallRepositoryImpl @Inject constructor(
     }
 
     // ── Internal Helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Handles an incoming call snapshot from RTDB.
+     * Emits RINGING state for calls with status "dialing" or "ringing".
+     */
+    private fun handleIncomingCallSnapshot(
+        snapshot: com.google.firebase.database.DataSnapshot
+    ): CallState? {
+        return try {
+            val status = snapshot.child("status").getValue(String::class.java)
+            if (status == "dialing" || status == "ringing") {
+                val callId = snapshot.key ?: return null
+                val callerUid = snapshot.child("callerUid").getValue(String::class.java) ?: return null
+                val callerDisplayName = snapshot.child("callerDisplayName").getValue(String::class.java) ?: ""
+                val isVideoCall = snapshot.child("isVideoCall").getValue(Boolean::class.java) ?: false
+
+                val incomingState = CallState.RINGING(
+                    callId = callId,
+                    callerUid = callerUid,
+                    callerDisplayName = callerDisplayName,
+                    callerAvatarUrl = "",
+                    isVideoCall = isVideoCall
+                )
+                _incomingCalls.value = incomingState
+                incomingState
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error parsing incoming call")
+            null
+        }
+    }
 
     private fun startDurationTracking(callId: String) {
         durationJob?.cancel()

@@ -32,7 +32,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -131,104 +130,78 @@ fun ContactListScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         ZixoGlassBackground()
 
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Transparent,
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            floatingActionButton = {
-                FloatingActionButton(
-                    onClick = { showFindDialog = true },
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .liquidGlassCard(),
-                    containerColor = NeonMint,
-                    contentColor = DarkPetrolCharcoal,
-                    shape = CircleShape,
-                    elevation = FloatingActionButtonDefaults.elevation(
-                        defaultElevation = 0.dp,
-                        pressedElevation = 0.dp,
-                        hoveredElevation = 0.dp,
-                        focusedElevation = 0.dp
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.PersonAdd,
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // ── Top Bar ─────────────────────────────
+            ZixoTopBar(
+                title = "Contacts",
+                actionIcons = listOf(
+                    TopBarAction(
+                        icon = Icons.Outlined.Search,
                         contentDescription = "Find contact",
-                        modifier = Modifier.size(24.dp),
-                        tint = DarkPetrolCharcoal
-                    )
-                }
-            }
-        ) { innerPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                // ── Top Bar ─────────────────────────────
-                ZixoTopBar(
-                    title = "Contacts",
-                    actionIcons = listOf(
-                        TopBarAction(
-                            icon = Icons.Outlined.Search,
-                            contentDescription = "Find contact",
-                            onClick = { showFindDialog = true }
-                        )
+                        onClick = { showFindDialog = true }
                     )
                 )
+            )
 
-                // ── Pull-to-Refresh + Contact List ──────
-                val pullToRefreshState = rememberPullToRefreshState()
+            // ── Pull-to-Refresh + Contact List ──────
+            val pullToRefreshState = rememberPullToRefreshState()
 
-                PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = { viewModel.refresh() },
-                    state = pullToRefreshState,
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    when {
-                        contacts.isEmpty() -> {
-                            // ── Empty State ──────────────────
-                            EmptyContactsState(
-                                onFindContacts = { showFindDialog = true },
-                                modifier = Modifier.fillMaxSize()
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = { viewModel.refresh() },
+                state = pullToRefreshState,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                when {
+                    contacts.isEmpty() -> {
+                        // ── Empty State ──────────────────
+                        EmptyContactsState(
+                            onFindContacts = { showFindDialog = true },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    else -> {
+                        // ── Contact List ─────────────────
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            contentPadding = PaddingValues(
+                                start = 12.dp,
+                                end = 12.dp,
+                                top = 8.dp,
+                                bottom = 16.dp // Parent already pads for bottom nav
                             )
-                        }
-
-                        else -> {
-                            // ── Contact List ─────────────────
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                contentPadding = PaddingValues(
-                                    start = 12.dp,
-                                    end = 12.dp,
-                                    top = 8.dp,
-                                    bottom = 88.dp // Space for bottom nav
-                                )
-                            ) {
-                                items(
-                                    items = sortedContacts,
-                                    key = { it.id }
-                                ) { contact ->
-                                    ContactListItem(
-                                        contact = contact,
-                                        onClick = {
-                                            if (contact.isMutual) {
-                                                onContactClick(contact.contactUserId)
-                                            }
-                                        },
-                                        onLongPress = {
-                                            showContactActions = contact
+                        ) {
+                            items(
+                                items = sortedContacts,
+                                key = { it.id }
+                            ) { contact ->
+                                ContactListItem(
+                                    contact = contact,
+                                    onClick = {
+                                        if (contact.isMutual) {
+                                            onContactClick(contact.contactUserId)
                                         }
-                                    )
-                                }
+                                    },
+                                    onLongPress = {
+                                        showContactActions = contact
+                                    }
+                                )
                             }
                         }
                     }
                 }
             }
         }
+
+        // ── Snackbar overlay ────────────────────────
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
 
         // ── Find Contact Dialog Overlay ────────────
         if (showFindDialog) {

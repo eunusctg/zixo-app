@@ -162,8 +162,10 @@ class ChatRepositoryImpl @Inject constructor(
             }
 
             // Create the message document
-            val messageData = messageToFirestoreMap(message)
-            messagesCollection(threadId).document(message.id).set(messageData).await()
+            val messageId = message.id.ifBlank { UUID.randomUUID().toString() }
+            val messageWithId = message.copy(id = messageId)
+            val messageData = messageToFirestoreMap(messageWithId)
+            messagesCollection(threadId).document(messageId).set(messageData).await()
 
             // Update the thread's last message metadata
             val threadUpdates = mapOf(
@@ -175,8 +177,8 @@ class ChatRepositoryImpl @Inject constructor(
             )
             threadsCollection.document(threadId).update(threadUpdates).await()
 
-            Timber.d("Message sent: %s in thread %s", message.id, threadId)
-            emit(Result.success(message))
+            Timber.d("Message sent: %s in thread %s", messageId, threadId)
+            emit(Result.success(messageWithId))
         } catch (e: Exception) {
             Timber.e(e, "Failed to send message")
             emit(Result.failure(e))
@@ -292,13 +294,14 @@ class ChatRepositoryImpl @Inject constructor(
             threadsCollection.document(threadId).update(threadUpdates).await()
 
             // Mark recent unread messages as read
-            val unreadMessages = messagesCollection(threadId)
-                .whereNotIn("readByUids", listOf(myUid))
+            // Use orderBy + limit to get recent messages, then filter locally
+            val recentMessages = messagesCollection(threadId)
+                .orderBy("timestamp", Query.Direction.DESCENDING)
                 .limit(50)
                 .get()
                 .await()
 
-            for (doc in unreadMessages.documents) {
+            for (doc in recentMessages.documents) {
                 @Suppress("UNCHECKED_CAST")
                 val readByUids = (doc.get("readByUids") as? List<String>) ?: emptyList()
                 if (!readByUids.contains(myUid)) {
@@ -613,6 +616,122 @@ class ChatRepositoryImpl @Inject constructor(
             emit(Result.success(Unit))
         } catch (e: Exception) {
             Timber.e(e, "Failed to toggle mute: %s", chatId)
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Get or Create Direct Thread ────────────────────────────────────────────
+
+    override fun getOrCreateDirectThread(otherUserId: String): Flow<Result<ChatThreadModel>> = flow {
+        val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+        try {
+            // Verify mutual contact first
+            var gateResult: CommunicationGate? = null
+            contactRepository.verifyMutualContact(otherUserId).collect { gateResult = it }
+
+            if (gateResult !is CommunicationGate.Allowed) {
+                emit(Result.failure(SecurityException("Cannot start chat — not a mutual contact")))
+                return@flow
+            }
+
+            // Look for an existing direct thread with this user
+            val existingThreads = threadsCollection
+                .whereEqualTo("type", ThreadType.SINGLE.name)
+                .whereArrayContains("participantUids", myUid)
+                .get()
+                .await()
+
+            for (doc in existingThreads.documents) {
+                @Suppress("UNCHECKED_CAST")
+                val participantUids = (doc.get("participantUids") as? List<String>) ?: continue
+                if (otherUserId in participantUids && participantUids.size == 2) {
+                    val thread = mapToChatThreadModel(doc, myUid)
+                    if (thread != null) {
+                        Timber.d("Found existing direct thread: %s", thread.id)
+                        emit(Result.success(thread))
+                        return@flow
+                    }
+                }
+            }
+
+            // No existing thread — create a new one
+            val threadId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+
+            // Fetch both profiles for denormalization
+            val otherProfileDoc = firestore.collection("users").document(otherUserId).get().await()
+            val myProfileDoc = firestore.collection("users").document(myUid).get().await()
+
+            val participantProfiles = mapOf(
+                myUid to mapOf(
+                    "uid" to myUid,
+                    "displayName" to (myProfileDoc.getString("displayName") ?: ""),
+                    "avatarUrl" to (myProfileDoc.getString("photoUrl") ?: ""),
+                    "zixoNumber" to (myProfileDoc.getString("zixoNumber") ?: ""),
+                    "role" to ParticipantRole.MEMBER.name,
+                    "joinedAt" to now,
+                    "isOnline" to (myProfileDoc.getBoolean("isOnline") ?: false)
+                ),
+                otherUserId to mapOf(
+                    "uid" to otherUserId,
+                    "displayName" to (otherProfileDoc.getString("displayName") ?: ""),
+                    "avatarUrl" to (otherProfileDoc.getString("photoUrl") ?: ""),
+                    "zixoNumber" to (otherProfileDoc.getString("zixoNumber") ?: ""),
+                    "role" to ParticipantRole.MEMBER.name,
+                    "joinedAt" to now,
+                    "isOnline" to (otherProfileDoc.getBoolean("isOnline") ?: false)
+                )
+            )
+
+            val threadData = hashMapOf(
+                "id" to threadId,
+                "type" to ThreadType.SINGLE.name,
+                "participantUids" to listOf(myUid, otherUserId),
+                "participantProfiles" to participantProfiles,
+                "groupName" to null,
+                "groupAvatarUrl" to null,
+                "groupDescription" to null,
+                "groupAdminUids" to emptyList<String>(),
+                "createdByUid" to myUid,
+                "createdAt" to now,
+                "lastMessage" to null,
+                "lastMessageTimestamp" to now,
+                "lastMessageSenderUid" to null,
+                "lastMessageSenderName" to null,
+                "lastMessageType" to null,
+                "unreadCount" to emptyMap<String, Int>(),
+                "isPinned" to false,
+                "isMuted" to false,
+                "isArchived" to false,
+                "ephemeralTimerSeconds" to 0
+            )
+
+            threadsCollection.document(threadId).set(threadData).await()
+
+            val thread = ChatThreadModel(
+                id = threadId,
+                type = ThreadType.SINGLE,
+                participantUids = setOf(myUid, otherUserId),
+                participantProfiles = participantProfiles.mapValues { (uid, data) ->
+                    ThreadParticipant(
+                        uid = uid,
+                        displayName = data["displayName"] as? String ?: "",
+                        avatarUrl = data["avatarUrl"] as? String ?: "",
+                        zixoNumber = data["zixoNumber"] as? String ?: "",
+                        role = ParticipantRole.MEMBER,
+                        joinedAt = data["joinedAt"] as? Long ?: 0L,
+                        isOnline = data["isOnline"] as? Boolean ?: false
+                    )
+                },
+                createdByUid = myUid,
+                createdAt = now
+            )
+
+            Timber.d("Direct thread created: %s with user %s", threadId, otherUserId)
+            emit(Result.success(thread))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to get or create direct thread")
             emit(Result.failure(e))
         }
     }.flowOn(Dispatchers.IO)

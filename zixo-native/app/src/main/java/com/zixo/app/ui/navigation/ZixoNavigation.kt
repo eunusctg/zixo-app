@@ -259,9 +259,9 @@ fun ZixoNavHost(
                     navController.navigate(ZixoRoute.GroupChat.createRoute(threadId))
                 },
                 onContactClick = { contactUserId ->
-                    // Zero-trust: only mutual contacts can navigate to chat
-                    // Navigate to the contact list to find or create a thread
-                    navController.navigate(ZixoRoute.ContactList.route)
+                    // Navigate to chat with the selected contact
+                    // TODO: Create/find thread by contactUserId and navigate to chat
+                    // For now, the ContactsTabContent handles display inline
                 },
                 onNewChatClick = {
                     // Open contact list for new chat creation

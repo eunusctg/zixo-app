@@ -72,12 +72,14 @@ class FirebaseSignalingClient @Inject constructor(
         callId: String,
         callerUid: String,
         targetUid: String,
-        isVideoCall: Boolean
+        isVideoCall: Boolean,
+        callerDisplayName: String = ""
     ) = kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
             val callData = mapOf(
                 "status" to "dialing",
                 "callerUid" to callerUid,
+                "callerDisplayName" to callerDisplayName,
                 "targetUid" to targetUid,
                 "isVideoCall" to isVideoCall,
                 "createdAt" to System.currentTimeMillis(),
