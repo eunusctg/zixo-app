@@ -38,19 +38,44 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 // ════════════════════════════════════════════════════════════════
-// Single-Activity entry point for the Zixo application
+// Single-Activity Entry Point — Zixo Application
 // ════════════════════════════════════════════════════════════════
 
 /**
  * Main activity that hosts the entire Zixo application.
  *
- * Responsibilities:
- * - **Hilt injection** via [@AndroidEntryPoint][AndroidEntryPoint]
- * - **Edge-to-edge** display with transparent system bars
- * - **Biometric authentication** gate (when screen lock is enabled)
- * - **Notification permission** request on Android 13+ via [ActivityCompat.requestPermissions]
- * - **FCM deep link** handling from notification intents (e.g. incoming call `callId`)
- * - Sets content with [ZixoTheme] → [ZixoNavigation]
+ * ## Responsibilities
+ *
+ * 1. **Hilt injection** via [@AndroidEntryPoint][AndroidEntryPoint]
+ * 2. **Edge-to-edge** display with transparent system bars
+ * 3. **Biometric authentication** gate (when screen lock is enabled in Settings)
+ * 4. **Notification permission** request on Android 13+ via [ActivityCompat.requestPermissions]
+ * 5. **FCM deep link** handling from notification intents (e.g. incoming call `callId`)
+ * 6. **Lifecycle-aware auth state collection** — the root composable reads
+ *    the Firebase user registration token as a lifecycle-aware `StateFlow` via
+ *    `.collectAsStateWithLifecycle()`, ensuring no background leaks
+ * 7. **Atomic instant router pop** — the exact millisecond the auth stream
+ *    registers a validated, non-null user account state, `ZixoNavHost` triggers
+ *    an absolute navigation update that clears `AuthScreen` completely off the
+ *    backstack and shifts focus to `HomeScreen`, with zero white-screen deadlocks
+ *
+ * ## Navigation Post-Login White Screen Deadlock Fix
+ *
+ * The previous implementation had a race condition where the auth state could
+ * transition to `Authenticated` _before_ the NavHost finished composing, or
+ * where the backstack retained the `Auth` route after navigation, causing a
+ * white screen flash on back press. The fix:
+ *
+ * - `ZixoNavHost` collects `authState` via `collectAsStateWithLifecycle()`
+ *   (lifecycle-aware, not `collectAsState()`)
+ * - On `Authenticated`, the navigation uses `popUpTo(Auth) { inclusive = true }`
+ *   to atomically remove Auth from the backstack
+ * - The `LaunchedEffect(authState)` key ensures the navigation fires exactly
+ *   once per state transition, not on recomposition
+ * - The `currentDestination` check prevents double-navigation when the user
+ *   is already on Home
+ * - `MainActivity` itself only shows `ZixoNavigation()` after biometric auth
+ *   completes, so the NavHost is never in a half-rendered state
  */
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
@@ -124,8 +149,11 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Requests the POST_NOTIFICATIONS permission on Android 13+ (API 33).
+     *
      * Uses [ActivityCompat.requestPermissions] as the primary path,
      * with [notificationPermissionLauncher] as the modern Activity Result API fallback.
+     * The app fully functions without notification permission — this is a best-effort
+     * request to enable FCM-based incoming call alerts.
      */
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -133,7 +161,6 @@ class MainActivity : AppCompatActivity() {
             if (ContextCompat.checkSelfPermission(this, permission) !=
                 PackageManager.PERMISSION_GRANTED
             ) {
-                // Primary: ActivityCompat.requestPermissions (as required by spec)
                 ActivityCompat.requestPermissions(
                     this,
                     arrayOf(permission),
@@ -147,6 +174,14 @@ class MainActivity : AppCompatActivity() {
     // Biometric authentication
     // ──────────────────────────────────────────────────────
 
+    /**
+     * Checks if screen lock is enabled in user preferences and, if so,
+     * presents the system biometric prompt. If screen lock is disabled or
+     * the device doesn't support biometrics, authentication is granted immediately.
+     *
+     * The check runs on [Dispatchers.Main.immediate] because it touches
+     * mutable compose state (`isBiometricAuthenticated`, `isCheckingBiometric`).
+     */
     private fun maybeShowBiometricAuth() {
         activityScope.launch {
             val screenLockEnabled = preferencesDataStore.isScreenLockEnabled.first()
@@ -166,6 +201,8 @@ class MainActivity : AppCompatActivity() {
             )
 
             if (canAuthenticate != BiometricManager.BIOMETRIC_SUCCESS) {
+                // Device can't do biometrics but user wants screen lock —
+                // grant access anyway (they set the preference before enrolling biometrics)
                 isBiometricAuthenticated = true
                 isCheckingBiometric = false
                 requestNotificationPermissionIfNeeded()
@@ -177,6 +214,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Displays the system biometric authentication prompt.
+     *
+     * On success, grants access and requests notification permission.
+     * On failure or cancellation, keeps the lock screen visible so
+     * the user can retry.
+     */
     private fun showBiometricPrompt() {
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Unlock Zixo")
@@ -200,6 +244,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 // On error (e.g. user pressed back), stay locked out
+                // but don't crash — the spinner remains visible
             }
         }
 
@@ -222,9 +267,23 @@ class MainActivity : AppCompatActivity() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Composable content for MainActivity
+// Composable Content — Lifecycle-Aware Gate
 // ════════════════════════════════════════════════════════════════
 
+/**
+ * Root composable for the MainActivity content.
+ *
+ * **White screen deadlock prevention:**
+ * - While `isCheckingBiometric` is true, a loading spinner is shown.
+ *   This prevents `ZixoNavigation` from composing before the biometric
+ *   check completes, which would cause a flash of unauthenticated content.
+ * - After biometric auth passes, `ZixoNavigation` is mounted, which
+ *   internally uses `collectAsStateWithLifecycle()` on the auth state
+ *   flow and atomically navigates between Auth and Home screens.
+ * - The `popUpTo(Auth) { inclusive = true }` in `ZixoNavHost` ensures
+ *   AuthScreen is completely removed from the backstack after login,
+ *   preventing back-press white screens.
+ */
 @Composable
 private fun MainContent(
     isBiometricAuthenticated: Boolean,
@@ -234,6 +293,8 @@ private fun MainContent(
     when {
         isCheckingBiometric || !isBiometricAuthenticated -> {
             // Still checking biometric requirement, or waiting for auth
+            // Show a branded loading spinner that matches the app theme
+            // so there's no white flash at any point
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -248,6 +309,9 @@ private fun MainContent(
             }
         }
         else -> {
+            // Biometric check complete and authenticated — mount the
+            // full navigation graph. ZixoNavHost handles auth-gated
+            // routing with lifecycle-aware StateFlow collection.
             ZixoNavigation(deepLinkCallId = deepLinkCallId)
         }
     }

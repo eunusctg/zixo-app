@@ -2,6 +2,7 @@ package com.zixo.app.ui.screens.auth
 
 import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,61 +73,139 @@ import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
 
+// ════════════════════════════════════════════════════════════════
+// Color Constants — Auth Screen Visual Brand
+// ════════════════════════════════════════════════════════════════
+
+/** Core Midnight Slate gradient start — deep dark teal. */
+private val GradientStart = Color(0xFF07191C)
+
+/** Core Midnight Slate gradient end — near-black charcoal. */
+private val GradientEnd = Color(0xFF050C0E)
+
+/** Frosted glass button background — rgba(255,255,255,0.07). */
+private val GlassButtonBackground = Color(0x12FFFFFF)
+
+/** Frosted glass border — rgba(255,255,255,0.15). */
+private val GlassButtonBorder = Color(0x26FFFFFF)
+
+/** Muted subtitle text color. */
+private val SubtitleMuted = Color(0xFFA1B0B3)
+
+/** OR divider text color. */
+private val OrDividerText = Color(0xFF6878A0)
+
+/** Email/password toggle link color. */
+private val ToggleLinkColor = Color(0xFF5B8DB8)
+
+/** Fallback notice card background — frosted glass. */
+private val FallbackCardBackground = Color(0x1A1A2A32)
+
+/** Fallback notice card border. */
+private val FallbackCardBorder = Color(0x33FFFFFF)
+
+/** Neon accent for notice text. */
+private val NoticeAccentColor = NeonMint
+
+/** Inline field error color. */
+private val FieldErrorColor = Color(0xFFFF5252)
+
+/** Google button disabled overlay. */
+private val DisabledOverlay = Color(0x40FFFFFF)
+
+// ════════════════════════════════════════════════════════════════
+// AuthScreen — Premium Liquid Glass Authentication
+// ════════════════════════════════════════════════════════════════
+
 /**
  * Kinetic Auth Page — iOS Liquid Glass Design Overhaul.
  *
  * ## Visual Specifications:
- * - Core backdrop: vertical gradient from #07191C (midnight slate teal) to #050C0E (dark charcoal)
- * - Soft blurred radial blobs for deep visual dimensionality
- * - Brand icon: squircle (RoundedCornerShape(38.dp)) filled with Neon Green (#00E676)
- *   containing black block-serif "Z" centered
- * - Title "Zixo" in bold white (38.sp)
- * - Subtitle "Secure messaging & calls" in #A1B0B3
+ * - **Core backdrop**: Vertical gradient from `#07191C` (midnight slate teal)
+ *   to `#050C0E` (dark charcoal), matching the Zixo brand dark theme.
+ * - **Soft blurred radial blobs**: Two semi-transparent radial gradients
+ *   (NeonMint at 8% alpha, deep teal at 12% alpha) positioned in the upper
+ *   third of the screen and blurred at 60–80 dp for deep visual dimensionality.
+ * - **Brand icon**: Strict squircle (`RoundedCornerShape(38.dp)`) filled with
+ *   Neon Green (`#00E676`), housing a centered solid black block-serif `"Z"`.
+ * - **Title**: Bold white `"Zixo"` at `38.sp`.
+ * - **Subtitle**: Muted `"Secure messaging & calls"` in `#A1B0B3` at `15.sp`.
  *
- * ## State-Driven Progressive Disclosure:
- * - Initial state: frosted "Continue with Google" button (Liquid Glass, rgba(255,255,255,0.07))
- * - Below: thin horizontal divider marked "OR"
- * - Text link: "Login using email and password"
- * - Tapped -> AnimatedVisibility(expandVertically + fadeIn) reveals email/password fields
- * - Secondary glowing green "Sign in with Email" button
- * - Auto-fallback: If no Google account on device, email fields auto-expand
+ * ## Hyper-Animated Progressive Disclosure:
+ * - **Default state**: Frosted `"Continue with Google"` button with glass styling.
+ *   The button is dimmed on non-GMS devices and shows a disabled visual state.
+ * - **OR divider**: Thin horizontal lines flanking centered `"OR"` text.
+ * - **Toggle link**: `"Login using email and password"` text button.
+ * - **Tapped**: Toggles a localized state variable (`showEmailForm`), which
+ *   wraps the email/password form in `AnimatedVisibility` with
+ *   `expandVertically(spring(stiffness = Spring.StiffnessLow)) + fadeIn()`.
+ *   This guarantees smooth, responsive physical motion on any screen form factor.
+ * - **Auto-fallback**: If no Google account is detected, `showEmailFallback`
+ *   from the ViewModel automatically expands the email form and shows an
+ *   inline frosted notice banner explaining the situation.
+ *
+ * ## Adaptive Inline Notice Banner:
+ * - A frosted glass card with neon accent text:
+ *   "No Google account found on this device. Please sign in with Email instead,
+ *   or add a Google account in your device Settings."
+ * - Only appears when `showEmailFallback = true` (triggered by GMS absence
+ *   or NoCredentialException).
+ *
+ * ## Navigation:
+ * - Post-login navigation is handled entirely by `ZixoNavHost`'s
+ *   `LaunchedEffect(authState)` observer — this screen never calls
+ *   navigation controllers directly, avoiding duplicate nav events.
  */
 @Composable
 fun AuthScreen(
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
+    val activity = context as? Activity
     val snackbarHostState = remember { SnackbarHostState() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Auto-show email fields when Google Sign-In fallback is triggered
-    val showEmailFields = uiState.showEmailFallback
-
-    // NOTE: Navigation is handled by ZixoNavHost's LaunchedEffect(authState).
-    // We do NOT call onAuthSuccess here to avoid duplicate navigation.
-
-    // Show error from UiState
-    LaunchedEffect(uiState.errorMessage) {
-        uiState.errorMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+    // ── GMS availability check (runs once on first composition) ──────────
+    LaunchedEffect(Unit) {
+        if (activity != null) {
+            viewModel.checkGmsAvailability(activity)
         }
     }
 
-    // ── Core Backdrop Gradient Canvas ─────────────────────────────
+    // ── Progressive disclosure state ─────────────────────────────────────
+    // The email form is visible when EITHER:
+    //   1. The user manually tapped the toggle link (isEmailSignIn = true), OR
+    //   2. The system auto-triggered the fallback (showEmailFallback = true)
+    var showEmailForm by remember { mutableStateOf(false) }
+
+    // Sync the ViewModel's fallback flag into the local visibility state.
+    // This ensures the form auto-opens when Google Sign-In is unavailable
+    // but also respects the user's manual toggle.
+    LaunchedEffect(uiState.showEmailFallback) {
+        if (uiState.showEmailFallback) {
+            showEmailForm = true
+        }
+    }
+
+    // ── Error snackbar ───────────────────────────────────────────────────
+    LaunchedEffect(uiState.errorMessage) {
+        uiState.errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearError()
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ROOT CONTAINER — Core Midnight Slate Gradient Backdrop
+    // ══════════════════════════════════════════════════════════════════════
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.linearGradient(
-                    colors = listOf(
-                        Color(0xFF07191C),
-                        Color(0xFF050C0E)
-                    ),
+                    colors = listOf(GradientStart, GradientEnd),
                     start = Offset(0f, 0f),
                     end = Offset(0f, 2000f)
                 )
@@ -134,12 +213,13 @@ fun AuthScreen(
             .systemBarsPadding()
             .imePadding()
     ) {
-        // ── Soft blurred radial blobs for depth ───────────────────
+        // ── Soft blurred radial blobs for depth ──────────────────────
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = 60.dp)
         ) {
+            // Mint radial blob — upper-left
             Box(
                 modifier = Modifier
                     .size(280.dp)
@@ -155,6 +235,7 @@ fun AuthScreen(
                         )
                     )
             )
+            // Deep teal radial blob — upper-right
             Box(
                 modifier = Modifier
                     .size(200.dp)
@@ -172,7 +253,9 @@ fun AuthScreen(
             )
         }
 
-        // ── Main Content Column ──────────────────────────────────
+        // ══════════════════════════════════════════════════════════════════
+        // MAIN CONTENT COLUMN — Scrollable
+        // ══════════════════════════════════════════════════════════════════
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -183,7 +266,7 @@ fun AuthScreen(
         ) {
             Spacer(modifier = Modifier.height(80.dp))
 
-            // ── Brand Icon: Squircle with "Z" ────────────────────
+            // ── Brand Icon: Squircle with "Z" ────────────────────────
             Box(
                 modifier = Modifier
                     .size(88.dp)
@@ -203,7 +286,7 @@ fun AuthScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // ── Title ─────────────────────────────────────────────
+            // ── Title ────────────────────────────────────────────────
             Text(
                 text = "Zixo",
                 fontSize = 38.sp,
@@ -213,33 +296,40 @@ fun AuthScreen(
 
             Spacer(modifier = Modifier.height(6.dp))
 
+            // ── Subtitle ─────────────────────────────────────────────
             Text(
                 text = "Secure messaging & calls",
                 fontSize = 15.sp,
-                color = Color(0xFFA1B0B3),
+                color = SubtitleMuted,
                 letterSpacing = 0.3.sp
             )
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // ── Continue with Google Button (Liquid Glass) ────────
+            // ══════════════════════════════════════════════════════════
+            // CONTINUE WITH GOOGLE — Frosted Liquid Glass Button
+            // ══════════════════════════════════════════════════════════
             Button(
                 onClick = {
-                    keyboardController?.hide()
-                    viewModel.signInWithGoogle(context as Activity)
+                    if (uiState.isGmsAvailable && activity != null && !uiState.isLoading) {
+                        keyboardController?.hide()
+                        viewModel.signInWithGoogle(activity)
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(54.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0x12FFFFFF),
-                    contentColor = TextPrimary
+                    containerColor = GlassButtonBackground,
+                    contentColor = TextPrimary,
+                    disabledContainerColor = GlassButtonBackground
                 ),
-                border = BorderStroke(1.dp, Color(0x26FFFFFF)),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                border = BorderStroke(1.dp, GlassButtonBorder),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
+                enabled = uiState.isGmsAvailable && !uiState.isLoading
             ) {
-                if (uiState.isLoading) {
+                if (uiState.isLoading && !uiState.isEmailSignIn) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         color = NeonMint,
@@ -247,17 +337,31 @@ fun AuthScreen(
                     )
                 } else {
                     Text(
-                        text = "Continue with Google",
+                        text = if (uiState.isGmsAvailable) "Continue with Google"
+                               else "Google Sign-In unavailable",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
+                        color = if (uiState.isGmsAvailable) TextPrimary else TextSecondary
                     )
                 }
             }
 
+            // ── Non-GMS disabled overlay explanation ─────────────────
+            if (!uiState.isGmsAvailable) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "This device doesn't support Google Sign-In",
+                    fontSize = 11.sp,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center
+                )
+            }
+
             Spacer(modifier = Modifier.height(20.dp))
 
-            // ── OR Divider ────────────────────────────────────────
+            // ══════════════════════════════════════════════════════════
+            // OR DIVIDER
+            // ══════════════════════════════════════════════════════════
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -269,7 +373,7 @@ fun AuthScreen(
                 )
                 Text(
                     text = "  OR  ",
-                    color = Color(0xFF6878A0),
+                    color = OrDividerText,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -282,20 +386,20 @@ fun AuthScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // ── Email Login Toggle Link ────────────────────────────
+            // ══════════════════════════════════════════════════════════
+            // EMAIL LOGIN TOGGLE LINK
+            // ══════════════════════════════════════════════════════════
             TextButton(
                 onClick = {
-                    if (uiState.showEmailFallback) {
-                        // Already showing via fallback, toggle to hide
-                        viewModel.clearEmailFallback()
-                    } else {
-                        viewModel.showEmailFallback()
+                    showEmailForm = !showEmailForm
+                    if (showEmailForm) {
+                        viewModel.setEmailSignIn(true)
                     }
                 }
             ) {
                 Text(
-                    text = if (showEmailFields) "Hide email login" else "Login using email and password",
-                    color = Color(0xFF5B8DB8),
+                    text = if (showEmailForm) "Hide email login" else "Login using email and password",
+                    color = ToggleLinkColor,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -303,23 +407,76 @@ fun AuthScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ── Progressive Disclosure: Email + Password Fields ───
+            // ══════════════════════════════════════════════════════════
+            // ADAPTIVE INLINE NOTICE BANNER
+            // (Only shown when Google Sign-In is unavailable on the device)
+            // ══════════════════════════════════════════════════════════
             AnimatedVisibility(
-                visible = showEmailFields,
-                enter = expandVertically(animationSpec = spring()) + fadeIn(),
-                exit = shrinkVertically(animationSpec = spring()) + fadeOut()
+                visible = uiState.showEmailFallback,
+                enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
+                exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeOut()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(FallbackCardBackground)
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                colors = listOf(FallbackCardBorder, FallbackCardBorder.copy(alpha = 0.5f))
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .padding(16.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "No Google account found",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = NoticeAccentColor
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "No Google account found on this device. " +
+                                    "Please sign in with Email instead, or add a " +
+                                    "Google account in your device Settings.",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = TextSecondary,
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
+            }
+
+            if (uiState.showEmailFallback) {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // ══════════════════════════════════════════════════════════
+            // PROGRESSIVE DISCLOSURE: Email + Password Fields
+            // AnimatedVisibility with spring(stiffness = StiffnessLow)
+            // for smooth, responsive physical motion on any form factor.
+            // ══════════════════════════════════════════════════════════
+            AnimatedVisibility(
+                visible = showEmailForm,
+                enter = expandVertically(
+                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                ) + fadeIn(),
+                exit = shrinkVertically(
+                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                ) + fadeOut()
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Email Field
+                    // ── Email Field ───────────────────────────────────
                     OutlinedTextField(
-                        value = email,
-                        onValueChange = {
-                            email = it
-                            viewModel.onEmailChange(it)
-                        },
+                        value = uiState.email,
+                        onValueChange = { viewModel.onEmailChange(it) },
                         label = { Text("Email", color = TextSecondary) },
                         leadingIcon = {
                             Icon(
@@ -328,16 +485,23 @@ fun AuthScreen(
                                 tint = TextSecondary
                             )
                         },
+                        isError = uiState.emailValidationError != null,
+                        supportingText = uiState.emailValidationError?.let {
+                            { Text(it, color = FieldErrorColor, fontSize = 12.sp) }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NeonMint,
                             unfocusedBorderColor = Color(0x33FFFFFF),
+                            errorBorderColor = FieldErrorColor,
                             focusedContainerColor = Color(0x0DFFFFFF),
                             unfocusedContainerColor = Color(0x08FFFFFF),
+                            errorContainerColor = Color(0x0DFF5252),
                             cursorColor = NeonMint,
                             focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
+                            unfocusedTextColor = TextPrimary,
+                            errorTextColor = TextPrimary
                         ),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Email,
@@ -348,13 +512,10 @@ fun AuthScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Password Field
+                    // ── Password Field ────────────────────────────────
                     OutlinedTextField(
-                        value = password,
-                        onValueChange = {
-                            password = it
-                            viewModel.onPasswordChange(it)
-                        },
+                        value = uiState.password,
+                        onValueChange = { viewModel.onPasswordChange(it) },
                         label = { Text("Password", color = TextSecondary) },
                         leadingIcon = {
                             Icon(
@@ -363,16 +524,23 @@ fun AuthScreen(
                                 tint = TextSecondary
                             )
                         },
+                        isError = uiState.passwordValidationError != null,
+                        supportingText = uiState.passwordValidationError?.let {
+                            { Text(it, color = FieldErrorColor, fontSize = 12.sp) }
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = NeonMint,
                             unfocusedBorderColor = Color(0x33FFFFFF),
+                            errorBorderColor = FieldErrorColor,
                             focusedContainerColor = Color(0x0DFFFFFF),
                             unfocusedContainerColor = Color(0x08FFFFFF),
+                            errorContainerColor = Color(0x0DFF5252),
                             cursorColor = NeonMint,
                             focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
+                            unfocusedTextColor = TextPrimary,
+                            errorTextColor = TextPrimary
                         ),
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(
@@ -394,7 +562,9 @@ fun AuthScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // ── Sign In / Sign Up Button (Glowing Green) ──
+                    // ══════════════════════════════════════════════════
+                    // SIGN IN / SIGN UP BUTTON — Glowing Neon Green
+                    // ══════════════════════════════════════════════════
                     Button(
                         onClick = {
                             keyboardController?.hide()
@@ -410,11 +580,13 @@ fun AuthScreen(
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = NeonMint,
-                            contentColor = AmoledBlack
+                            contentColor = AmoledBlack,
+                            disabledContainerColor = NeonMint.copy(alpha = 0.4f)
                         ),
                         elevation = ButtonDefaults.buttonElevation(
                             defaultElevation = 4.dp
-                        )
+                        ),
+                        enabled = !uiState.isLoading
                     ) {
                         if (uiState.isLoading) {
                             CircularProgressIndicator(
@@ -434,7 +606,9 @@ fun AuthScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // ── Toggle Sign In / Sign Up ──────────────────
+                    // ══════════════════════════════════════════════════
+                    // TOGGLE SIGN IN / SIGN UP
+                    // ══════════════════════════════════════════════════
                     TextButton(
                         onClick = { viewModel.toggleEmailSignUpMode() }
                     ) {
@@ -444,7 +618,7 @@ fun AuthScreen(
                             } else {
                                 "Don't have an account? Sign up"
                             },
-                            color = Color(0xFF5B8DB8),
+                            color = ToggleLinkColor,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -452,9 +626,109 @@ fun AuthScreen(
                 }
             }
 
+            // ── Profile Setup Dialog (new users after sign-up) ──────
+            AnimatedVisibility(
+                visible = uiState.isProfileSetupNeeded,
+                enter = expandVertically(
+                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                ) + fadeIn(),
+                exit = shrinkVertically(
+                    animationSpec = spring(stiffness = Spring.StiffnessLow)
+                ) + fadeOut()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Choose a display name",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "This is how others will see you on Zixo",
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = uiState.displayName,
+                        onValueChange = { viewModel.onDisplayNameChange(it) },
+                        label = { Text("Display name", color = TextSecondary) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Person,
+                                contentDescription = null,
+                                tint = TextSecondary
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonMint,
+                            unfocusedBorderColor = Color(0x33FFFFFF),
+                            focusedContainerColor = Color(0x0DFFFFFF),
+                            unfocusedContainerColor = Color(0x08FFFFFF),
+                            cursorColor = NeonMint,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                keyboardController?.hide()
+                                viewModel.setDisplayNameAndContinue(uiState.displayName)
+                            }
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            keyboardController?.hide()
+                            viewModel.setDisplayNameAndContinue(uiState.displayName)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NeonMint,
+                            contentColor = AmoledBlack
+                        ),
+                        enabled = !uiState.isLoading && uiState.displayName.isNotBlank()
+                    ) {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = AmoledBlack,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Continue",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AmoledBlack
+                            )
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
 
-            // ── Snackbar ──────────────────────────────────────────
+            // ── Snackbar ────────────────────────────────────────────
             SnackbarHost(hostState = snackbarHostState)
         }
     }
