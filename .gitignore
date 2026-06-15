@@ -62,3 +62,25 @@ server.log
 
 # Skills directory
 /skills/.open-next/
+
+# Android / Zixo Native
+zixo-native/.gradle/
+zixo-native/build/
+zixo-native/app/build/
+zixo-native/local.properties
+zixo-native/.idea/
+zixo-native/*.iml
+zixo-native/*.apk
+zixo-native/*.aab
+zixo-native/*.jks
+zixo-native/*.keystore
+zixo-native/app/google-services.json
+
+# Agent context / tool results
+/agent-ctx/
+/tool-results/
+/upload/
+/download/
+
+# Worklog
+worklog.md

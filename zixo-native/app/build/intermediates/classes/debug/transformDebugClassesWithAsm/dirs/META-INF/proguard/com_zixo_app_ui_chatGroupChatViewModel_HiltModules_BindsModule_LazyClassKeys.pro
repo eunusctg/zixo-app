@@ -1,3 +1,0 @@
--keep,allowobfuscation,allowshrinking class com.zixo.app.ui.chat.ChatViewModel
--keep,allowobfuscation,allowshrinking class com.zixo.app.ui.chat.ChatViewModel
--keep,allowobfuscation,allowshrinking class com.zixo.app.ui.chat.GroupChatViewModel
