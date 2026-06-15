@@ -106,7 +106,7 @@ class AuthViewModel @Inject constructor(
     fun signInWithGoogle(activity: Activity) {
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val credentialManager = CredentialManager.create(activity)
 
@@ -191,7 +191,7 @@ class AuthViewModel @Inject constructor(
      * handles new user registration (minting Zixo Number + username).
      */
     private fun authenticateWithBackend(idToken: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             authRepository.signInWithGoogle(idToken).collect { result ->
                 when (result) {
                     is AuthResult.Loading -> {
@@ -354,7 +354,7 @@ class AuthViewModel @Inject constructor(
 
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 authRepository.updateUserProfile(
                     displayName = displayName.trim(),
@@ -397,7 +397,7 @@ class AuthViewModel @Inject constructor(
      * Clears the credential state and signs the user out.
      */
     fun signOut() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 authRepository.signOut()
             } catch (_: Exception) {

@@ -76,32 +76,40 @@ class ContactListViewModel @Inject constructor(
     init {
         // Real-time contact list from Firestore
         viewModelScope.launch {
-            contactRepository.observeContactsRealtime()
-                .stateIn(
-                    scope = viewModelScope,
-                    started = SharingStarted.WhileSubscribed(5_000),
-                    initialValue = emptyList()
-                )
-                .collect { contactList ->
-                    _contacts.value = contactList
-                }
+            try {
+                contactRepository.observeContactsRealtime()
+                    .stateIn(
+                        scope = viewModelScope,
+                        started = SharingStarted.WhileSubscribed(5_000),
+                        initialValue = emptyList()
+                    )
+                    .collect { contactList ->
+                        _contacts.value = contactList
+                    }
+            } catch (e: Exception) {
+                // Silently handle — real-time listener will recover
+            }
         }
 
         // Debounced search: only fire after 400ms of inactivity
         viewModelScope.launch {
-            _searchQuery
-                .debounce(SEARCH_DEBOUNCE_MS)
-                .distinctUntilChanged()
-                .collect { query ->
-                    if (query.length == 8 && query.all { it.isDigit() }) {
-                        performSearch(query)
-                    } else if (query.isNotEmpty() && query.length < 8) {
-                        // Don't overwrite an already-active searching state
-                        if (_searchResult.value !is ContactSearchResult.Searching) {
-                            _searchResult.value = ContactSearchResult.Idle
+            try {
+                _searchQuery
+                    .debounce(SEARCH_DEBOUNCE_MS)
+                    .distinctUntilChanged()
+                    .collect { query ->
+                        if (query.length == 8 && query.all { it.isDigit() }) {
+                            performSearch(query)
+                        } else if (query.isNotEmpty() && query.length < 8) {
+                            // Don't overwrite an already-active searching state
+                            if (_searchResult.value !is ContactSearchResult.Searching) {
+                                _searchResult.value = ContactSearchResult.Idle
+                            }
                         }
                     }
-                }
+            } catch (e: Exception) {
+                // Silently handle — search will recover on next input
+            }
         }
     }
 

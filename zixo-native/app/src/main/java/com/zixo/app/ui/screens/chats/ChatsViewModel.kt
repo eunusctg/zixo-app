@@ -64,21 +64,26 @@ class ChatsViewModel @Inject constructor(
      */
     private fun observeThreadsRealtime() {
         viewModelScope.launch {
-            _isLoading.value = true
-            chatRepository.observeThreadsRealtime()
-                .catch { e ->
-                    Timber.e(e, "ChatsViewModel: Failed to observe threads")
-                    _isLoading.value = false
-                }
-                .collect { threadList ->
-                    allThreads = threadList.sortedWith(
-                        compareByDescending<ChatThreadModel> { it.isPinned }
-                            .thenByDescending { it.lastMessage?.timestamp ?: it.createdAt }
-                    )
-                    applyFilter()
-                    _unreadCount.value = allThreads.sumOf { it.unreadCount }
-                    _isLoading.value = false
-                }
+            try {
+                _isLoading.value = true
+                chatRepository.observeThreadsRealtime()
+                    .catch { e ->
+                        Timber.e(e, "ChatsViewModel: Failed to observe threads")
+                        _isLoading.value = false
+                    }
+                    .collect { threadList ->
+                        allThreads = threadList.sortedWith(
+                            compareByDescending<ChatThreadModel> { it.isPinned }
+                                .thenByDescending { it.lastMessage?.timestamp ?: it.createdAt }
+                        )
+                        applyFilter()
+                        _unreadCount.value = allThreads.sumOf { it.unreadCount }
+                        _isLoading.value = false
+                    }
+            } catch (e: Exception) {
+                Timber.e(e, "ChatsViewModel: Thread observation failed completely")
+                _isLoading.value = false
+            }
         }
     }
 

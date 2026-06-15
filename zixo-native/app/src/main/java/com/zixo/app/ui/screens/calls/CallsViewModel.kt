@@ -70,27 +70,31 @@ class CallsViewModel @Inject constructor(
         _uiState.update { it.copy(currentUserId = firebaseAuth.currentUser?.uid) }
 
         viewModelScope.launch {
-            combine(
-                allCallsFlow,
-                _selectedFilter
-            ) { calls, filter ->
-                val filtered = when (filter) {
-                    CallFilter.ALL -> calls
-                    CallFilter.MISSED -> calls.filter { it.type.name == "MISSED" }
-                    CallFilter.OUTGOING -> calls.filter { it.type.name == "OUTGOING" }
-                    CallFilter.INCOMING -> calls.filter { it.type.name == "INCOMING" }
+            try {
+                combine(
+                    allCallsFlow,
+                    _selectedFilter
+                ) { calls, filter ->
+                    val filtered = when (filter) {
+                        CallFilter.ALL -> calls
+                        CallFilter.MISSED -> calls.filter { it.type.name == "MISSED" }
+                        CallFilter.OUTGOING -> calls.filter { it.type.name == "OUTGOING" }
+                        CallFilter.INCOMING -> calls.filter { it.type.name == "INCOMING" }
+                    }
+                    CallsUiState(
+                        calls = filtered,
+                        selectedFilter = filter,
+                        isLoading = false,
+                        isRefreshing = false,
+                        currentUserId = firebaseAuth.currentUser?.uid,
+                        activeCallState = _uiState.value.activeCallState,
+                        errorMessage = _uiState.value.errorMessage
+                    )
+                }.collect { state ->
+                    _uiState.value = state
                 }
-                CallsUiState(
-                    calls = filtered,
-                    selectedFilter = filter,
-                    isLoading = false,
-                    isRefreshing = false,
-                    currentUserId = firebaseAuth.currentUser?.uid,
-                    activeCallState = _uiState.value.activeCallState,
-                    errorMessage = _uiState.value.errorMessage
-                )
-            }.collect { state ->
-                _uiState.value = state
+            } catch (e: Exception) {
+                Timber.e(e, "CallsViewModel: Failed to observe calls")
             }
         }
     }

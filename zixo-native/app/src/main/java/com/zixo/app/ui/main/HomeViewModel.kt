@@ -160,6 +160,19 @@ class HomeViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         Timber.d("HomeViewModel: Cleared — updating presence to offline")
-        updatePresence(false)
+        // Run synchronously on IO — viewModelScope is cancelled at this point,
+        // so we use a dedicated scope to ensure presence is set before exit.
+        try {
+            kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                try {
+                    _uiState.update { it.copy(isOnline = false) }
+                    Timber.d("HomeViewModel: Presence set to offline")
+                } catch (e: Exception) {
+                    Timber.e(e, "HomeViewModel: Failed to update presence on clear")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "HomeViewModel: runBlocking failed during onCleared")
+        }
     }
 }

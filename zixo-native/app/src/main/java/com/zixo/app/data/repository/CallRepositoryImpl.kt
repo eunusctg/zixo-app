@@ -16,9 +16,10 @@ import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.repository.CallRepository
 import com.zixo.app.domain.repository.ContactRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -61,6 +62,8 @@ class CallRepositoryImpl @Inject constructor(
     private val signalingClient: FirebaseSignalingClient,
     @ApplicationContext private val context: Context
 ) : CallRepository {
+
+    private val callScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val currentUid: String?
         get() = firebaseAuth.currentUser?.uid
@@ -227,7 +230,7 @@ class CallRepositoryImpl @Inject constructor(
 
             // Set up ICE candidate forwarding: local ICE → Firebase signaling
             webRtcClient.onIceCandidateGenerated = { candidate ->
-                GlobalScope.launch(Dispatchers.IO) {
+                callScope.launch(Dispatchers.IO) {
                     try {
                         signalingClient.sendIceCandidate(
                             callId = callId,
@@ -366,7 +369,7 @@ class CallRepositoryImpl @Inject constructor(
 
             // Set up ICE candidate forwarding: local ICE → Firebase signaling
             webRtcClient.onIceCandidateGenerated = { candidate ->
-                GlobalScope.launch(Dispatchers.IO) {
+                callScope.launch(Dispatchers.IO) {
                     try {
                         signalingClient.sendIceCandidate(
                             callId = callId,
@@ -586,7 +589,7 @@ class CallRepositoryImpl @Inject constructor(
      * @param localUid The local user's UID (to filter out self-sent candidates).
      */
     private fun observeIceCandidates(callId: String, localUid: String) {
-        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+        callScope.launch(Dispatchers.IO) {
             try {
                 signalingClient.observeIceCandidates(callId, localUid).collect { candidates ->
                     for (candidate in candidates) {
@@ -644,7 +647,7 @@ class CallRepositoryImpl @Inject constructor(
 
     private fun startDurationTracking(callId: String) {
         durationJob?.cancel()
-        durationJob = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+        durationJob = callScope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(1000)
                 val currentState = _callState.value

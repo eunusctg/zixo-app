@@ -312,9 +312,9 @@ fun StatusTabScreen(
     }
 
     // ── Full-Screen Status Viewer ───────────────
-    if (viewingGroup != null) {
+    viewingGroup?.let { group ->
         StatusViewerOverlay(
-            group = viewingGroup!!,
+            group = group,
             currentIndex = viewingIndex,
             replyText = replyText,
             onReplyTextChange = { replyText = it },
@@ -325,6 +325,7 @@ fun StatusTabScreen(
             onReaction = { statusId, emoji -> viewModel.reactToStatus(statusId, emoji) }
         )
     }
+
 }
 
 // ──────────────────────────────────────────────

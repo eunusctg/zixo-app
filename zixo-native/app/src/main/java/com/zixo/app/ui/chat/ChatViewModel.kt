@@ -63,6 +63,11 @@ class ChatViewModel @Inject constructor(
 
     // ── Real-time StateFlows ──────────────────────────────────────────────────
 
+    /** Whether the ViewModel is in an invalid state (missing threadId). */
+    val isInvalidState: Boolean = threadId.isBlank()
+
+    // ── Real-time StateFlows ──────────────────────────────────────────────────
+
     /** Real-time message list from Firestore snapshot listener. */
     private val _messages = MutableStateFlow<List<MessageModel>>(emptyList())
     val messages: StateFlow<List<MessageModel>> = _messages.asStateFlow()
@@ -115,6 +120,8 @@ class ChatViewModel @Inject constructor(
             attachContinuousListeners()
             verifyContactGate()
             markAsRead()
+        } else {
+            _errorMessage.value = "Invalid thread — missing thread ID"
         }
 
         // Observe incoming calls for call overlay

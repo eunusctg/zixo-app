@@ -67,13 +67,19 @@ class GroupChatViewModel @Inject constructor(
     private val _messageText = MutableStateFlow("")
     val messageText: StateFlow<String> = _messageText.asStateFlow()
 
+    /** Whether the ViewModel is in an invalid state (missing chatId). */
+    val isInvalidState: Boolean
+
     init {
         val chatId = savedStateHandle.get<String>("chatId") ?: ""
+        isInvalidState = chatId.isEmpty()
         if (chatId.isNotEmpty()) {
             _uiState.update { it.copy(chatId = chatId) }
             loadGroupDetails(chatId)
             loadMembers(chatId)
             observeMessages(chatId)
+        } else {
+            _uiState.update { it.copy(isLoading = false, error = "Invalid group — missing chat ID") }
         }
     }
 

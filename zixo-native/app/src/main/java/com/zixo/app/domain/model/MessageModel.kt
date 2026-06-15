@@ -58,7 +58,7 @@ data class MessageModel(
      * Whether this message has an active ephemeral timer that hasn't expired yet.
      */
     val isEphemeralActive: Boolean
-        get() = ephemeralExpiresAt != null && ephemeralExpiresAt!! > System.currentTimeMillis()
+        get() = ephemeralExpiresAt != null && ephemeralExpiresAt > System.currentTimeMillis()
 }
 
 /**

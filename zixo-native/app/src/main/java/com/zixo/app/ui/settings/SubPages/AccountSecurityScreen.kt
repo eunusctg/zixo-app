@@ -176,7 +176,7 @@ fun AccountSecurityScreen(
             },
             text = {
                 Text(
-                    text = "Removing \"${showDeletePasskeyDialog!!.name}\" means you will no longer be able to sign in with this passkey. Make sure you have another authentication method available.",
+                    text = "Removing \"${showDeletePasskeyDialog?.name ?: "this passkey"}\" means you will no longer be able to sign in with this passkey. Make sure you have another authentication method available.",
                     color = TextSecondary,
                     fontSize = 14.sp
                 )
@@ -184,7 +184,10 @@ fun AccountSecurityScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        passkeys = passkeys.filter { it.id != showDeletePasskeyDialog!!.id }
+                        val dialogPasskey = showDeletePasskeyDialog
+                        if (dialogPasskey != null) {
+                            passkeys = passkeys.filter { it.id != dialogPasskey.id }
+                        }
                         showDeletePasskeyDialog = null
                     }
                 ) {

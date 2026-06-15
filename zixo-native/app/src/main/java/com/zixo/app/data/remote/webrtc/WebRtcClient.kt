@@ -268,7 +268,12 @@ class WebRtcClient @Inject constructor(
                     }
                     .build()
 
-                val result = audioManager.requestAudioFocus(audioFocusRequest!!)
+                val focusRequest = audioFocusRequest
+                if (focusRequest == null) {
+                    Timber.w("AudioFocusRequest was null, skipping focus request")
+                    return
+                }
+                val result = audioManager.requestAudioFocus(focusRequest)
                 isAudioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
                 Timber.d("Audio focus request result: %s (granted=%s)", result, isAudioFocusHeld)
             } else {
@@ -307,8 +312,8 @@ class WebRtcClient @Inject constructor(
             audioManager.isBluetoothScoOn = false
 
             // Release audio focus
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
-                audioManager.abandonAudioFocusRequest(audioFocusRequest!!)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
             } else {
                 @Suppress("DEPRECATION")
                 audioManager.abandonAudioFocus(null)

@@ -192,7 +192,12 @@ class ZixoAudioManager @Inject constructor(
                     }
                     .build()
 
-                val result = audioManager.requestAudioFocus(audioFocusRequest!!)
+                val focusRequest = audioFocusRequest
+                if (focusRequest == null) {
+                    Timber.w("AudioFocusRequest was null, skipping focus request")
+                    return
+                }
+                val result = audioManager.requestAudioFocus(focusRequest)
                 isAudioFocusHeld = result == AndroidAudioManager.AUDIOFOCUS_REQUEST_GRANTED
             } else {
                 @Suppress("DEPRECATION")
@@ -215,7 +220,7 @@ class ZixoAudioManager @Inject constructor(
     private fun abandonAudioFocus() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
-                audioManager.abandonAudioFocusRequest(audioFocusRequest!!)
+                audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
             } else {
                 @Suppress("DEPRECATION")
                 audioManager.abandonAudioFocus(null)

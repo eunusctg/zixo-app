@@ -69,6 +69,7 @@ import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import org.webrtc.SurfaceViewRenderer
+import timber.log.Timber
 
 // ════════════════════════════════════════════════════════════════
 // Call Screen Overlay — Fullscreen Frosted Glass with Video
@@ -227,36 +228,55 @@ private fun VideoRenderLayer(
     // ── Remote Video (Full Screen) ──
     val remoteContext = LocalContext.current
     val remoteSurfaceView = remember { SurfaceViewRenderer(remoteContext) }
+    var isRemoteRendererInitialized by remember { mutableStateOf(false) }
 
     DisposableEffect(remoteSurfaceView) {
-        webRtcClient.initRemoteVideoRenderer(remoteSurfaceView)
+        if (!isRemoteRendererInitialized) {
+            try {
+                webRtcClient.initRemoteVideoRenderer(remoteSurfaceView)
+                isRemoteRendererInitialized = true
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to initialize remote video renderer in DisposableEffect")
+            }
+        }
         onDispose {
-            webRtcClient.releaseVideoRenderer(remoteSurfaceView, isLocal = false)
+            try {
+                webRtcClient.releaseVideoRenderer(remoteSurfaceView, isLocal = false)
+                isRemoteRendererInitialized = false
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to release remote video renderer on dispose")
+            }
         }
     }
 
     // Remote video fills the entire background
     AndroidView(
         factory = { remoteSurfaceView },
-        modifier = Modifier.fillMaxSize(),
-        update = { view ->
-            try {
-                webRtcClient.initRemoteVideoRenderer(view)
-            } catch (_: Exception) {
-                // Renderer may already be initialized
-            }
-        }
+        modifier = Modifier.fillMaxSize()
     )
 
     // ── Local Video (Picture-in-Picture) ──
     if (!callState.isCameraOff) {
         val localContext = LocalContext.current
         val localSurfaceView = remember { SurfaceViewRenderer(localContext) }
+        var isLocalRendererInitialized by remember { mutableStateOf(false) }
 
         DisposableEffect(localSurfaceView) {
-            webRtcClient.initLocalVideoRenderer(localSurfaceView)
+            if (!isLocalRendererInitialized) {
+                try {
+                    webRtcClient.initLocalVideoRenderer(localSurfaceView)
+                    isLocalRendererInitialized = true
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to initialize local video renderer in DisposableEffect")
+                }
+            }
             onDispose {
-                webRtcClient.releaseVideoRenderer(localSurfaceView, isLocal = true)
+                try {
+                    webRtcClient.releaseVideoRenderer(localSurfaceView, isLocal = true)
+                    isLocalRendererInitialized = false
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to release local video renderer on dispose")
+                }
             }
         }
 
@@ -272,14 +292,7 @@ private fun VideoRenderLayer(
                 modifier = Modifier
                     .size(width = 120.dp, height = 160.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .border(2.dp, NeonMint.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
-                update = { view ->
-                    try {
-                        webRtcClient.initLocalVideoRenderer(view)
-                    } catch (_: Exception) {
-                        // Renderer may already be initialized
-                    }
-                }
+                    .border(2.dp, NeonMint.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
             )
         }
     }
