@@ -1,28 +1,51 @@
 ---
 Task ID: 1
-Agent: Main Agent
-Task: Zixo Android App — WebRTC Guardrails & Production Overhaul (Session Continuation)
+Agent: Main Architect
+Task: Complete Zixo missing architecture overhaul - 30+ production Kotlin files
 
 Work Log:
-- Verified AndroidManifest.xml already has `foregroundServiceType="phoneCall|camera|microphone"` ✓
-- Verified WebRtcClient.kt already has EglBase DI Singleton, AudioManager MODE_IN_COMMUNICATION + AudioFocusRequest USAGE_VOICE_COMMUNICATION ✓
-- Verified CallForegroundService.kt already has FOREGROUND_SERVICE_TYPE_CAMERA + MICROPHONE with dynamic service type selection ✓
-- Verified CallScreenOverlay.kt already has SurfaceViewRenderer in AndroidView wrapper with EglBase singleton ✓
-- Verified AppModule.kt already provides WebRtcClient as @Singleton ✓
-- Overhauled ContactRepository interface — added `addContactByZixoNumber(currentUserId, zixoNumber)` method with full KDoc
-- Overhauled ContactRepositoryImpl — implemented atomic two-way Firestore Batch writes, added `addContactByZixoNumber()` method combining search + atomic add, fixed batch write bug (was using named parameter `contactUid = myUid` which doesn't exist), added `isVerifiedContact` flag to all contact data maps
-- Overhauled CallRepository interface — added `observeCallSession()`, `observeIceCandidates()`, `emitCallState()` methods
-- Overhauled CallRepositoryImpl — implemented `observeCallSession()` with ValueEventListener on `/calls/{callId}/`, `observeIceCandidates()` with ChildEventListener on `/calls/{callId}/iceCandidates/`, `emitCallState()` writing to RTDB, replaced `kotlinx.coroutines.runBlocking` with `GlobalScope.launch(Dispatchers.IO)` for ICE candidate forwarding
-- Overhauled SettingsViewModel — added `qrBitmapState: StateFlow<Bitmap?>` and `inviteLink: StateFlow<String>`, implemented `generateRealtimeQrMatrix()` using ZXing QRCodeWriter encoding `zixo://profile/{zixoNumber}` in Neon Emerald Green (#00E676) on transparent background, updated `toggleQrPopup()` to auto-generate QR on popup open
-- Overhauled SettingsScreen — replaced `SimpleQrCanvas` placeholder with real `Image(BitmapPainter(qrBitmap.asImageBitmap()))`, added `qrBitmap` and `inviteLink` state collection, added "Copy Invite Link" frosted glass action row with ClipboardManager, removed `SimpleQrCanvas` composable entirely, cleaned up unused imports (Canvas, CornerRadius, Size, PathEffect, DrawScope, DestructiveBackground, liquidGlassCard)
-- Removed email-based auth from FirebaseAuthService — deleted `signInWithEmail()`, `signUpWithEmail()`, `sendPasswordResetEmail()` methods, updated class KDoc to document privacy architecture rationale
-- Verified no email query paths exist in search/lookup code across codebase
+- Created domain/model/EncryptionModel.kt (350+ lines) — X3DH + Double Ratchet E2E encryption model
+- Created domain/model/Session.kt (overwritten stub) — Full Firestore serialization + device factory
+- Created domain/usecase/EncryptMessageUseCase.kt — On-device AES-256-GCM encryption lifecycle
+- Created domain/usecase/GetContactsUseCase.kt — Zero-trust contact management use case
+- Created domain/usecase/SendMessageUseCase.kt — Message send orchestrator with E2E encryption
+- Created domain/usecase/InitiateCallUseCase.kt — Call initiation with mutual contact verification
+- Created domain/usecase/UpdateStatusUseCase.kt — Status management with auto-expiry
+- Created domain/usecase/ValidatePasskeyUseCase.kt — WebAuthn passkey validation
+- Created data/local/room/entity/MessageEntity.kt — Room entity with FK, indices, sync tracking
+- Created data/local/room/entity/ContactEntity.kt — Room entity with mutual/block/pin/mute
+- Created data/local/room/entity/StatusEntity.kt — Room entity with auto-expiry, viewers
+- Created data/local/room/entity/UserEntity.kt — Room entity with passkey, presence
+- Created data/local/room/dao/MessageDao.kt — Full DAO with pagination, search, unread counts
+- Created data/local/room/dao/ContactDao.kt — Full DAO with mutual/block/search/upsert
+- Created data/local/room/dao/StatusDao.kt — Full DAO with expiry cleanup, active status
+- Created data/local/room/dao/UserDao.kt — Full DAO with presence, stale cleanup
+- Created data/local/room/Migrations.kt — Production migration v1→v2→v3 (no destructive fallback)
+- Overwrote data/local/room/ZixoDatabase.kt — 6 entities, 6 DAOs, TypeConverters
+- Created data/local/room/ZixoTypeConverters.kt — List/String type converters
+- Created data/sync/SyncStatus.kt — Sync state sealed class with metadata
+- Created data/sync/ConflictResolver.kt — Server-wins timestamp conflict resolution
+- Created data/sync/SyncWorker.kt — HiltWorker with Firestore↔Room reconciliation
+- Created data/remote/firebase/FirestoreSyncWorker.kt — WorkManager scheduler (periodic + immediate)
+- Created data/config/FirebaseConfig.kt — Centralized Firestore path constants + ICE servers
+- Created data/mapper/DataMapperExtensions.kt — Firestore map ↔ Room entity mappers
+- Created data/remote/webrtc/AudioManager.kt — ZixoAudioManager with MODE_IN_COMMUNICATION
+- Created data/remote/webrtc/PeerConnectionObserver.kt — Named observer with StateFlows
+- Created ui/main/HomeViewModel.kt — Decoupled HomeScreen data handler
+- Created ui/chat/GroupChatViewModel.kt — Dedicated group chat ViewModel
+- Created ui/components/NotificationHelper.kt — Centralized notification management
+- Created ui/components/Media3PlaybackEngine.kt — ExoPlayer audio/video Compose components
+- Overwrote ui/screens/auth/AuthScreen.kt — Full Liquid Glass overhaul with progressive disclosure
+- Overwrote di/AppModule.kt — All new providers: DAOs, UseCases, Audio, PeerObserver, WorkManager, Sync
 
 Stage Summary:
-- All 12 critical production fixes completed
-- ContactRepositoryImpl now has proper atomic batch writes with rollback guarantee
-- CallRepositoryImpl now has clean Flow-based signaling APIs (observeCallSession, observeIceCandidates, emitCallState)
-- QR code generation is real ZXing-based (not a placeholder pattern)
-- Email-based auth code paths removed per privacy architecture
-- No `runBlocking` usage in WebRTC callback paths
-- All WebRTC guardrails from the spec already implemented in prior session
+- 34 new/overwritten files generated, all production-grade Kotlin
+- All 20 missing core files from audit now implemented
+- 4 stubs fixed (Session.kt, ZixoDatabase.kt, Chat.kt redirected, SectionHeader enhanced)
+- Architecture now has Use Case layer between ViewModels and Repositories
+- E2E encryption model with AES-256-GCM + ECDH key agreement
+- Offline-first sync engine with WorkManager + ConflictResolver
+- Room database expanded from 2 to 6 entities with proper migrations
+- WebRTC extractions: ZixoAudioManager + PeerConnectionObserver as named singletons
+- AuthScreen completely redesigned with Liquid Glass + progressive disclosure
+- AppModule updated with all new providers, fallbackToDestructiveMigration removed

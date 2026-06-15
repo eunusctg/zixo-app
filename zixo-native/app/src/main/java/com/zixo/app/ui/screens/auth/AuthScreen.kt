@@ -2,15 +2,18 @@ package com.zixo.app.ui.screens.auth
 
 import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,322 +29,408 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.Capability
-import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.zixo.app.ui.components.GlassOutlinedTextField
-import com.zixo.app.ui.components.ZixoGlassBackground
-import com.zixo.app.ui.components.liquidGlassContainer
-import com.zixo.app.ui.theme.BackgroundGradientEnd
-import com.zixo.app.ui.theme.BackgroundGradientStart
-import com.zixo.app.ui.theme.DestructiveBackground
-import com.zixo.app.ui.theme.DestructiveText
+import com.zixo.app.ui.theme.AmoledBlack
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
 /**
- * Zixo Authentication Screen — Google Sign-In via CredentialManager.
+ * Kinetic Auth Page — iOS Liquid Glass Design Overhaul.
  *
- * This screen handles two flows:
- * 1. **Sign-In Flow**: User taps "Continue with Google" → CredentialManager
- *    launches the native Google Sign-In sheet → Token is verified by
- *    Cloudflare Edge Worker → Firebase Auth session is created.
- * 2. **Profile Setup Flow** (new users only): After successful Google Sign-In,
- *    new users are prompted to enter a display name. The system-generated
- *    8-digit Zixo Number and @username are minted by the Cloudflare backend.
+ * ## Visual Specifications:
+ * - Core backdrop: vertical gradient from #07191C (midnight slate teal) to #050C0E (dark charcoal)
+ * - Soft blurred radial blobs for deep visual dimensionality
+ * - Brand icon: squircle (RoundedCornerShape(38.dp)) filled with Neon Green (#00E676)
+ *   containing black block-serif "Z" centered
+ * - Title "Zixo" in bold white (38.sp)
+ * - Subtitle "Secure messaging & calls" in #A1B0B3
  *
- * No email/password fields — authentication is exclusively via Google
- * CredentialManager with WebAuthn passkey support.
+ * ## State-Driven Progressive Disclosure:
+ * - Initial state: frosted "Continue with Google" button (Liquid Glass, rgba(255,255,255,0.07))
+ * - Below: thin horizontal divider marked "OR"
+ * - Text link: "Login using email and password"
+ * - Tapped → AnimatedVisibility(expandVertically + fadeIn) reveals email/password fields
+ * - Secondary glowing green "Sign in with Email" button
  */
 @Composable
 fun AuthScreen(
+    onAuthSuccess: () -> Unit = {},
     viewModel: AuthViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val authState by viewModel.authState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        ZixoGlassBackground()
+    var showEmailFields by remember { mutableStateOf(false) }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
 
-        AuthScreenContent(
-            uiState = uiState,
-            onGoogleSignIn = {
-                val activity = context as? Activity
-                if (activity != null) {
-                    viewModel.signInWithGoogle(activity)
-                }
-            },
-            onDisplayNameChange = viewModel::onDisplayNameChange,
-            onProfileSetupSubmit = {
-                viewModel.setDisplayNameAndContinue(uiState.displayName)
-            },
-            onClearError = viewModel::clearError
-        )
+    // Auto-navigate on successful auth
+    LaunchedEffect(authState) {
+        if (authState is AuthState.Success) {
+            onAuthSuccess()
+        }
+        if (authState is AuthState.Error) {
+            snackbarHostState.showSnackbar((authState as AuthState.Error).message)
+        }
     }
-}
 
-@Composable
-private fun AuthScreenContent(
-    uiState: AuthUiState,
-    onGoogleSignIn: () -> Unit,
-    onDisplayNameChange: (String) -> Unit,
-    onProfileSetupSubmit: () -> Unit,
-    onClearError: () -> Unit
-) {
-    val focusManager = LocalFocusManager.current
-
+    // ── Core Backdrop Gradient Canvas ─────────────────────────────
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF07191C),
+                        Color(0xFF050C0E)
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(0f, 2000f)
+                )
+            )
             .systemBarsPadding()
             .imePadding()
     ) {
+        // ── Soft blurred radial blobs for depth ───────────────────
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 60.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(280.dp)
+                    .align(Alignment.TopStart)
+                    .offset(x = (-80).dp, y = 40.dp)
+                    .blur(80.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                NeonMint.copy(alpha = 0.08f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .size(200.dp)
+                    .align(Alignment.TopEnd)
+                    .offset(x = 40.dp, y = 160.dp)
+                    .blur(60.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF1A5C6E).copy(alpha = 0.12f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+        }
+
+        // ── Main Content Column ──────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
             Spacer(modifier = Modifier.height(80.dp))
 
-            // ── ZIXO Logo ──────────────────────────────
+            // ── Brand Icon: Squircle with "Z" ────────────────────
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .clip(RoundedCornerShape(38.dp))
+                    .background(NeonMint),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Z",
+                    fontSize = 44.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Serif,
+                    color = AmoledBlack,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // ── Title ─────────────────────────────────────────────
             Text(
-                text = "ZIXO",
-                color = NeonMint,
-                fontSize = 56.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 8.sp,
-                textAlign = TextAlign.Center
+                text = "Zixo",
+                fontSize = 38.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-            // ── Tagline ────────────────────────────────
             Text(
-                text = "Secure. Private. Connected.",
-                color = TextSecondary,
+                text = "Secure messaging & calls",
                 fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.5.sp,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // ── Sub-tagline explaining zero-trust model ──
-            Text(
-                text = "Find contacts by Zixo Number only",
-                color = TextSecondary.copy(alpha = 0.7f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Normal,
-                letterSpacing = 0.3.sp,
-                textAlign = TextAlign.Center
+                color = Color(0xFFA1B0B3),
+                letterSpacing = 0.3.sp
             )
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // ── Profile Setup (new users) ───────────────
-            AnimatedVisibility(
-                visible = uiState.isProfileSetupNeeded,
-                enter = fadeIn() + expandVertically() + slideInVertically(),
-                exit = fadeOut() + shrinkVertically() + slideOutVertically()
+            // ── Continue with Google Button (Liquid Glass) ────────
+            Button(
+                onClick = {
+                    keyboardController?.hide()
+                    viewModel.signInWithGoogle(context as Activity)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0x12FFFFFF),
+                    contentColor = TextPrimary
+                ),
+                border = BorderStroke(1.dp, Color(0x26FFFFFF)),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
-                        .liquidGlassContainer()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
+                if (authState is AuthState.Loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = NeonMint,
+                        strokeWidth = 2.dp
+                    )
+                } else {
                     Text(
-                        text = "Set Up Your Profile",
-                        color = TextPrimary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = "Continue with Google",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
                     )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "Your Zixo Number and username have been generated automatically.",
-                        color = TextSecondary,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    GlassOutlinedTextField(
-                        value = uiState.displayName,
-                        onValueChange = onDisplayNameChange,
-                        label = { Text("Display Name") },
-                        placeholder = { Text("Enter your display name") },
-                        maxLength = 50,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Words,
-                            keyboardType = KeyboardType.Text
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                focusManager.clearFocus()
-                                onProfileSetupSubmit()
-                            }
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Button(
-                        onClick = {
-                            focusManager.clearFocus()
-                            onProfileSetupSubmit()
-                        },
-                        enabled = !uiState.isLoading && uiState.displayName.isNotBlank(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonMint,
-                            contentColor = BackgroundGradientStart,
-                            disabledContainerColor = NeonMint.copy(alpha = 0.5f),
-                            disabledContentColor = BackgroundGradientStart.copy(alpha = 0.5f)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                    ) {
-                        if (uiState.isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                color = BackgroundGradientStart,
-                                strokeWidth = 2.5.dp
-                            )
-                        } else {
-                            Text(
-                                text = "Continue",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
                 }
             }
 
-            // ── Google Sign-In Button (main auth flow) ──
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ── OR Divider ────────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = Color(0x1AFFFFFF),
+                    thickness = 1.dp
+                )
+                Text(
+                    text = "  OR  ",
+                    color = Color(0xFF6878A0),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = Color(0x1AFFFFFF),
+                    thickness = 1.dp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ── Email Login Toggle Link ────────────────────────────
+            TextButton(
+                onClick = { showEmailFields = !showEmailFields }
+            ) {
+                Text(
+                    text = if (showEmailFields) "Hide email login" else "Login using email and password",
+                    color = Color(0xFF5B8DB8),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ── Progressive Disclosure: Email + Password Fields ───
             AnimatedVisibility(
-                visible = !uiState.isProfileSetupNeeded,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
+                visible = showEmailFields,
+                enter = expandVertically(animationSpec = spring()) + fadeIn(),
+                exit = shrinkVertically(animationSpec = spring()) + fadeOut()
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // ── Continue with Google Button ─────────
-                    Button(
-                        onClick = onGoogleSignIn,
-                        enabled = !uiState.isLoading,
+                    // Email Field
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Email", color = TextSecondary) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Email,
+                                contentDescription = null,
+                                tint = TextSecondary
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonMint,
-                            contentColor = BackgroundGradientStart,
-                            disabledContainerColor = NeonMint.copy(alpha = 0.5f),
-                            disabledContentColor = BackgroundGradientStart.copy(alpha = 0.5f)
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonMint,
+                            unfocusedBorderColor = Color(0x33FFFFFF),
+                            focusedContainerColor = Color(0x0DFFFFFF),
+                            unfocusedContainerColor = Color(0x08FFFFFF),
+                            cursorColor = NeonMint,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
                         ),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Next
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Password Field
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password", color = TextSecondary) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = TextSecondary
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = NeonMint,
+                            unfocusedBorderColor = Color(0x33FFFFFF),
+                            focusedContainerColor = Color(0x0DFFFFFF),
+                            unfocusedContainerColor = Color(0x08FFFFFF),
+                            cursorColor = NeonMint,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                keyboardController?.hide()
+                                viewModel.signInWithEmail(email, password)
+                            }
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // ── Sign in with Email Button (Glowing Green) ──
+                    Button(
+                        onClick = {
+                            keyboardController?.hide()
+                            viewModel.signInWithEmail(email, password)
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .height(52.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NeonMint,
+                            contentColor = AmoledBlack
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(
+                            defaultElevation = 4.dp
+                        )
                     ) {
-                        if (uiState.isLoading) {
+                        if (authState is AuthState.Loading) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = BackgroundGradientStart,
-                                strokeWidth = 2.5.dp
+                                modifier = Modifier.size(20.dp),
+                                color = AmoledBlack,
+                                strokeWidth = 2.dp
                             )
                         } else {
-                            Icon(
-                                imageVector = Icons.Filled.Person,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = BackgroundGradientStart
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Continue with Google",
+                                text = "Sign in with Email",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.3.sp
+                                color = AmoledBlack
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // ── Security Note ───────────────────────
-                    Text(
-                        text = "Your Zixo Number and @username are generated automatically.\nNo one can search you by name — only by your 8-digit number.",
-                        color = TextSecondary.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 16.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(1f, fill = false))
-
-            // ── Error Message ──────────────────────────
-            AnimatedVisibility(
-                visible = !uiState.errorMessage.isNullOrBlank(),
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                uiState.errorMessage?.let { message ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = DestructiveBackground,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = message,
-                            color = DestructiveText,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
 
             Spacer(modifier = Modifier.height(32.dp))
+
+            // ── Snackbar ──────────────────────────────────────────
+            SnackbarHost(hostState = snackbarHostState)
         }
     }
+}
+
+// ── Offset helper (suppressed - used for blob positioning) ──────
+@Suppress("unused")
+private fun Modifier.offset(x: Int = 0, y: Int = 0): Modifier =
+    this.then(Modifier.padding(start = x.dp, top = y.dp))
+
+// ── Auth State ──────────────────────────────────────────────────
+sealed class AuthState {
+    data object Idle : AuthState()
+    data object Loading : AuthState()
+    data object Success : AuthState()
+    data class Error(val message: String) : AuthState()
 }

@@ -9,13 +9,25 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
+import androidx.work.WorkManager
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.zixo.app.data.local.PreferencesDataStore
 import com.zixo.app.data.local.room.ZixoDatabase
+import com.zixo.app.data.local.room.ZixoMigrations
 import com.zixo.app.data.local.room.dao.CallLogDao
 import com.zixo.app.data.local.room.dao.ChatDao
+import com.zixo.app.data.local.room.dao.ContactDao
+import com.zixo.app.data.local.room.dao.MessageDao
+import com.zixo.app.data.local.room.dao.StatusDao
+import com.zixo.app.data.local.room.dao.UserDao
 import com.zixo.app.data.remote.cloudflare.CloudflareApi
 import com.zixo.app.data.remote.cloudflare.CloudflareApiService
+import com.zixo.app.data.remote.firebase.FirestoreSyncWorker
+import com.zixo.app.data.remote.webrtc.FirebaseSignalingClient
+import com.zixo.app.data.remote.webrtc.PeerConnectionObserver
+import com.zixo.app.data.remote.webrtc.WebRtcClient
+import com.zixo.app.data.remote.webrtc.ZixoAudioManager
+import com.zixo.app.data.sync.ConflictResolver
 import com.zixo.app.domain.repository.AuthRepository
 import com.zixo.app.domain.repository.CallRepository
 import com.zixo.app.domain.repository.ChatRepository
@@ -28,8 +40,13 @@ import com.zixo.app.data.repository.ChatRepositoryImpl
 import com.zixo.app.data.repository.ContactRepositoryImpl
 import com.zixo.app.data.repository.SettingsRepositoryImpl
 import com.zixo.app.data.repository.StatusRepositoryImpl
-import com.zixo.app.data.remote.webrtc.FirebaseSignalingClient
-import com.zixo.app.data.remote.webrtc.WebRtcClient
+import com.zixo.app.domain.usecase.EncryptMessageUseCase
+import com.zixo.app.domain.usecase.GetContactsUseCase
+import com.zixo.app.domain.usecase.InitiateCallUseCase
+import com.zixo.app.domain.usecase.SendMessageUseCase
+import com.zixo.app.domain.usecase.UpdateStatusUseCase
+import com.zixo.app.domain.usecase.ValidatePasskeyUseCase
+import com.zixo.app.ui.components.NotificationHelper
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
@@ -53,19 +70,17 @@ import javax.inject.Singleton
 /**
  * Hilt dependency injection module providing all application-scoped dependencies.
  *
- * Provides:
- * - [DataStore]<[Preferences]> for user preferences persistence
- * - [ZixoDatabase] and DAOs for local Room database
- * - [Json], [OkHttpClient], [Retrofit] for networking
- * - [CloudflareApiService] for Cloudflare Edge Worker API
- * - [WebRtcClient] for peer-to-peer WebRTC calls
- * - [FirebaseSignalingClient] for Firebase Realtime DB call signaling
- * - All repository implementations bound to their domain interfaces
- *
- * All Firebase instances ([FirebaseAuth], [FirebaseFirestore],
- * [FirebaseDatabase], [FirebaseStorage]) are provided by [FirebaseModule].
- *
- * No LiveKit-related providers exist in this module.
+ * Updated to include:
+ * - All 6 Room DAOs (ChatDao, CallLogDao, MessageDao, ContactDao, StatusDao, UserDao)
+ * - ZixoAudioManager singleton for WebRTC audio calibration
+ * - PeerConnectionObserver singleton for WebRTC event handling
+ * - NotificationHelper singleton for centralized notification management
+ * - WorkManager instance for background sync scheduling
+ * - FirestoreSyncWorker for sync orchestration
+ * - ConflictResolver for server-wins timestamp resolution
+ * - All 5 Use Cases (GetContacts, SendMessage, InitiateCall, UpdateStatus, ValidatePasskey)
+ * - EncryptMessageUseCase for E2E encryption
+ * - Proper Room migrations (no fallbackToDestructiveMigration)
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -92,7 +107,7 @@ object AppModule {
     )
 
     // ════════════════════════════════════════════════════════
-    // Room Database
+    // Room Database — Proper Migrations, NO destructive fallback
     // ════════════════════════════════════════════════════════
 
     @Provides
@@ -104,16 +119,15 @@ object AppModule {
         ZixoDatabase::class.java,
         ZixoDatabase.DATABASE_NAME
     )
-        .fallbackToDestructiveMigration()
+        .addMigrations(*ZixoMigrations.ALL_MIGRATIONS.toTypedArray())
         .build()
 
-    @Provides
-    fun provideChatDao(database: ZixoDatabase): ChatDao =
-        database.chatDao()
-
-    @Provides
-    fun provideCallLogDao(database: ZixoDatabase): CallLogDao =
-        database.callLogDao()
+    @Provides fun provideChatDao(db: ZixoDatabase): ChatDao = db.chatDao()
+    @Provides fun provideCallLogDao(db: ZixoDatabase): CallLogDao = db.callLogDao()
+    @Provides fun provideMessageDao(db: ZixoDatabase): MessageDao = db.messageDao()
+    @Provides fun provideContactDao(db: ZixoDatabase): ContactDao = db.contactDao()
+    @Provides fun provideStatusDao(db: ZixoDatabase): StatusDao = db.statusDao()
+    @Provides fun provideUserDao(db: ZixoDatabase): UserDao = db.userDao()
 
     // ════════════════════════════════════════════════════════
     // Networking
@@ -144,10 +158,7 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideRetrofit(
-        okHttpClient: OkHttpClient,
-        json: Json
-    ): Retrofit = Retrofit.Builder()
+    fun provideRetrofit(okHttpClient: OkHttpClient, json: Json): Retrofit = Retrofit.Builder()
         .baseUrl(BASE_URL)
         .client(okHttpClient)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
@@ -169,43 +180,116 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideWebRtcClient(
-        @ApplicationContext context: Context
-    ): WebRtcClient = WebRtcClient(context)
+    fun provideWebRtcClient(@ApplicationContext context: Context): WebRtcClient =
+        WebRtcClient(context)
 
     @Provides
     @Singleton
-    fun provideFirebaseSignalingClient(
-        firebaseDatabase: FirebaseDatabase
-    ): FirebaseSignalingClient = FirebaseSignalingClient(firebaseDatabase)
+    fun provideFirebaseSignalingClient(firebaseDatabase: FirebaseDatabase): FirebaseSignalingClient =
+        FirebaseSignalingClient(firebaseDatabase)
+
+    @Provides
+    @Singleton
+    fun provideZixoAudioManager(@ApplicationContext context: Context): ZixoAudioManager =
+        ZixoAudioManager(context)
+
+    @Provides
+    @Singleton
+    fun providePeerConnectionObserver(): PeerConnectionObserver =
+        PeerConnectionObserver()
+
+    // ════════════════════════════════════════════════════════
+    // WorkManager & Sync Engine
+    // ════════════════════════════════════════════════════════
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager =
+        WorkManager.getInstance(context)
+
+    @Provides
+    @Singleton
+    fun provideFirestoreSyncWorker(
+        @ApplicationContext context: Context,
+        workManager: WorkManager
+    ): FirestoreSyncWorker = FirestoreSyncWorker(context, workManager)
+
+    @Provides
+    @Singleton
+    fun provideConflictResolver(): ConflictResolver = ConflictResolver()
+
+    // ════════════════════════════════════════════════════════
+    // Notification Helper
+    // ════════════════════════════════════════════════════════
+
+    @Provides
+    @Singleton
+    fun provideNotificationHelper(@ApplicationContext context: Context): NotificationHelper =
+        NotificationHelper(context)
+
+    // ════════════════════════════════════════════════════════
+    // Domain Use Cases
+    // ════════════════════════════════════════════════════════
+
+    @Provides
+    @Singleton
+    fun provideEncryptMessageUseCase(
+        contactRepository: ContactRepository
+    ): EncryptMessageUseCase = EncryptMessageUseCase(contactRepository)
+
+    @Provides
+    @Singleton
+    fun provideGetContactsUseCase(
+        contactRepository: ContactRepository
+    ): GetContactsUseCase = GetContactsUseCase(contactRepository)
+
+    @Provides
+    @Singleton
+    fun provideSendMessageUseCase(
+        chatRepository: ChatRepository,
+        contactRepository: ContactRepository,
+        encryptMessageUseCase: EncryptMessageUseCase
+    ): SendMessageUseCase = SendMessageUseCase(chatRepository, contactRepository, encryptMessageUseCase)
+
+    @Provides
+    @Singleton
+    fun provideInitiateCallUseCase(
+        callRepository: CallRepository,
+        contactRepository: ContactRepository
+    ): InitiateCallUseCase = InitiateCallUseCase(callRepository, contactRepository)
+
+    @Provides
+    @Singleton
+    fun provideUpdateStatusUseCase(
+        statusRepository: StatusRepository,
+        contactRepository: ContactRepository
+    ): UpdateStatusUseCase = UpdateStatusUseCase(statusRepository, contactRepository)
+
+    @Provides
+    @Singleton
+    fun provideValidatePasskeyUseCase(
+        authRepository: AuthRepository
+    ): ValidatePasskeyUseCase = ValidatePasskeyUseCase(authRepository)
 
     // ════════════════════════════════════════════════════════
     // Repository Bindings
     // ════════════════════════════════════════════════════════
-    // Binds domain repository interfaces to their concrete implementations.
-    // All implementations are @Singleton and injected via @Inject constructor().
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideAuthRepository(impl: AuthRepositoryImpl): AuthRepository = impl
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideContactRepository(impl: ContactRepositoryImpl): ContactRepository = impl
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideChatRepository(impl: ChatRepositoryImpl): ChatRepository = impl
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideCallRepository(impl: CallRepositoryImpl): CallRepository = impl
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository = impl
 
-    @Provides
-    @Singleton
+    @Provides @Singleton
     fun provideStatusRepository(impl: StatusRepositoryImpl): StatusRepository = impl
 }
