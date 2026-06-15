@@ -144,4 +144,20 @@ interface CallRepository {
      * @param state The call state string (e.g., "ringing", "connected", "ended").
      */
     suspend fun emitCallState(callId: String, state: String)
+
+    /**
+     * Gets all calls (alias for getCallHistory with additional metadata).
+     * Used by the CallsViewModel for filtered call log display.
+     *
+     * @return A flow emitting the list of [CallLogEntry] entries.
+     */
+    fun getAllCalls(): Flow<List<CallLogEntry>>
+
+    /**
+     * Clears the entire call history for the current user.
+     * Removes all call log entries from Firestore.
+     *
+     * @return A flow emitting Result success or failure.
+     */
+    fun clearCallHistory(): Flow<Result<Unit>>
 }

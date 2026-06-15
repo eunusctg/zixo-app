@@ -42,10 +42,13 @@ import com.zixo.app.ui.screens.calls.CallsScreen
 import com.zixo.app.ui.settings.EditProfileScreen
 import com.zixo.app.ui.settings.SettingsScreen
 import com.zixo.app.ui.settings.SettingsViewModel
+import com.zixo.app.ui.settings.SubPages.AboutUsScreen
 import com.zixo.app.ui.settings.SubPages.AccountSecurityScreen
 import com.zixo.app.ui.settings.SubPages.ChatConfigScreen
+import com.zixo.app.ui.settings.SubPages.ContactUsScreen
 import com.zixo.app.ui.settings.SubPages.NotificationManagerScreen
 import com.zixo.app.ui.settings.SubPages.PrivacyCenterScreen
+import com.zixo.app.ui.settings.SubPages.PrivacyPolicyScreen
 import com.zixo.app.ui.settings.SubPages.StorageDataHubScreen
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.graphics.Color
@@ -77,6 +80,9 @@ sealed class ZixoRoute(val route: String) {
     data object ChatConfig : ZixoRoute("chat_config")
     data object NotificationManager : ZixoRoute("notification_manager")
     data object StorageDataHub : ZixoRoute("storage_data_hub")
+    data object AboutUs : ZixoRoute("about_us")
+    data object ContactUs : ZixoRoute("contact_us")
+    data object PrivacyPolicy : ZixoRoute("privacy_policy")
     data object CallScreen : ZixoRoute("call/{callId}") {
         fun createRoute(callId: String) = "call/$callId"
     }
@@ -344,6 +350,36 @@ fun ZixoNavHost(
             StorageDataHubScreen(
                 onBackClick = { navController.popBackStack() },
                 viewModel = settingsViewModel,
+            )
+        }
+
+        // ── About Us ───────────────────────────────────────────
+        composable(route = ZixoRoute.AboutUs.route) {
+            AboutUsScreen(
+                onBackClick = { navController.popBackStack() },
+                onPrivacyPolicyClick = {
+                    navController.navigate(ZixoRoute.PrivacyPolicy.route)
+                },
+                onTermsOfServiceClick = {
+                    // TODO: Navigate to Terms of Service when created
+                },
+                onLicensesClick = {
+                    // TODO: Navigate to Open Source Licenses when created
+                },
+            )
+        }
+
+        // ── Contact Us ─────────────────────────────────────────
+        composable(route = ZixoRoute.ContactUs.route) {
+            ContactUsScreen(
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        // ── Privacy Policy ─────────────────────────────────────
+        composable(route = ZixoRoute.PrivacyPolicy.route) {
+            PrivacyPolicyScreen(
+                onBackClick = { navController.popBackStack() },
             )
         }
 

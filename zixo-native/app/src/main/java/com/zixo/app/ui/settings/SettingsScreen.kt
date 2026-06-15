@@ -67,7 +67,7 @@ import com.zixo.app.ui.components.GlassSwitch
 import com.zixo.app.ui.components.ZixoGlassBackground
 import com.zixo.app.ui.components.diagonalMeshGradient
 import com.zixo.app.ui.components.liquidGlassContainer
-import com.zixo.app.ui.navigation.ZixoRoutes
+import com.zixo.app.ui.navigation.ZixoRoute
 import com.zixo.app.ui.theme.DestructiveText
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
@@ -116,7 +116,7 @@ fun SettingsScreen(
                     bio = userProfile.bio,
                     avatarUrl = userProfile.avatarUrl,
                     onQrClick = { viewModel.toggleQrPopup() },
-                    onProfileClick = { navController.navigate(ZixoRoutes.EDIT_PROFILE) }
+                    onProfileClick = { navController.navigate(ZixoRoute.EditProfile.route) }
                 )
             }
 
@@ -133,31 +133,63 @@ fun SettingsScreen(
                         emoji = "🔒",
                         title = "Account & Security",
                         subtitle = "Passkeys, biometrics, verification",
-                        onClick = { navController.navigate(ZixoRoutes.ACCOUNT_SECURITY) }
+                        onClick = { navController.navigate(ZixoRoute.AccountSecurity.route) }
                     )
                     SettingsNavItem(
                         emoji = "🛡️",
                         title = "Privacy Center",
                         subtitle = "Last seen, read receipts, blocking",
-                        onClick = { navController.navigate(ZixoRoutes.PRIVACY_CENTER) }
+                        onClick = { navController.navigate(ZixoRoute.PrivacyCenter.route) }
                     )
                     SettingsNavItem(
                         emoji = "💬",
                         title = "Chat Configuration",
                         subtitle = "Theme, wallpaper, font size, ephemeral",
-                        onClick = { navController.navigate(ZixoRoutes.CHAT_CONFIG) }
+                        onClick = { navController.navigate(ZixoRoute.ChatConfig.route) }
                     )
                     SettingsNavItem(
                         emoji = "🔔",
                         title = "Notifications",
                         subtitle = "Tones, vibration, ringtone",
-                        onClick = { navController.navigate(ZixoRoutes.NOTIFICATION_MANAGER) }
+                        onClick = { navController.navigate(ZixoRoute.NotificationManager.route) }
                     )
                     SettingsNavItem(
                         emoji = "💾",
                         title = "Storage & Data",
                         subtitle = "Usage, auto-download, upload quality",
-                        onClick = { navController.navigate(ZixoRoutes.STORAGE_DATA_HUB) }
+                        onClick = { navController.navigate(ZixoRoute.StorageDataHub.route) }
+                    )
+                }
+            }
+
+            // ── App Info & Support Section ──────────────────────────────
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .liquidGlassContainer()
+                        .padding(4.dp)
+                ) {
+                    SettingsNavItem(
+                        emoji = "ℹ️",
+                        title = "About Zixo",
+                        subtitle = "Version, features, licenses",
+                        onClick = { navController.navigate(ZixoRoute.AboutUs.route) }
+                    )
+                    SettingsNavItem(
+                        emoji = "📞",
+                        title = "Contact Us",
+                        subtitle = "Support, feedback, FAQ",
+                        onClick = { navController.navigate(ZixoRoute.ContactUs.route) }
+                    )
+                    SettingsNavItem(
+                        emoji = "📜",
+                        title = "Privacy Policy",
+                        subtitle = "Data handling, encryption, your rights",
+                        onClick = { navController.navigate(ZixoRoute.PrivacyPolicy.route) }
                     )
                 }
             }

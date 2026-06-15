@@ -67,6 +67,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.LaunchedEffect
+import com.zixo.app.domain.repository.AuthState
 import com.zixo.app.ui.theme.AmoledBlack
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
@@ -106,13 +108,19 @@ fun AuthScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
     // Auto-navigate on successful auth
     LaunchedEffect(authState) {
-        if (authState is AuthState.Success) {
+        if (authState is AuthState.Authenticated) {
             onAuthSuccess()
         }
-        if (authState is AuthState.Error) {
-            snackbarHostState.showSnackbar((authState as AuthState.Error).message)
+    }
+
+    // Show error from UiState
+    LaunchedEffect(uiState.errorMessage) {
+        uiState.errorMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -238,7 +246,7 @@ fun AuthScreen(
                 border = BorderStroke(1.dp, Color(0x26FFFFFF)),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
             ) {
-                if (authState is AuthState.Loading) {
+                if (uiState.isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         color = NeonMint,
@@ -368,7 +376,9 @@ fun AuthScreen(
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 keyboardController?.hide()
-                                viewModel.signInWithEmail(email, password)
+                                viewModel.onEmailChange(email)
+                                viewModel.onPasswordChange(password)
+                                viewModel.signInWithEmail()
                             }
                         ),
                         singleLine = true
@@ -380,7 +390,9 @@ fun AuthScreen(
                     Button(
                         onClick = {
                             keyboardController?.hide()
-                            viewModel.signInWithEmail(email, password)
+                            viewModel.onEmailChange(email)
+                            viewModel.onPasswordChange(password)
+                            viewModel.signInWithEmail()
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -394,7 +406,7 @@ fun AuthScreen(
                             defaultElevation = 4.dp
                         )
                     ) {
-                        if (authState is AuthState.Loading) {
+                        if (uiState.isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 color = AmoledBlack,
@@ -426,11 +438,3 @@ fun AuthScreen(
 @Suppress("unused")
 private fun Modifier.offset(x: Int = 0, y: Int = 0): Modifier =
     this.then(Modifier.padding(start = x.dp, top = y.dp))
-
-// ── Auth State ──────────────────────────────────────────────────
-sealed class AuthState {
-    data object Idle : AuthState()
-    data object Loading : AuthState()
-    data object Success : AuthState()
-    data class Error(val message: String) : AuthState()
-}

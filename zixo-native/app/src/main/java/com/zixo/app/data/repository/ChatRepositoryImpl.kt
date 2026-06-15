@@ -401,6 +401,222 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    // ── Get Chat Thread ──────────────────────────────────────────────────────
+
+    override fun getChatThread(chatId: String): Flow<ChatThreadModel?> = callbackFlow {
+        val myUid = currentUid
+        if (myUid == null) {
+            trySend(null)
+            close()
+            return@callbackFlow
+        }
+
+        val subscription = threadsCollection.document(chatId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Timber.e(error, "Error observing chat thread: %s", chatId)
+                    trySend(null)
+                    return@addSnapshotListener
+                }
+
+                val thread = snapshot?.let { doc ->
+                    try {
+                        mapToChatThreadModel(doc, myUid)
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to map thread: %s", doc.id)
+                        null
+                    }
+                }
+
+                trySend(thread)
+            }
+
+        awaitClose { subscription.remove() }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Get Group Members ────────────────────────────────────────────────────
+
+    override fun getGroupMembers(chatId: String): Flow<List<ThreadParticipant>> = callbackFlow {
+        val subscription = threadsCollection.document(chatId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Timber.e(error, "Error observing group members for: %s", chatId)
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+
+                @Suppress("UNCHECKED_CAST")
+                val profilesRaw = snapshot?.get("participantProfiles") as? Map<String, Map<String, Any>>
+                    ?: emptyMap()
+
+                val members = profilesRaw.map { (uid, data) ->
+                    val roleStr = data["role"] as? String ?: "MEMBER"
+                    ThreadParticipant(
+                        uid = uid,
+                        displayName = data["displayName"] as? String ?: "",
+                        avatarUrl = data["avatarUrl"] as? String ?: "",
+                        zixoNumber = data["zixoNumber"] as? String ?: "",
+                        role = try { ParticipantRole.valueOf(roleStr) } catch (_: Exception) { ParticipantRole.MEMBER },
+                        joinedAt = data["joinedAt"] as? Long ?: 0L,
+                        isOnline = data["isOnline"] as? Boolean ?: false
+                    )
+                }
+
+                trySend(members)
+            }
+
+        awaitClose { subscription.remove() }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Update Group Name ────────────────────────────────────────────────────
+
+    override fun updateGroupName(chatId: String, name: String): Flow<Result<Unit>> = flow {
+        try {
+            threadsCollection.document(chatId)
+                .update("groupName", name)
+                .await()
+            Timber.d("Group name updated: %s", chatId)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update group name: %s", chatId)
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Update Group Description ─────────────────────────────────────────────
+
+    override fun updateGroupDescription(chatId: String, description: String): Flow<Result<Unit>> = flow {
+        try {
+            threadsCollection.document(chatId)
+                .update("groupDescription", description)
+                .await()
+            Timber.d("Group description updated: %s", chatId)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update group description: %s", chatId)
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Update Member Role ───────────────────────────────────────────────────
+
+    override fun updateMemberRole(chatId: String, userId: String, role: ParticipantRole): Flow<Result<Unit>> = flow {
+        try {
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            // Verify the current user is an admin
+            val threadDoc = threadsCollection.document(chatId).get().await()
+            @Suppress("UNCHECKED_CAST")
+            val adminUids = (threadDoc.get("groupAdminUids") as? List<String>) ?: emptyList()
+            if (myUid !in adminUids) {
+                emit(Result.failure(SecurityException("Only admins can change member roles")))
+                return@flow
+            }
+
+            // Update the participant's role in the denormalized profiles
+            val fieldPath = "participantProfiles.$userId.role"
+            threadsCollection.document(chatId)
+                .update(fieldPath, role.name)
+                .await()
+
+            // Update admin list if changing to/from admin role
+            if (role == ParticipantRole.ADMIN && myUid !in adminUids) {
+                threadsCollection.document(chatId)
+                    .update("groupAdminUids", adminUids + userId)
+                    .await()
+            } else if (role != ParticipantRole.ADMIN && userId in adminUids) {
+                threadsCollection.document(chatId)
+                    .update("groupAdminUids", adminUids.filter { it != userId })
+                    .await()
+            }
+
+            Timber.d("Member role updated: %s -> %s in %s", userId, role.name, chatId)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update member role")
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Remove Group Member ──────────────────────────────────────────────────
+
+    override fun removeGroupMember(chatId: String, userId: String): Flow<Result<Unit>> = flow {
+        try {
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            // Verify admin status
+            val threadDoc = threadsCollection.document(chatId).get().await()
+            @Suppress("UNCHECKED_CAST")
+            val adminUids = (threadDoc.get("groupAdminUids") as? List<String>) ?: emptyList()
+            if (myUid !in adminUids) {
+                emit(Result.failure(SecurityException("Only admins can remove members")))
+                return@flow
+            }
+
+            @Suppress("UNCHECKED_CAST")
+            val participantUids = (threadDoc.get("participantUids") as? List<String>) ?: emptyList()
+            val updatedUids = participantUids.filter { it != userId }
+
+            val updates = mapOf(
+                "participantUids" to updatedUids,
+                "groupAdminUids" to adminUids.filter { it != userId }
+            )
+
+            threadsCollection.document(chatId).update(updates).await()
+
+            Timber.d("Member removed: %s from %s", userId, chatId)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to remove group member")
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Leave Group ──────────────────────────────────────────────────────────
+
+    override fun leaveGroup(chatId: String): Flow<Result<Unit>> = flow {
+        try {
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            val threadDoc = threadsCollection.document(chatId).get().await()
+            @Suppress("UNCHECKED_CAST")
+            val participantUids = (threadDoc.get("participantUids") as? List<String>) ?: emptyList()
+            @Suppress("UNCHECKED_CAST")
+            val adminUids = (threadDoc.get("groupAdminUids") as? List<String>) ?: emptyList()
+
+            val updatedUids = participantUids.filter { it != myUid }
+            val updatedAdminUids = adminUids.filter { it != myUid }
+
+            val updates = mutableMapOf<String, Any>(
+                "participantUids" to updatedUids,
+                "groupAdminUids" to updatedAdminUids
+            )
+
+            threadsCollection.document(chatId).update(updates.toMap()).await()
+
+            Timber.d("Left group: %s", chatId)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to leave group: %s", chatId)
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Toggle Mute Chat ─────────────────────────────────────────────────────
+
+    override fun toggleMuteChat(chatId: String, isMuted: Boolean): Flow<Result<Unit>> = flow {
+        try {
+            threadsCollection.document(chatId)
+                .update("isMuted", isMuted)
+                .await()
+            Timber.d("Chat mute toggled: %s -> %b", chatId, isMuted)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to toggle mute: %s", chatId)
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
     // ── Mapping Helpers ───────────────────────────────────────────────────────
 
     private fun mapToChatThreadModel(

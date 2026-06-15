@@ -1,0 +1,1290 @@
+     1→package com.zixo.app.ui.chat
+     2→
+     3→import androidx.compose.animation.AnimatedVisibility
+     4→import androidx.compose.animation.fadeIn
+     5→import androidx.compose.animation.fadeOut
+     6→import androidx.compose.animation.slideInVertically
+     7→import androidx.compose.animation.slideOutVertically
+     8→import androidx.compose.foundation.ExperimentalFoundationApi
+     9→import androidx.compose.foundation.background
+    10→import androidx.compose.foundation.border
+    11→import androidx.compose.foundation.combinedClickable
+    12→import androidx.compose.foundation.interaction.MutableInteractionSource
+    13→import androidx.compose.foundation.layout.Arrangement
+    14→import androidx.compose.foundation.layout.Box
+    15→import androidx.compose.foundation.layout.Column
+    16→import androidx.compose.foundation.layout.Row
+    17→import androidx.compose.foundation.layout.Spacer
+    18→import androidx.compose.foundation.layout.fillMaxSize
+    19→import androidx.compose.foundation.layout.fillMaxWidth
+    20→import androidx.compose.foundation.layout.height
+    21→import androidx.compose.foundation.layout.imePadding
+    22→import androidx.compose.foundation.layout.padding
+    23→import androidx.compose.foundation.layout.size
+    24→import androidx.compose.foundation.layout.width
+    25→import androidx.compose.foundation.lazy.LazyColumn
+    26→import androidx.compose.foundation.lazy.LazyRow
+    27→import androidx.compose.foundation.lazy.items
+    28→import androidx.compose.foundation.lazy.rememberLazyListState
+    29→import androidx.compose.foundation.shape.CircleShape
+    30→import androidx.compose.foundation.shape.RoundedCornerShape
+    31→import androidx.compose.material.icons.Icons
+    32→import androidx.compose.material.icons.automirrored.filled.ArrowBack
+    33→import androidx.compose.material.icons.filled.Call
+    34→import androidx.compose.material.icons.filled.Close
+    35→import androidx.compose.material.icons.filled.ContentCopy
+    36→import androidx.compose.material.icons.filled.Delete
+    37→import androidx.compose.material.icons.filled.DeleteForever
+    38→import androidx.compose.material.icons.filled.Forward
+    39→import androidx.compose.material.icons.filled.Group
+    40→import androidx.compose.material.icons.filled.Image
+    41→import androidx.compose.material.icons.filled.Info
+    42→import androidx.compose.material.icons.filled.Logout
+    43→import androidx.compose.material.icons.filled.PersonAdd
+    44→import androidx.compose.material.icons.filled.PlayArrow
+    45→import androidx.compose.material.icons.filled.Reply
+    46→import androidx.compose.material.icons.filled.Send
+    47→import androidx.compose.material.icons.filled.Videocam
+    48→import androidx.compose.material3.Icon
+    49→import androidx.compose.material3.IconButton
+    50→import androidx.compose.material3.Scaffold
+    51→import androidx.compose.material3.SnackbarHost
+    52→import androidx.compose.material3.SnackbarHostState
+    53→import androidx.compose.material3.Text
+    54→import androidx.compose.material3.TopAppBar
+    55→import androidx.compose.material3.TopAppBarDefaults
+    56→import androidx.compose.runtime.Composable
+    57→import androidx.compose.runtime.LaunchedEffect
+    58→import androidx.compose.runtime.collectAsState
+    59→import androidx.compose.runtime.getValue
+    60→import androidx.compose.runtime.mutableStateOf
+    61→import androidx.compose.runtime.remember
+    62→import androidx.compose.runtime.setValue
+    63→import androidx.compose.ui.Alignment
+    64→import androidx.compose.ui.Modifier
+    65→import androidx.compose.ui.draw.clip
+    66→import androidx.compose.ui.graphics.Color
+    67→import androidx.compose.ui.layout.ContentScale
+    68→import androidx.compose.ui.platform.LocalClipboardManager
+    69→import androidx.compose.ui.text.AnnotatedString
+    70→import androidx.compose.ui.text.font.FontWeight
+    71→import androidx.compose.ui.text.style.TextAlign
+    72→import androidx.compose.ui.text.style.TextOverflow
+    73→import androidx.compose.ui.unit.dp
+    74→import androidx.compose.ui.unit.sp
+    75→import androidx.hilt.navigation.compose.hiltViewModel
+    76→import androidx.navigation.NavController
+    77→import coil.compose.AsyncImage
+    78→import com.zixo.app.domain.model.CallState
+    79→import com.zixo.app.domain.model.CommunicationGate
+    80→import com.zixo.app.domain.model.MessageContentType
+    81→import com.zixo.app.domain.model.MessageModel
+    82→import com.zixo.app.domain.model.ParticipantRole
+    83→import com.zixo.app.domain.model.ThreadParticipant
+    84→import com.zixo.app.ui.components.GlassOutlinedTextField
+    85→import com.zixo.app.ui.components.ZixoGlassBackground
+    86→import com.zixo.app.ui.components.liquidGlassCard
+    87→import com.zixo.app.ui.components.liquidGlassContainer
+    88→import com.zixo.app.ui.theme.DarkPetrolCharcoal
+    89→import com.zixo.app.ui.theme.NeonMint
+    90→import com.zixo.app.ui.theme.TextPrimary
+    91→import com.zixo.app.ui.theme.TextSecondary
+    92→
+    93→// ── Design Tokens ─────────────────────────────────────────────────────────────
+    94→
+    95→private val NeonMintAlpha15 = NeonMint.copy(alpha = 0.15f)
+    96→private val IncomingBubbleColor = Color(0x1A1A2A32)
+    97→private val GlassBorderColor = Color(0x33FFFFFF)
+    98→private val InputTrayHeight = 74.dp
+    99→private val InputTrayCornerSize = 28.dp
+   100→private val BubbleCornerSize = 16.dp
+   101→private val OnlineIndicatorColor = NeonMint
+   102→private val ReactionEmojis = listOf("❤️", "😂", "😮", "😢", "👍", "🔥", "🎉", "💯")
+   103→private val AdminBadgeColor = NeonMint
+   104→
+   105→// ── Screen Entry Point ────────────────────────────────────────────────────────
+   106→
+   107→/**
+   108→ * Group chat screen — extends ChatMessageScreen with group-specific features.
+   109→ *
+   110→ * Features:
+   111→ * - Group-specific header: group name, avatar, participant count
+   112→ * - Tap header to show group info panel (slide-up Liquid Glass sheet)
+   113→ * - Group info panel with avatar, name, description, participant list
+   114→ * - Admin badges on participant rows
+   115→ * - "Add participant" button (admin only, mutual contacts)
+   116→ * - "Leave group" option
+   117→ * - Participant avatars in the top bar
+   118→ * - Group calling: audio/video call buttons start LiveKit Room sessions
+   119→ * - WebRTC group call button in top bar
+   120→ * - Group info button in top bar (navigates to group details)
+   121→ * - Ephemeral timer indicator
+   122→ * - Communication gate check — blocked overlay if group contains non-mutual contacts
+   123→ * - Copy option in long-press action menu
+   124→ * - Same keyboard avoidance (74dp input tray, reverseLayout, imePadding)
+   125→ * - NavController for navigation
+   126→ *
+   127→ * @param threadId The ID of the group chat thread to display.
+   128→ * @param navController Navigation controller for screen transitions.
+   129→ * @param onBack Callback for the back navigation button.
+   130→ */
+   131→@OptIn(ExperimentalFoundationApi::class)
+   132→@Composable
+   133→fun GroupChatScreen(
+   134→    threadId: String,
+   135→    navController: NavController,
+   136→    onBack: () -> Unit = {},
+   137→    viewModel: ChatViewModel = hiltViewModel()
+   138→) {
+   139→    val messages by viewModel.messages.collectAsState()
+   140→    val thread by viewModel.thread.collectAsState()
+   141→    val inputText by viewModel.inputText.collectAsState()
+   142→    val isSending by viewModel.isSending.collectAsState()
+   143→    val callState by viewModel.callState.collectAsState()
+   144→    val replyToMessage by viewModel.replyToMessage.collectAsState()
+   145→    val showActionMenu by viewModel.showActionMenu.collectAsState()
+   146→    val currentUserId by viewModel.currentUserId.collectAsState()
+   147→    val errorMessage by viewModel.errorMessage.collectAsState()
+   148→    val communicationGate by viewModel.communicationGate.collectAsState()
+   149→
+   150→    val snackbarHostState = remember { SnackbarHostState() }
+   151→    val listState = rememberLazyListState()
+   152→    var showGroupInfoPanel by remember { mutableStateOf(false) }
+   153→
+   154→    // Auto-scroll to bottom on new messages
+   155→    LaunchedEffect(messages.size) {
+   156→        if (messages.isNotEmpty()) {
+   157→            listState.animateScrollToItem(0)
+   158→        }
+   159→    }
+   160→
+   161→    // Display error messages as snackbars
+   162→    LaunchedEffect(errorMessage) {
+   163→        errorMessage?.let {
+   164→            snackbarHostState.showSnackbar(it)
+   165→            viewModel.clearError()
+   166→        }
+   167→    }
+   168→
+   169→    // Group-specific data
+   170→    val groupName = thread?.groupName ?: "Group"
+   171→    val groupAvatar = thread?.groupAvatarUrl ?: ""
+   172→    val participants = thread?.participantProfiles?.values?.toList() ?: emptyList()
+   173→    val participantCount = participants.size
+   174→    val isAdmin = thread?.groupAdminUids?.contains(currentUserId) == true
+   175→    val ephemeralSeconds = thread?.ephemeralTimerSeconds ?: 0
+   176→
+   177→    // Check if communication is blocked (group must only contain mutual contacts)
+   178→    val isBlocked = communicationGate is CommunicationGate.Blocked
+   179→
+   180→    Scaffold(
+   181→        snackbarHost = { SnackbarHost(snackbarHostState) },
+   182→        containerColor = Color.Transparent,
+   183→        modifier = Modifier.fillMaxSize()
+   184→    ) { innerPadding ->
+   185→        Box(modifier = Modifier.fillMaxSize()) {
+   186→            ZixoGlassBackground()
+   187→
+   188→            Column(
+   189→                modifier = Modifier
+   190→                    .fillMaxSize()
+   191→                    .imePadding()
+   192→                    .padding(innerPadding)
+   193→            ) {
+   194→                // ── Group Top Bar ──────────────────────────────────────────
+   195→                GroupChatTopBar(
+   196→                    groupName = groupName,
+   197→                    groupAvatar = groupAvatar,
+   198→                    participantCount = participantCount,
+   199→                    participants = participants,
+   200→                    onBackClick = onBack,
+   201→                    onHeaderClick = { showGroupInfoPanel = true },
+   202→                    onGroupInfoClick = { showGroupInfoPanel = true },
+   203→                    onAudioCallClick = { viewModel.startGroupAudioCall() },
+   204→                    onVideoCallClick = { viewModel.startGroupVideoCall() }
+   205→                )
+   206→
+   207→                // ── Ephemeral Timer Indicator ─────────────────────────────
+   208→                if (ephemeralSeconds > 0) {
+   209→                    Row(
+   210→                        modifier = Modifier
+   211→                            .fillMaxWidth()
+   212→                            .background(NeonMintAlpha15)
+   213→                            .padding(horizontal = 16.dp, vertical = 4.dp),
+   214→                        verticalAlignment = Alignment.CenterVertically,
+   215→                        horizontalArrangement = Arrangement.Center
+   216→                    ) {
+   217→                        Text(
+   218→                            text = "⏱ Messages disappear in ${formatEphemeralTimer(ephemeralSeconds)}",
+   219→                            color = NeonMint,
+   220→                            fontSize = 12.sp,
+   221→                            fontWeight = FontWeight.Medium
+   222→                        )
+   223→                    }
+   224→                }
+   225→
+   226→                // ── Message List ───────────────────────────────────────────
+   227→                LazyColumn(
+   228→                    state = listState,
+   229→                    reverseLayout = true,
+   230→                    modifier = Modifier
+   231→                        .weight(1f)
+   232→                        .fillMaxWidth()
+   233→                        .padding(horizontal = 12.dp),
+   234→                    verticalArrangement = Arrangement.spacedBy(6.dp)
+   235→                ) {
+   236→                    items(
+   237→                        count = messages.size,
+   238→                        key = { index -> messages[index].id }
+   239→                    ) { index ->
+   240→                        val message = messages[index]
+   241→                        val isOwnMessage = message.senderUid == currentUserId
+   242→
+   243→                        GroupMessageBubble(
+   244→                            message = message,
+   245→                            isOwnMessage = isOwnMessage,
+   246→                            participants = participants,
+   247→                            onLongClick = { viewModel.showActionMenu.value = message }
+   248→                        )
+   249→                    }
+   250→                }
+   251→
+   252→                // ── Reply Preview Bar ──────────────────────────────────────
+   253→                AnimatedVisibility(
+   254→                    visible = replyToMessage != null,
+   255→                    enter = slideInVertically() + fadeIn(),
+   256→                    exit = slideOutVertically() + fadeOut()
+   257→                ) {
+   258→                    replyToMessage?.let { replied ->
+   259→                        GroupReplyPreviewBar(
+   260→                            senderName = replied.replyToSenderName ?: replied.senderDisplayName,
+   261→                            previewText = replied.replyToPreview ?: replied.content,
+   262→                            onDismiss = { viewModel.clearReplyTo() }
+   263→                        )
+   264→                    }
+   265→                }
+   266→
+   267→                // ── Input Tray (74dp Liquid Glass Pill) ────────────────────
+   268→                GroupInputTray(
+   269→                    value = inputText,
+   270→                    onValueChange = { viewModel.onInputTextChanged(it) },
+   271→                    onSendClick = { viewModel.sendMessage() },
+   272→                    isSending = isSending,
+   273→                    enabled = !isBlocked,
+   274→                    modifier = Modifier.fillMaxWidth()
+   275→                )
+   276→            }
+   277→
+   278→            // ── Communication Gate Blocked Overlay ────────────────────────
+   279→            if (isBlocked) {
+   280→                GroupCommunicationGateOverlay(
+   281→                    reason = (communicationGate as? CommunicationGate.Blocked)?.reason
+   282→                        ?: "Group contains non-mutual contacts"
+   283→                )
+   284→            }
+   285→
+   286→            // ── Group Info Panel (Slide-up Sheet) ─────────────────────────
+   287→            if (showGroupInfoPanel) {
+   288→                GroupInfoPanel(
+   289→                    groupName = groupName,
+   290→                    groupAvatar = groupAvatar,
+   291→                    groupDescription = thread?.groupDescription ?: "",
+   292→                    participants = participants,
+   293→                    currentUserId = currentUserId,
+   294→                    isAdmin = isAdmin,
+   295→                    onClose = { showGroupInfoPanel = false }
+   296→                )
+   297→            }
+   298→
+   299→            // ── Action Menu Overlay ────────────────────────────────────────
+   300→            showActionMenu?.let { actionMessage ->
+   301→                GroupActionMenuOverlay(
+   302→                    message = actionMessage,
+   303→                    isOwnMessage = actionMessage.senderUid == currentUserId,
+   304→                    onReact = { emoji, isThreeD ->
+   305→                        viewModel.addReaction(actionMessage.id, emoji, isThreeD)
+   306→                    },
+   307→                    onReply = {
+   308→                        viewModel.setReplyTo(actionMessage.id)
+   309→                    },
+   310→                    onForward = {
+   311→                        viewModel.forwardMessage(actionMessage.id, emptyList())
+   312→                    },
+   313→                    onDeleteForMe = {
+   314→                        viewModel.deleteForMe(actionMessage.id)
+   315→                    },
+   316→                    onDeleteForEveryone = {
+   317→                        viewModel.deleteForEveryone(actionMessage.id)
+   318→                    },
+   319→                    onDismiss = { viewModel.dismissActionMenu() }
+   320→                )
+   321→            }
+   322→
+   323→            // ── Call State Overlay ─────────────────────────────────────────
+   324→            if (callState !is CallState.IDLE) {
+   325→                GroupCallOverlay(
+   326→                    callState = callState,
+   327→                    groupName = groupName,
+   328→                    groupAvatar = groupAvatar
+   329→                )
+   330→            }
+   331→        }
+   332→    }
+   333→}
+   334→
+   335→// ── Group Top Bar ─────────────────────────────────────────────────────────────
+   336→
+   337→@Composable
+   338→private fun GroupChatTopBar(
+   339→    groupName: String,
+   340→    groupAvatar: String,
+   341→    participantCount: Int,
+   342→    participants: List<ThreadParticipant>,
+   343→    onBackClick: () -> Unit,
+   344→    onHeaderClick: () -> Unit,
+   345→    onGroupInfoClick: () -> Unit,
+   346→    onAudioCallClick: () -> Unit,
+   347→    onVideoCallClick: () -> Unit
+   348→) {
+   349→    TopAppBar(
+   350→        title = {
+   351→            Column(
+   352→                modifier = Modifier
+   353→                    .combinedClickable(
+   354→                        interactionSource = remember { MutableInteractionSource() },
+   355→                        indication = null,
+   356→                        onClick = onHeaderClick,
+   357→                        onLongClick = {}
+   358→                    )
+   359→                    .padding(vertical = 4.dp)
+   360→            ) {
+   361→                Text(
+   362→                    text = groupName,
+   363→                    color = TextPrimary,
+   364→                    fontSize = 18.sp,
+   365→                    fontWeight = FontWeight.SemiBold,
+   366→                    maxLines = 1,
+   367→                    overflow = TextOverflow.Ellipsis
+   368→                )
+   369→                Row(verticalAlignment = Alignment.CenterVertically) {
+   370→                    Icon(
+   371→                        imageVector = Icons.Filled.Group,
+   372→                        contentDescription = null,
+   373→                        tint = TextSecondary,
+   374→                        modifier = Modifier.size(14.dp)
+   375→                    )
+   376→                    Spacer(modifier = Modifier.width(4.dp))
+   377→                    Text(
+   378→                        text = "$participantCount participants",
+   379→                        color = TextSecondary,
+   380→                        fontSize = 12.sp
+   381→                    )
+   382→                }
+   383→            }
+   384→        },
+   385→        navigationIcon = {
+   386→            IconButton(onClick = onBackClick) {
+   387→                Icon(
+   388→                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+   389→                    contentDescription = "Back",
+   390→                    tint = TextPrimary
+   391→                )
+   392→            }
+   393→        },
+   394→        actions = {
+   395→            // Participant avatars in top bar (show up to 3)
+   396→            LazyRow(
+   397→                verticalAlignment = Alignment.CenterVertically,
+   398→                horizontalArrangement = Arrangement.spacedBy(0.dp)
+   399→            ) {
+   400→                items(participants.take(3)) { participant ->
+   401→                    AsyncImage(
+   402→                        model = participant.avatarUrl,
+   403→                        contentDescription = participant.displayName,
+   404→                        modifier = Modifier
+   405→                            .size(24.dp)
+   406→                            .clip(CircleShape)
+   407→                            .border(1.dp, GlassBorderColor, CircleShape),
+   408→                        contentScale = ContentScale.Crop
+   409→                    )
+   410→                }
+   411→            }
+   412→            Spacer(modifier = Modifier.width(4.dp))
+   413→
+   414→            // Group info button (navigates to group details)
+   415→            IconButton(onClick = onGroupInfoClick) {
+   416→                Icon(
+   417→                    imageVector = Icons.Filled.Info,
+   418→                    contentDescription = "Group Info",
+   419→                    tint = TextSecondary
+   420→                )
+   421→            }
+   422→
+   423→            // WebRTC group audio call button
+   424→            IconButton(onClick = onAudioCallClick) {
+   425→                Icon(
+   426→                    imageVector = Icons.Filled.Call,
+   427→                    contentDescription = "Group Audio Call",
+   428→                    tint = TextSecondary
+   429→                )
+   430→            }
+   431→
+   432→            // WebRTC group video call button
+   433→            IconButton(onClick = onVideoCallClick) {
+   434→                Icon(
+   435→                    imageVector = Icons.Filled.Videocam,
+   436→                    contentDescription = "Group Video Call",
+   437→                    tint = TextSecondary
+   438→                )
+   439→            }
+   440→        },
+   441→        colors = TopAppBarDefaults.topAppBarColors(
+   442→            containerColor = Color.Transparent
+   443→        )
+   444→    )
+   445→}
+   446→
+   447→// ── Group Message Bubble ──────────────────────────────────────────────────────
+   448→
+   449→@OptIn(ExperimentalFoundationApi::class)
+   450→@Composable
+   451→private fun GroupMessageBubble(
+   452→    message: MessageModel,
+   453→    isOwnMessage: Boolean,
+   454→    participants: List<ThreadParticipant>,
+   455→    onLongClick: () -> Unit
+   456→) {
+   457→    if (message.isDeletedForEveryone) {
+   458→        Row(
+   459→            modifier = Modifier
+   460→                .fillMaxWidth()
+   461→                .padding(start = 48.dp, end = 48.dp),
+   462→            horizontalArrangement = if (isOwnMessage) Arrangement.End else Arrangement.Start
+   463→        ) {
+   464→            Box(
+   465→                modifier = Modifier
+   466→                    .clip(RoundedCornerShape(BubbleCornerSize))
+   467→                    .background(IncomingBubbleColor)
+   468→                    .padding(horizontal = 14.dp, vertical = 10.dp)
+   469→            ) {
+   470→                Text(
+   471→                    text = "This message was deleted",
+   472→                    color = TextSecondary,
+   473→                    fontSize = 14.sp,
+   474→                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+   475→                )
+   476→            }
+   477→        }
+   478→        return
+   479→    }
+   480→
+   481→    if (message.isDeletedForMe) return
+   482→
+   483→    val bubbleColor = if (isOwnMessage) NeonMintAlpha15 else IncomingBubbleColor
+   484→    val alignment = if (isOwnMessage) Arrangement.End else Arrangement.Start
+   485→    val shape = RoundedCornerShape(
+   486→        topStart = BubbleCornerSize,
+   487→        topEnd = BubbleCornerSize,
+   488→        bottomStart = if (isOwnMessage) BubbleCornerSize else 4.dp,
+   489→        bottomEnd = if (isOwnMessage) 4.dp else BubbleCornerSize
+   490→    )
+   491→
+   492→    Row(
+   493→        modifier = Modifier
+   494→            .fillMaxWidth()
+   495→            .padding(start = if (isOwnMessage) 48.dp else 0.dp, end = if (!isOwnMessage) 48.dp else 0.dp),
+   496→        horizontalArrangement = alignment
+   497→    ) {
+   498→        Column(
+   499→            modifier = Modifier
+   500→                .clip(shape)
+   501→                .background(bubbleColor)
+   502→                .combinedClickable(
+   503→                    interactionSource = remember { MutableInteractionSource() },
+   504→                    indication = null,
+   505→                    onClick = {},
+   506→                    onLongClick = onLongClick
+   507→                )
+   508→                .padding(horizontal = 14.dp, vertical = 10.dp)
+   509→        ) {
+   510→            // Sender name label (group-specific: show for incoming messages)
+   511→            if (!isOwnMessage) {
+   512→                val sender = participants.firstOrNull { it.uid == message.senderUid }
+   513→                val senderColor = senderNameColor(message.senderUid)
+   514→                Text(
+   515→                    text = sender?.displayName ?: message.senderDisplayName,
+   516→                    color = senderColor,
+   517→                    fontSize = 13.sp,
+   518→                    fontWeight = FontWeight.SemiBold,
+   519→                    maxLines = 1
+   520→                )
+   521→                Spacer(modifier = Modifier.height(2.dp))
+   522→            }
+   523→
+   524→            // Reply reference preview
+   525→            if (message.replyToPreview != null) {
+   526→                Row(
+   527→                    modifier = Modifier
+   528→                        .fillMaxWidth()
+   529→                        .clip(RoundedCornerShape(8.dp))
+   530→                        .background(NeonMintAlpha15)
+   531→                        .padding(horizontal = 8.dp, vertical = 4.dp)
+   532→                ) {
+   533→                    Text(
+   534→                        text = message.replyToSenderName ?: "",
+   535→                        color = NeonMint,
+   536→                        fontSize = 12.sp,
+   537→                        fontWeight = FontWeight.SemiBold,
+   538→                        maxLines = 1
+   539→                    )
+   540→                    Spacer(modifier = Modifier.width(6.dp))
+   541→                    Text(
+   542→                        text = message.replyToPreview ?: "",
+   543→                        color = TextSecondary,
+   544→                        fontSize = 12.sp,
+   545→                        maxLines = 1,
+   546→                        overflow = TextOverflow.Ellipsis,
+   547→                        modifier = Modifier.weight(1f)
+   548→                    )
+   549→                }
+   550→                Spacer(modifier = Modifier.height(4.dp))
+   551→            }
+   552→
+   553→            // Forwarded label
+   554→            if (message.isForwarded) {
+   555→                Text(
+   556→                    text = "Forwarded",
+   557→                    color = TextSecondary,
+   558→                    fontSize = 11.sp,
+   559→                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+   560→                )
+   561→                Spacer(modifier = Modifier.height(2.dp))
+   562→            }
+   563→
+   564→            // Media thumbnail
+   565→            if (message.type == MessageContentType.IMAGE || message.type == MessageContentType.VIDEO) {
+   566→                val imageUrl = message.mediaThumbnailUrl ?: message.mediaUrl
+   567→                if (!imageUrl.isNullOrBlank()) {
+   568→                    AsyncImage(
+   569→                        model = imageUrl,
+   570→                        contentDescription = "Media",
+   571→                        modifier = Modifier
+   572→                            .fillMaxWidth()
+   573→                            .height(180.dp)
+   574→                            .clip(RoundedCornerShape(10.dp)),
+   575→                        contentScale = ContentScale.Crop
+   576→                    )
+   577→                    Spacer(modifier = Modifier.height(4.dp))
+   578→                }
+   579→                if (message.type == MessageContentType.VIDEO) {
+   580→                    Box(
+   581→                        modifier = Modifier
+   582→                            .size(36.dp)
+   583→                            .clip(CircleShape)
+   584→                            .background(DarkPetrolCharcoal.copy(alpha = 0.7f)),
+   585→                        contentAlignment = Alignment.Center
+   586→                    ) {
+   587→                        Icon(
+   588→                            imageVector = Icons.Filled.PlayArrow,
+   589→                            contentDescription = "Play",
+   590→                            tint = TextPrimary,
+   591→                            modifier = Modifier.size(20.dp)
+   592→                        )
+   593→                    }
+   594→                }
+   595→            }
+   596→
+   597→            // Voice message indicator
+   598→            if (message.type == MessageContentType.AUDIO_VOICE) {
+   599→                Row(verticalAlignment = Alignment.CenterVertically) {
+   600→                    Icon(
+   601→                        imageVector = Icons.Filled.PlayArrow,
+   602→                        contentDescription = "Voice",
+   603→                        tint = NeonMint,
+   604→                        modifier = Modifier.size(20.dp)
+   605→                    )
+   606→                    Spacer(modifier = Modifier.width(6.dp))
+   607→                    Text(text = "Voice message", color = TextSecondary, fontSize = 14.sp)
+   608→                }
+   609→                Spacer(modifier = Modifier.height(4.dp))
+   610→            }
+   611→
+   612→            // Text content
+   613→            if (message.content.isNotBlank()) {
+   614→                Text(
+   615→                    text = message.content,
+   616→                    color = TextPrimary,
+   617→                    fontSize = 15.sp,
+   618→                    lineHeight = 20.sp
+   619→                )
+   620→            }
+   621→
+   622→            // Media caption
+   623→            if (!message.caption.isNullOrBlank() && message.type != MessageContentType.TEXT) {
+   624→                Spacer(modifier = Modifier.height(4.dp))
+   625→                Text(text = message.caption, color = TextPrimary, fontSize = 14.sp)
+   626→            }
+   627→
+   628→            // Timestamp and read receipt row
+   629→            Row(
+   630→                modifier = Modifier.fillMaxWidth(),
+   631→                horizontalArrangement = Arrangement.End,
+   632→                verticalAlignment = Alignment.CenterVertically
+   633→            ) {
+   634→                Text(
+   635→                    text = formatTimestamp(message.timestamp),
+   636→                    color = TextSecondary,
+   637→                    fontSize = 11.sp
+   638→                )
+   639→                if (isOwnMessage) {
+   640→                    Spacer(modifier = Modifier.width(4.dp))
+   641→                    val tickColor = if (message.isRead) NeonMint else TextSecondary
+   642→                    Text(text = if (message.isRead) "✓✓" else "✓", color = tickColor, fontSize = 11.sp)
+   643→                }
+   644→            }
+   645→
+   646→            // Reactions row — emoji badges below the bubble
+   647→            if (message.reactions.isNotEmpty()) {
+   648→                Spacer(modifier = Modifier.height(4.dp))
+   649→                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+   650→                    message.reactions.distinctBy { it.emoji }.forEach { reaction ->
+   651→                        Box(
+   652→                            modifier = Modifier
+   653→                                .clip(RoundedCornerShape(12.dp))
+   654→                                .background(GlassBorderColor)
+   655→                                .padding(horizontal = 6.dp, vertical = 2.dp)
+   656→                        ) {
+   657→                            Text(
+   658→                                text = "${reaction.emoji} ${message.reactions.count { it.emoji == reaction.emoji }}",
+   659→                                fontSize = 12.sp
+   660→                            )
+   661→                        }
+   662→                    }
+   663→                }
+   664→            }
+   665→        }
+   666→    }
+   667→}
+   668→
+   669→// ── Group Info Panel (Liquid Glass Sheet) ─────────────────────────────────────
+   670→
+   671→@Composable
+   672→private fun GroupInfoPanel(
+   673→    groupName: String,
+   674→    groupAvatar: String,
+   675→    groupDescription: String,
+   676→    participants: List<ThreadParticipant>,
+   677→    currentUserId: String,
+   678→    isAdmin: Boolean,
+   679→    onClose: () -> Unit
+   680→) {
+   681→    Box(
+   682→        modifier = Modifier
+   683→            .fillMaxSize()
+   684→            .background(Color.Black.copy(alpha = 0.6f))
+   685→    ) {
+   686→        // Scrim dismiss
+   687→        Box(
+   688→            modifier = Modifier
+   689→                .fillMaxSize()
+   690→                .combinedClickable(
+   691→                    interactionSource = remember { MutableInteractionSource() },
+   692→                    indication = null,
+   693→                    onClick = onClose,
+   694→                    onLongClick = {}
+   695→                )
+   696→        )
+   697→
+   698→        // Slide-up liquid glass sheet
+   699→        Column(
+   700→            modifier = Modifier
+   701→                .align(Alignment.BottomCenter)
+   702→                .fillMaxWidth()
+   703→                .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+   704→                .liquidGlassContainer()
+   705→                .padding(24.dp)
+   706→        ) {
+   707→            // Close handle
+   708→            Box(
+   709→                modifier = Modifier
+   710→                    .align(Alignment.CenterHorizontally)
+   711→                    .width(40.dp)
+   712→                    .height(4.dp)
+   713→                    .clip(RoundedCornerShape(2.dp))
+   714→                    .background(TextSecondary.copy(alpha = 0.4f))
+   715→            )
+   716→
+   717→            Spacer(modifier = Modifier.height(20.dp))
+   718→
+   719→            // Group avatar
+   720→            AsyncImage(
+   721→                model = groupAvatar,
+   722→                contentDescription = "Group Avatar",
+   723→                modifier = Modifier
+   724→                    .size(80.dp)
+   725→                    .align(Alignment.CenterHorizontally)
+   726→                    .clip(RoundedCornerShape(20.dp))
+   727→                    .border(2.dp, GlassBorderColor, RoundedCornerShape(20.dp)),
+   728→                contentScale = ContentScale.Crop
+   729→            )
+   730→
+   731→            Spacer(modifier = Modifier.height(12.dp))
+   732→
+   733→            // Group name
+   734→            Text(
+   735→                text = groupName,
+   736→                color = TextPrimary,
+   737→                fontSize = 22.sp,
+   738→                fontWeight = FontWeight.Bold,
+   739→                textAlign = TextAlign.Center,
+   740→                modifier = Modifier.fillMaxWidth()
+   741→            )
+   742→
+   743→            // Group description
+   744→            if (groupDescription.isNotBlank()) {
+   745→                Spacer(modifier = Modifier.height(6.dp))
+   746→                Text(
+   747→                    text = groupDescription,
+   748→                    color = TextSecondary,
+   749→                    fontSize = 14.sp,
+   750→                    textAlign = TextAlign.Center,
+   751→                    modifier = Modifier.fillMaxWidth()
+   752→                )
+   753→            }
+   754→
+   755→            Spacer(modifier = Modifier.height(20.dp))
+   756→
+   757→            // Participant count
+   758→            Text(
+   759→                text = "${participants.size} participants",
+   760→                color = TextSecondary,
+   761→                fontSize = 14.sp,
+   762→                fontWeight = FontWeight.Medium
+   763→            )
+   764→
+   765→            Spacer(modifier = Modifier.height(12.dp))
+   766→
+   767→            // Participant list
+   768→            LazyColumn(
+   769→                modifier = Modifier
+   770→                    .fillMaxWidth()
+   771→                    .height(240.dp),
+   772→                verticalArrangement = Arrangement.spacedBy(6.dp)
+   773→            ) {
+   774→                items(participants) { participant ->
+   775→                    ParticipantRow(
+   776→                        participant = participant,
+   777→                        isCurrentUser = participant.uid == currentUserId,
+   778→                        isAdmin = participant.role == ParticipantRole.ADMIN
+   779→                    )
+   780→                }
+   781→            }
+   782→
+   783→            Spacer(modifier = Modifier.height(12.dp))
+   784→
+   785→            // Add participant (admin only)
+   786→            if (isAdmin) {
+   787→                Row(
+   788→                    modifier = Modifier
+   789→                        .fillMaxWidth()
+   790→                        .clip(RoundedCornerShape(12.dp))
+   791→                        .background(NeonMintAlpha15)
+   792→                        .combinedClickable(
+   793→                            interactionSource = remember { MutableInteractionSource() },
+   794→                            indication = null,
+   795→                            onClick = { },
+   796→                            onLongClick = {}
+   797→                        )
+   798→                        .padding(horizontal = 16.dp, vertical = 14.dp),
+   799→                    verticalAlignment = Alignment.CenterVertically
+   800→                ) {
+   801→                    Icon(
+   802→                        imageVector = Icons.Filled.PersonAdd,
+   803→                        contentDescription = "Add Participant",
+   804→                        tint = NeonMint,
+   805→                        modifier = Modifier.size(22.dp)
+   806→                    )
+   807→                    Spacer(modifier = Modifier.width(12.dp))
+   808→                    Text(
+   809→                        text = "Add participant",
+   810→                        color = NeonMint,
+   811→                        fontSize = 15.sp,
+   812→                        fontWeight = FontWeight.Medium
+   813→                    )
+   814→                }
+   815→                Spacer(modifier = Modifier.height(8.dp))
+   816→            }
+   817→
+   818→            // Leave group
+   819→            Row(
+   820→                modifier = Modifier
+   821→                    .fillMaxWidth()
+   822→                    .clip(RoundedCornerShape(12.dp))
+   823→                    .background(Color(0x33FF5252))
+   824→                    .combinedClickable(
+   825→                        interactionSource = remember { MutableInteractionSource() },
+   826→                        indication = null,
+   827→                        onClick = { },
+   828→                        onLongClick = {}
+   829→                    )
+   830→                    .padding(horizontal = 16.dp, vertical = 14.dp),
+   831→                verticalAlignment = Alignment.CenterVertically
+   832→            ) {
+   833→                Icon(
+   834→                    imageVector = Icons.Filled.Logout,
+   835→                    contentDescription = "Leave Group",
+   836→                    tint = Color(0xFFFF5252),
+   837→                    modifier = Modifier.size(22.dp)
+   838→                )
+   839→                Spacer(modifier = Modifier.width(12.dp))
+   840→                Text(
+   841→                    text = "Leave group",
+   842→                    color = Color(0xFFFF5252),
+   843→                    fontSize = 15.sp,
+   844→                    fontWeight = FontWeight.Medium
+   845→                )
+   846→            }
+   847→        }
+   848→    }
+   849→}
+   850→
+   851→// ── Participant Row ───────────────────────────────────────────────────────────
+   852→
+   853→@Composable
+   854→private fun ParticipantRow(
+   855→    participant: ThreadParticipant,
+   856→    isCurrentUser: Boolean,
+   857→    isAdmin: Boolean
+   858→) {
+   859→    Row(
+   860→        modifier = Modifier
+   861→            .fillMaxWidth()
+   862→            .clip(RoundedCornerShape(12.dp))
+   863→            .background(IncomingBubbleColor)
+   864→            .padding(horizontal = 12.dp, vertical = 10.dp),
+   865→        verticalAlignment = Alignment.CenterVertically
+   866→    ) {
+   867→        AsyncImage(
+   868→            model = participant.avatarUrl,
+   869→            contentDescription = participant.displayName,
+   870→            modifier = Modifier
+   871→                .size(40.dp)
+   872→                .clip(CircleShape)
+   873→                .border(1.dp, GlassBorderColor, CircleShape),
+   874→            contentScale = ContentScale.Crop
+   875→        )
+   876→        Spacer(modifier = Modifier.width(12.dp))
+   877→        Column(modifier = Modifier.weight(1f)) {
+   878→            Row(verticalAlignment = Alignment.CenterVertically) {
+   879→                Text(
+   880→                    text = if (isCurrentUser) "You" else participant.displayName,
+   881→                    color = TextPrimary,
+   882→                    fontSize = 15.sp,
+   883→                    fontWeight = FontWeight.Medium
+   884→                )
+   885→                if (isAdmin) {
+   886→                    Spacer(modifier = Modifier.width(6.dp))
+   887→                    Text(
+   888→                        text = "Admin",
+   889→                        color = AdminBadgeColor,
+   890→                        fontSize = 11.sp,
+   891→                        fontWeight = FontWeight.Bold
+   892→                    )
+   893→                }
+   894→            }
+   895→            Text(
+   896→                text = participant.zixoNumber,
+   897→                color = TextSecondary,
+   898→                fontSize = 13.sp
+   899→            )
+   900→        }
+   901→        if (participant.isOnline) {
+   902→            Box(
+   903→                modifier = Modifier
+   904→                    .size(10.dp)
+   905→                    .clip(CircleShape)
+   906→                    .background(OnlineIndicatorColor)
+   907→            )
+   908→        }
+   909→    }
+   910→}
+   911→
+   912→// ── Group Reply Preview Bar ───────────────────────────────────────────────────
+   913→
+   914→@Composable
+   915→private fun GroupReplyPreviewBar(
+   916→    senderName: String,
+   917→    previewText: String,
+   918→    onDismiss: () -> Unit
+   919→) {
+   920→    Row(
+   921→        modifier = Modifier
+   922→            .fillMaxWidth()
+   923→            .background(DarkPetrolCharcoal.copy(alpha = 0.8f))
+   924→            .padding(horizontal = 16.dp, vertical = 8.dp),
+   925→        verticalAlignment = Alignment.CenterVertically
+   926→    ) {
+   927→        Box(
+   928→            modifier = Modifier
+   929→                .width(3.dp)
+   930→                .height(36.dp)
+   931→                .clip(RoundedCornerShape(2.dp))
+   932→                .background(NeonMint)
+   933→        )
+   934→        Spacer(modifier = Modifier.width(10.dp))
+   935→        Column(modifier = Modifier.weight(1f)) {
+   936→            Text(
+   937→                text = senderName,
+   938→                color = NeonMint,
+   939→                fontSize = 13.sp,
+   940→                fontWeight = FontWeight.SemiBold,
+   941→                maxLines = 1
+   942→            )
+   943→            Text(
+   944→                text = previewText,
+   945→                color = TextSecondary,
+   946→                fontSize = 13.sp,
+   947→                maxLines = 1,
+   948→                overflow = TextOverflow.Ellipsis
+   949→            )
+   950→        }
+   951→        IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+   952→            Icon(
+   953→                imageVector = Icons.Filled.Close,
+   954→                contentDescription = "Dismiss reply",
+   955→                tint = TextSecondary,
+   956→                modifier = Modifier.size(16.dp)
+   957→            )
+   958→        }
+   959→    }
+   960→}
+   961→
+   962→// ── Group Input Tray (74dp Liquid Glass Pill) ─────────────────────────────────
+   963→
+   964→@Composable
+   965→private fun GroupInputTray(
+   966→    value: String,
+   967→    onValueChange: (String) -> Unit,
+   968→    onSendClick: () -> Unit,
+   969→    isSending: Boolean,
+   970→    enabled: Boolean,
+   971→    modifier: Modifier = Modifier
+   972→) {
+   973→    Row(
+   974→        modifier = modifier
+   975→            .height(InputTrayHeight)
+   976→            .padding(horizontal = 12.dp, vertical = 8.dp)
+   977→            .clip(RoundedCornerShape(InputTrayCornerSize))
+   978→            .background(DarkPetrolCharcoal.copy(alpha = 0.6f))
+   979→            .border(1.dp, GlassBorderColor, RoundedCornerShape(InputTrayCornerSize))
+   980→            .padding(horizontal = 8.dp),
+   981→        verticalAlignment = Alignment.CenterVertically
+   982→    ) {
+   983→        // Attach button (camera/image icon)
+   984→        IconButton(
+   985→            onClick = { /* TODO: Launch media picker */ },
+   986→            enabled = enabled,
+   987→            modifier = Modifier.size(40.dp)
+   988→        ) {
+   989→            Icon(
+   990→                imageVector = Icons.Filled.Image,
+   991→                contentDescription = "Attach",
+   992→                tint = if (enabled) TextSecondary else TextSecondary.copy(alpha = 0.4f)
+   993→            )
+   994→        }
+   995→
+   996→        // Text input field (GlassOutlinedTextField style)
+   997→        GlassOutlinedTextField(
+   998→            value = value,
+   999→            onValueChange = onValueChange,
+  1000→            placeholder = {
+  1001→                Text(
+  1002→                    text = "Message…",
+  1003→                    color = TextSecondary.copy(alpha = 0.6f),
+  1004→                    fontSize = 15.sp
+  1005→                )
+  1006→            },
+  1007→            modifier = Modifier.weight(1f),
+  1008→            enabled = enabled,
+  1009→            singleLine = false,
+  1010→            maxLength = 4096
+  1011→        )
+  1012→
+  1013→        // Send button (NeonMint arrow icon)
+  1014→        IconButton(
+  1015→            onClick = onSendClick,
+  1016→            enabled = value.isNotBlank() && !isSending && enabled,
+  1017→            modifier = Modifier.size(40.dp)
+  1018→        ) {
+  1019→            Icon(
+  1020→                imageVector = Icons.Filled.Send,
+  1021→                contentDescription = "Send",
+  1022→                tint = if (value.isNotBlank() && !isSending && enabled) NeonMint else TextSecondary.copy(alpha = 0.4f)
+  1023→            )
+  1024→        }
+  1025→    }
+  1026→}
+  1027→
+  1028→// ── Group Action Menu Overlay (Frosted Glass) ─────────────────────────────────
+  1029→
+  1030→@Composable
+  1031→private fun GroupActionMenuOverlay(
+  1032→    message: MessageModel,
+  1033→    isOwnMessage: Boolean,
+  1034→    onReact: (emoji: String, isThreeD: Boolean) -> Unit,
+  1035→    onReply: () -> Unit,
+  1036→    onForward: () -> Unit,
+  1037→    onDeleteForMe: () -> Unit,
+  1038→    onDeleteForEveryone: () -> Unit,
+  1039→    onDismiss: () -> Unit
+  1040→) {
+  1041→    val clipboardManager = LocalClipboardManager.current
+  1042→
+  1043→    Box(
+  1044→        modifier = Modifier
+  1045→            .fillMaxSize()
+  1046→            .background(Color.Black.copy(alpha = 0.5f))
+  1047→    ) {
+  1048→        Box(
+  1049→            modifier = Modifier
+  1050→                .fillMaxSize()
+  1051→                .combinedClickable(
+  1052→                    interactionSource = remember { MutableInteractionSource() },
+  1053→                    indication = null,
+  1054→                    onClick = onDismiss,
+  1055→                    onLongClick = {}
+  1056→                )
+  1057→        )
+  1058→
+  1059→        // Frosted glass action panel — uses liquidGlassCard()
+  1060→        Column(
+  1061→            modifier = Modifier
+  1062→                .fillMaxWidth()
+  1063→                .align(Alignment.Center)
+  1064→                .padding(horizontal = 24.dp)
+  1065→                .liquidGlassCard()
+  1066→                .padding(16.dp),
+  1067→            verticalArrangement = Arrangement.spacedBy(8.dp)
+  1068→        ) {
+  1069→            // 3D Reactions bar
+  1070→            Row(
+  1071→                modifier = Modifier.fillMaxWidth(),
+  1072→                horizontalArrangement = Arrangement.SpaceEvenly
+  1073→            ) {
+  1074→                ReactionEmojis.forEach { emoji ->
+  1075→                    IconButton(
+  1076→                        onClick = { onReact(emoji, true) },
+  1077→                        modifier = Modifier.size(44.dp)
+  1078→                    ) {
+  1079→                        Text(text = emoji, fontSize = 24.sp)
+  1080→                    }
+  1081→                }
+  1082→            }
+  1083→
+  1084→            Spacer(modifier = Modifier.height(4.dp))
+  1085→
+  1086→            GroupActionMenuItem(icon = Icons.Filled.Reply, label = "Reply", onClick = onReply)
+  1087→            GroupActionMenuItem(icon = Icons.Filled.Forward, label = "Forward", onClick = onForward)
+  1088→
+  1089→            // Copy option
+  1090→            GroupActionMenuItem(
+  1091→                icon = Icons.Filled.ContentCopy,
+  1092→                label = "Copy",
+  1093→                onClick = {
+  1094→                    clipboardManager.setText(AnnotatedString(message.content))
+  1095→                    onDismiss()
+  1096→                }
+  1097→            )
+  1098→
+  1099→            GroupActionMenuItem(
+  1100→                icon = Icons.Filled.Delete,
+  1101→                label = "Delete for Me",
+  1102→                onClick = onDeleteForMe,
+  1103→                tint = Color(0xFFFF5252)
+  1104→            )
+  1105→            if (isOwnMessage) {
+  1106→                GroupActionMenuItem(
+  1107→                    icon = Icons.Filled.DeleteForever,
+  1108→                    label = "Delete for Everyone",
+  1109→                    onClick = onDeleteForEveryone,
+  1110→                    tint = Color(0xFFFF5252)
+  1111→                )
+  1112→            }
+  1113→        }
+  1114→    }
+  1115→}
+  1116→
+  1117→// ── Group Action Menu Item ────────────────────────────────────────────────────
+  1118→
+  1119→@Composable
+  1120→private fun GroupActionMenuItem(
+  1121→    icon: androidx.compose.ui.graphics.vector.ImageVector,
+  1122→    label: String,
+  1123→    onClick: () -> Unit,
+  1124→    tint: Color = TextPrimary
+  1125→) {
+  1126→    Row(
+  1127→        modifier = Modifier
+  1128→            .fillMaxWidth()
+  1129→            .clip(RoundedCornerShape(12.dp))
+  1130→            .combinedClickable(
+  1131→                interactionSource = remember { MutableInteractionSource() },
+  1132→                indication = null,
+  1133→                onClick = onClick,
+  1134→                onLongClick = {}
+  1135→            )
+  1136→            .padding(horizontal = 8.dp, vertical = 10.dp),
+  1137→        verticalAlignment = Alignment.CenterVertically
+  1138→    ) {
+  1139→        Icon(
+  1140→            imageVector = icon,
+  1141→            contentDescription = label,
+  1142→            tint = tint,
+  1143→            modifier = Modifier.size(22.dp)
+  1144→        )
+  1145→        Spacer(modifier = Modifier.width(14.dp))
+  1146→        Text(
+  1147→            text = label,
+  1148→            color = tint,
+  1149→            fontSize = 15.sp,
+  1150→            fontWeight = FontWeight.Medium
+  1151→        )
+  1152→    }
+  1153→}
+  1154→
+  1155→// ── Group Communication Gate Blocked Overlay ──────────────────────────────────
+  1156→
+  1157→/**
+  1158→ * Full-screen overlay shown when the communication gate blocks messaging
+  1159→ * in a group context (group contains non-mutual contacts).
+  1160→ */
+  1161→@Composable
+  1162→private fun GroupCommunicationGateOverlay(
+  1163→    reason: String
+  1164→) {
+  1165→    Box(
+  1166→        modifier = Modifier
+  1167→            .fillMaxSize()
+  1168→            .background(Color.Black.copy(alpha = 0.7f)),
+  1169→        contentAlignment = Alignment.Center
+  1170→    ) {
+  1171→        Column(
+  1172→            modifier = Modifier
+  1173→                .fillMaxWidth()
+  1174→                .padding(horizontal = 32.dp)
+  1175→                .liquidGlassContainer()
+  1176→                .padding(24.dp),
+  1177→            horizontalAlignment = Alignment.CenterHorizontally
+  1178→        ) {
+  1179→            Text(
+  1180→                text = "🔒",
+  1181→                fontSize = 40.sp
+  1182→            )
+  1183→            Spacer(modifier = Modifier.height(12.dp))
+  1184→            Text(
+  1185→                text = "Group Communication Blocked",
+  1186→                color = TextPrimary,
+  1187→                fontSize = 20.sp,
+  1188→                fontWeight = FontWeight.Bold,
+  1189→                textAlign = TextAlign.Center
+  1190→            )
+  1191→            Spacer(modifier = Modifier.height(8.dp))
+  1192→            Text(
+  1193→                text = reason,
+  1194→                color = TextSecondary,
+  1195→                fontSize = 14.sp,
+  1196→                textAlign = TextAlign.Center,
+  1197→                lineHeight = 20.sp
+  1198→            )
+  1199→        }
+  1200→    }
+  1201→}
+  1202→
+  1203→// ── Group Call Overlay ────────────────────────────────────────────────────────
+  1204→
+  1205→@Composable
+  1206→private fun GroupCallOverlay(
+  1207→    callState: CallState,
+  1208→    groupName: String,
+  1209→    groupAvatar: String
+  1210→) {
+  1211→    Box(
+  1212→        modifier = Modifier
+  1213→            .fillMaxSize()
+  1214→            .background(DarkPetrolCharcoal.copy(alpha = 0.85f))
+  1215→    ) {
+  1216→        Column(
+  1217→            modifier = Modifier
+  1218→                .align(Alignment.Center)
+  1219→                .padding(32.dp),
+  1220→            horizontalAlignment = Alignment.CenterHorizontally
+  1221→        ) {
+  1222→            val statusText = when (callState) {
+  1223→                is CallState.DIALING -> "Starting group call…"
+  1224→                is CallState.RINGING -> "Incoming group call…"
+  1225→                is CallState.CONNECTED -> "Group call connected • ${callState.participantCount} participants"
+  1226→                is CallState.ENDED -> "Group call ended"
+  1227→                else -> ""
+  1228→            }
+  1229→
+  1230→            AsyncImage(
+  1231→                model = groupAvatar,
+  1232→                contentDescription = "Group",
+  1233→                modifier = Modifier
+  1234→                    .size(80.dp)
+  1235→                    .clip(RoundedCornerShape(20.dp))
+  1236→                    .border(2.dp, NeonMint, RoundedCornerShape(20.dp)),
+  1237→                contentScale = ContentScale.Crop
+  1238→            )
+  1239→            Spacer(modifier = Modifier.height(16.dp))
+  1240→            Text(
+  1241→                text = groupName,
+  1242→                color = TextPrimary,
+  1243→                fontSize = 22.sp,
+  1244→                fontWeight = FontWeight.Bold
+  1245→            )
+  1246→            Spacer(modifier = Modifier.height(6.dp))
+  1247→            Text(
+  1248→                text = statusText,
+  1249→                color = TextSecondary,
+  1250→                fontSize = 14.sp
+  1251→            )
+  1252→        }
+  1253→    }
+  1254→}
+  1255→
+  1256→// ── Utilities ─────────────────────────────────────────────────────────────────
+  1257→
+  1258→/** Formats epoch milliseconds to a readable time string. */
+  1259→private fun formatTimestamp(epochMs: Long): String {
+  1260→    if (epochMs == 0L) return ""
+  1261→    val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+  1262→    return sdf.format(java.util.Date(epochMs))
+  1263→}
+  1264→
+  1265→/** Formats ephemeral timer seconds into a human-readable string. */
+  1266→private fun formatEphemeralTimer(seconds: Int): String {
+  1267→    return when {
+  1268→        seconds >= 86400 -> "${seconds / 86400} day${if (seconds / 86400 > 1) "s" else ""}"
+  1269→        seconds >= 3600 -> "${seconds / 3600} hour${if (seconds / 3600 > 1) "s" else ""}"
+  1270→        seconds >= 60 -> "${seconds / 60} minute${if (seconds / 60 > 1) "s" else ""}"
+  1271→        else -> "$seconds second${if (seconds > 1) "s" else ""}"
+  1272→    }
+  1273→}
+  1274→
+  1275→/** Generates a deterministic color for a sender's name in group chats. */
+  1276→private fun senderNameColor(uid: String): Color {
+  1277→    val colors = listOf(
+  1278→        NeonMint,
+  1279→        Color(0xFF42A5F5),
+  1280→        Color(0xFFAB47BC),
+  1281→        Color(0xFFFF7043),
+  1282→        Color(0xFFFFCA28),
+  1283→        Color(0xFF26C6DA),
+  1284→        Color(0xFFEC407A),
+  1285→        Color(0xFF66BB6A)
+  1286→    )
+  1287→    val index = uid.hashCode().mod(colors.size).let { if (it < 0) -it else it }
+  1288→    return colors[index]
+  1289→}
+  1290→

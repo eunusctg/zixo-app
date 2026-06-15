@@ -124,4 +124,12 @@ interface ContactRepository {
      * @return A flow emitting the current list of blocked [ContactModel] entries.
      */
     fun getBlockedContacts(): Flow<List<ContactModel>>
+
+    /**
+     * Gets only mutual contacts (contacts where both users have added each other).
+     * Used by the home screen to display the mutual contact count.
+     *
+     * @return A flow emitting the list of mutual [ContactModel] entries.
+     */
+    fun getMutualContacts(): Flow<List<ContactModel>>
 }

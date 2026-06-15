@@ -37,6 +37,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -123,8 +125,10 @@ fun HomeScreen(
     unreadChatCount: Int = 0,
     unreadCallsCount: Int = 0,
     currentUserAvatarUrl: String? = null,
-    currentUserDisplayName: String = ""
+    currentUserDisplayName: String = "",
+    viewModel: HomeViewModel = hiltViewModel()
 ) {
+    val homeUiState by viewModel.uiState.collectAsStateWithLifecycle()
     var currentTab by remember { mutableIntStateOf(selectedTabIndex) }
 
     // Sync with external tab selection
@@ -147,7 +151,7 @@ fun HomeScreen(
                         currentTab = index
                         onTabSelected(index)
                     },
-                    unreadChatCount = unreadChatCount,
+                    unreadChatCount = homeUiState.unreadCount,
                     unreadCallsCount = unreadCallsCount
                 )
             },
@@ -166,8 +170,8 @@ fun HomeScreen(
             ) {
                 // ── Branded Top Bar ────────────────────
                 HomeTopBar(
-                    currentUserAvatarUrl = currentUserAvatarUrl,
-                    currentUserDisplayName = currentUserDisplayName
+                    currentUserAvatarUrl = homeUiState.currentUser?.avatarUrl ?: currentUserAvatarUrl,
+                    currentUserDisplayName = homeUiState.currentUser?.displayName ?: currentUserDisplayName
                 )
 
                 // ── Tab Content Area ──────────────────

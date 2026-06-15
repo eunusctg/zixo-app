@@ -408,6 +408,40 @@ class ContactRepositoryImpl @Inject constructor(
 
     override fun observeContactsRealtime(): Flow<List<ContactModel>> = getContacts()
 
+    // ── Mutual Contacts ────────────────────────────────────────────────────────
+
+    override fun getMutualContacts(): Flow<List<ContactModel>> = callbackFlow {
+        val myUid = currentUid
+        if (myUid == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val subscription = contactsCollection(myUid)
+            .whereEqualTo("isMutual", true)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Timber.e(error, "Error observing mutual contacts")
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val mutualContacts = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        mapToContactModel(doc, myUid)
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to map mutual contact document: %s", doc.id)
+                        null
+                    }
+                } ?: emptyList()
+
+                trySend(mutualContacts)
+            }
+
+        awaitClose { subscription.remove() }
+    }.flowOn(Dispatchers.IO)
+
     // ── Communication Gate (Zero-Trust) ───────────────────────────────────────
 
     override fun verifyMutualContact(targetUid: String): Flow<CommunicationGate> = flow {

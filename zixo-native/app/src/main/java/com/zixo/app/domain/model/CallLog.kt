@@ -18,6 +18,7 @@ data class CallLogEntry(
     val calleeAvatar: String? = null,
     val type: CallDirection = CallDirection.OUTGOING,
     val isVideoCall: Boolean = false,
+    val callType: CallTechnology = CallTechnology.WEBRTC_AUDIO,
     val isGroupCall: Boolean = false,
     val duration: Long = 0L,             // Duration in seconds
     val timestamp: Long = 0L,            // Epoch milliseconds
@@ -37,4 +38,10 @@ enum class CallFilter {
     MISSED,
     OUTGOING,
     INCOMING
+}
+
+enum class CallTechnology {
+    WEBRTC_AUDIO,
+    WEBRTC_VIDEO,
+    SIP
 }

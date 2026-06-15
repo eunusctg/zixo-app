@@ -122,4 +122,79 @@ interface ChatRepository {
         name: String,
         participantUids: Set<String>
     ): Flow<Result<ChatThreadModel>>
+
+    /**
+     * Gets a single chat thread by its ID.
+     *
+     * @param chatId The ID of the thread to retrieve.
+     * @return A flow emitting the [ChatThreadModel] or null if not found.
+     */
+    fun getChatThread(chatId: String): Flow<ChatThreadModel?>
+
+    /**
+     * Gets the list of group members for a specific group chat thread.
+     *
+     * @param chatId The ID of the group chat thread.
+     * @return A flow emitting the list of [ThreadParticipant] entries.
+     */
+    fun getGroupMembers(chatId: String): Flow<List<com.zixo.app.domain.model.ThreadParticipant>>
+
+    /**
+     * Updates the name of a group chat.
+     * Only admins can update the group name.
+     *
+     * @param chatId The ID of the group chat thread.
+     * @param name The new name for the group.
+     * @return A flow emitting Result success or failure.
+     */
+    fun updateGroupName(chatId: String, name: String): Flow<Result<Unit>>
+
+    /**
+     * Updates the description of a group chat.
+     * Only admins can update the group description.
+     *
+     * @param chatId The ID of the group chat thread.
+     * @param description The new description for the group.
+     * @return A flow emitting Result success or failure.
+     */
+    fun updateGroupDescription(chatId: String, description: String): Flow<Result<Unit>>
+
+    /**
+     * Updates the role of a group member.
+     * Only admins can change member roles.
+     *
+     * @param chatId The ID of the group chat thread.
+     * @param userId The UID of the member whose role is being changed.
+     * @param role The new role to assign.
+     * @return A flow emitting Result success or failure.
+     */
+    fun updateMemberRole(chatId: String, userId: String, role: com.zixo.app.domain.model.ParticipantRole): Flow<Result<Unit>>
+
+    /**
+     * Removes a member from a group chat.
+     * Only admins can remove members.
+     *
+     * @param chatId The ID of the group chat thread.
+     * @param userId The UID of the member to remove.
+     * @return A flow emitting Result success or failure.
+     */
+    fun removeGroupMember(chatId: String, userId: String): Flow<Result<Unit>>
+
+    /**
+     * Allows the current user to leave a group chat.
+     * Admins must transfer ownership before leaving if they are the last admin.
+     *
+     * @param chatId The ID of the group chat thread to leave.
+     * @return A flow emitting Result success or failure.
+     */
+    fun leaveGroup(chatId: String): Flow<Result<Unit>>
+
+    /**
+     * Toggles the mute state of a chat thread for the current user.
+     *
+     * @param chatId The ID of the chat thread.
+     * @param isMuted Whether the thread should be muted.
+     * @return A flow emitting Result success or failure.
+     */
+    fun toggleMuteChat(chatId: String, isMuted: Boolean): Flow<Result<Unit>>
 }

@@ -87,7 +87,7 @@ class HomeViewModel @Inject constructor(
     private fun observeChats() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                chatRepository.getChatThreads().collect { chats ->
+                chatRepository.getThreads().collect { chats ->
                     _uiState.update { state ->
                         state.copy(
                             recentChats = chats,

@@ -730,6 +730,7 @@ class CallRepositoryImpl @Inject constructor(
                     calleeName = state.targetDisplayName,
                     type = CallDirection.OUTGOING,
                     isVideoCall = state.isVideoCall,
+                    callType = if (state.isVideoCall) com.zixo.app.domain.model.CallTechnology.WEBRTC_VIDEO else com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO,
                     duration = durationSeconds,
                     timestamp = System.currentTimeMillis(),
                     endReason = CallEndReason.COMPLETED
@@ -743,6 +744,7 @@ class CallRepositoryImpl @Inject constructor(
                     calleeName = state.targetDisplayName,
                     type = CallDirection.OUTGOING,
                     isVideoCall = state.isVideoCall,
+                    callType = if (state.isVideoCall) com.zixo.app.domain.model.CallTechnology.WEBRTC_VIDEO else com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO,
                     duration = 0L,
                     timestamp = System.currentTimeMillis(),
                     endReason = CallEndReason.CANCELLED
@@ -773,6 +775,8 @@ class CallRepositoryImpl @Inject constructor(
             val endReason = try { CallEndReason.valueOf(endReasonStr) }
                 catch (_: Exception) { CallEndReason.COMPLETED }
 
+            val callTechnologyStr = doc.getString("callType") ?: "WEBRTC_AUDIO"
+
             CallLogEntry(
                 id = doc.id,
                 callId = doc.getString("callId") ?: "",
@@ -784,6 +788,7 @@ class CallRepositoryImpl @Inject constructor(
                 calleeAvatar = doc.getString("calleeAvatar"),
                 type = if (endReason == CallEndReason.MISSED) CallDirection.MISSED else direction,
                 isVideoCall = doc.getBoolean("isVideoCall") ?: false,
+                callType = try { com.zixo.app.domain.model.CallTechnology.valueOf(callTechnologyStr) } catch (_: Exception) { com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO },
                 isGroupCall = doc.getBoolean("isGroupCall") ?: false,
                 duration = doc.getLong("duration") ?: 0L,
                 timestamp = doc.getLong("timestamp") ?: 0L,
@@ -807,6 +812,7 @@ class CallRepositoryImpl @Inject constructor(
         "calleeAvatar" to entry.calleeAvatar,
         "type" to entry.type.name,
         "isVideoCall" to entry.isVideoCall,
+        "callType" to entry.callType.name,
         "isGroupCall" to entry.isGroupCall,
         "duration" to entry.duration,
         "timestamp" to entry.timestamp,
@@ -815,4 +821,100 @@ class CallRepositoryImpl @Inject constructor(
         "threadId" to entry.threadId,
         "isRead" to entry.isRead
     )
+
+    // ── Get All Calls ────────────────────────────────────────────────────────
+
+    override fun getAllCalls(): Flow<List<CallLogEntry>> = callbackFlow {
+        val myUid = currentUid
+        if (myUid == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val subscription = callLogCollection
+            .whereArrayContains("participantUids", myUid)
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Timber.e(error, "Error observing call history")
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val calls = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        mapToCallLogEntry(doc)
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to map call log: %s", doc.id)
+                        null
+                    }
+                } ?: emptyList()
+
+                trySend(calls)
+            }
+
+        awaitClose { subscription.remove() }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Clear Call History ────────────────────────────────────────────────────
+
+    override fun clearCallHistory(): Flow<Result<Unit>> = flow {
+        try {
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            val snapshot = callLogCollection
+                .whereArrayContains("participantUids", myUid)
+                .get()
+                .await()
+
+            val batch = firestore.batch()
+            for (doc in snapshot.documents) {
+                batch.delete(doc.reference)
+            }
+            batch.commit().await()
+
+            Timber.d("Call history cleared: %d entries removed", snapshot.size())
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to clear call history")
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Mapping Helper ────────────────────────────────────────────────────────
+
+    private fun mapToCallLogEntry(
+        doc: com.google.firebase.firestore.DocumentSnapshot
+    ): CallLogEntry? {
+        return try {
+            val typeStr = doc.getString("type") ?: "OUTGOING"
+            val endReasonStr = doc.getString("endReason") ?: "COMPLETED"
+            val callTechnologyStr = doc.getString("callType") ?: "WEBRTC_AUDIO"
+            val isVideo = doc.getBoolean("isVideoCall") ?: false
+
+            CallLogEntry(
+                id = doc.id,
+                callId = doc.getString("callId") ?: "",
+                callerUid = doc.getString("callerUid") ?: "",
+                calleeUid = doc.getString("calleeUid") ?: "",
+                callerName = doc.getString("callerName") ?: "",
+                calleeName = doc.getString("calleeName") ?: "",
+                callerAvatar = doc.getString("callerAvatar"),
+                calleeAvatar = doc.getString("calleeAvatar"),
+                type = try { CallDirection.valueOf(typeStr) } catch (_: Exception) { CallDirection.OUTGOING },
+                isVideoCall = isVideo,
+                callType = try { com.zixo.app.domain.model.CallTechnology.valueOf(callTechnologyStr) } catch (_: Exception) { com.zixo.app.domain.model.CallTechnology.WEBRTC_AUDIO },
+                isGroupCall = doc.getBoolean("isGroupCall") ?: false,
+                duration = doc.getLong("duration") ?: 0L,
+                timestamp = doc.getLong("timestamp") ?: 0L,
+                endReason = try { CallEndReason.valueOf(endReasonStr) } catch (_: Exception) { CallEndReason.COMPLETED },
+                threadId = doc.getString("threadId") ?: "",
+                isRead = doc.getBoolean("isRead") ?: false
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to map CallLogEntry from document: %s", doc.id)
+            null
+        }
+    }
 }

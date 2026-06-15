@@ -586,9 +586,10 @@ private fun formatDuration(seconds: Long): String {
     return "%02d:%02d".format(mins, secs)
 }
 
-private fun formatRelativeTime(timestamp: Instant): String {
+private fun formatRelativeTime(timestamp: Long): String {
+    val instant = Instant.ofEpochMilli(timestamp)
     val now = Instant.now()
-    val duration = Duration.between(timestamp, now)
+    val duration = Duration.between(instant, now)
 
     return when {
         duration.isNegative -> "Just now"
@@ -605,7 +606,7 @@ private fun formatRelativeTime(timestamp: Instant): String {
             if (weeks == 1L) "1 week ago" else "$weeks weeks ago"
         }
         else -> {
-            val dateTime = LocalDateTime.ofInstant(timestamp, ZoneId.systemDefault())
+            val dateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault())
             val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
             dateTime.format(formatter)
         }
