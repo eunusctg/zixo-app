@@ -1,5 +1,6 @@
 package com.zixo.app.ui.components
 
+import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -22,9 +23,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.zIndex
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.SwitchCamera
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.VideocamOff
@@ -40,6 +44,7 @@ import androidx.compose.material.icons.outlined.VolumeOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -50,23 +55,38 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.zixo.app.data.remote.webrtc.WebRtcClient
 import com.zixo.app.domain.model.CallState
 import com.zixo.app.ui.theme.AmoledBlack
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
+import org.webrtc.SurfaceViewRenderer
 
 // ════════════════════════════════════════════════════════════════
-// Call Screen Overlay — Fullscreen Frosted Glass
+// Call Screen Overlay — Fullscreen Frosted Glass with Video
 // ════════════════════════════════════════════════════════════════
 
 /**
  * Fullscreen frosted glass overlay that pops over the UI during WebRTC calls.
+ *
+ * ## Crash-Proof Video Rendering:
+ *
+ * The [SurfaceViewRenderer] for video is wrapped inside an [AndroidView].
+ * The hardware-accelerated root EglBase context is retained using the DI
+ * Singleton [WebRtcClient] — it is **NEVER** re-initialized on Composable
+ * recomposition, as that would trigger an uncatchable SIGABRT crash in the
+ * native WebRTC layer.
+ *
+ * The SurfaceViewRenderer is created once per composition using `remember`
+ * and initialized with the singleton EglBase context from [WebRtcClient].
  *
  * Renders different UI based on the current [CallState]:
  *
@@ -74,30 +94,32 @@ import kotlinx.coroutines.delay
  * |----------------------|-----------------------------------------------------------|
  * | [CallState.DIALING]  | "Calling…" label with pulsing animation                   |
  * | [CallState.RINGING]  | "Incoming Call" with Accept / Decline buttons             |
- * | [CallState.CONNECTED]| Call duration timer + mute/camera/speaker toggles + end   |
+ * | [CallState.CONNECTED]| Video views + duration timer + controls + end             |
  * | [CallState.ENDED]    | Brief "Call Ended" message, then auto-dismiss            |
  *
- * All surfaces use the Liquid Glass design (frosted blur + semi-transparent
- * borders) to prevent the black-screen issue that occurs when a call UI
- * blocks the main thread.
- *
- * @param callId     The unique call identifier.
- * @param callState  The current call state. Defaults to [CallState.DIALING].
- * @param onEndCall  Callback invoked when the user ends/declines the call.
- * @param onAcceptCall Callback invoked when the user accepts an incoming call.
+ * @param callId         The unique call identifier.
+ * @param callState      The current call state.
+ * @param webRtcClient   The singleton WebRTC client for video rendering.
+ * @param isVideoCall    Whether this is a video call.
+ * @param onEndCall      Callback invoked when the user ends/declines the call.
+ * @param onAcceptCall   Callback invoked when the user accepts an incoming call.
  * @param onToggleMute   Callback invoked when the mute button is toggled.
  * @param onToggleCamera Callback invoked when the camera button is toggled.
  * @param onToggleSpeaker Callback invoked when the speaker button is toggled.
+ * @param onSwitchCamera Callback invoked when the camera switch button is pressed.
  */
 @Composable
 fun CallScreenOverlay(
     callId: String,
     callState: CallState = CallState.DIALING(),
+    webRtcClient: WebRtcClient? = null,
+    isVideoCall: Boolean = false,
     onEndCall: () -> Unit = {},
     onAcceptCall: () -> Unit = {},
     onToggleMute: () -> Unit = {},
     onToggleCamera: () -> Unit = {},
     onToggleSpeaker: () -> Unit = {},
+    onSwitchCamera: () -> Unit = {},
 ) {
     // ── Auto-dismiss after ENDED state ──────────────────────
     var hasDismissed by remember { mutableStateOf(false) }
@@ -114,15 +136,23 @@ fun CallScreenOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                color = AmoledBlack.copy(alpha = 0.85f)
-            ),
+            .background(color = AmoledBlack.copy(alpha = 0.85f)),
         contentAlignment = Alignment.Center
     ) {
+        // ── Video Rendering Layer (EglBase Singleton Preservation) ──
+        if (isVideoCall && callState is CallState.CONNECTED && webRtcClient != null) {
+            VideoRenderLayer(
+                webRtcClient = webRtcClient,
+                callState = callState
+            )
+        }
+
+        // ── UI Controls Layer ──
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(24.dp)
+                .zIndex(if (isVideoCall && callState is CallState.CONNECTED) 1f else 0f),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -133,9 +163,7 @@ fun CallScreenOverlay(
 
             // ── Call State Display ──────────────────────────
             when (callState) {
-                is CallState.IDLE -> {
-                    // Shouldn't happen when overlay is shown
-                }
+                is CallState.IDLE -> { /* Shouldn't happen when overlay is shown */ }
 
                 is CallState.DIALING -> {
                     DialingIndicator()
@@ -151,9 +179,11 @@ fun CallScreenOverlay(
                 is CallState.CONNECTED -> {
                     ConnectedControls(
                         callState = callState,
+                        isVideoCall = isVideoCall,
                         onToggleMute = onToggleMute,
                         onToggleCamera = onToggleCamera,
                         onToggleSpeaker = onToggleSpeaker,
+                        onSwitchCamera = onSwitchCamera,
                         onEndCall = onEndCall
                     )
                 }
@@ -167,12 +197,96 @@ fun CallScreenOverlay(
 }
 
 // ════════════════════════════════════════════════════════════════
-// Contact Info Section
+// Video Rendering Layer — EglBase Singleton + SurfaceViewRenderer
 // ════════════════════════════════════════════════════════════════
 
 /**
- * Displays the contact avatar, display name, and call type (audio/video).
+ * Renders the remote and local video tracks using [SurfaceViewRenderer]
+ * wrapped inside [AndroidView].
+ *
+ * ## Critical Rules for Crash Prevention:
+ *
+ * 1. **EglBase Singleton**: The [WebRtcClient.eglBaseContext] is a DI Singleton
+ *    that is NEVER re-created on recomposition. Re-creating EglBase triggers
+ *    an uncatchable SIGABRT crash in the native WebRTC layer.
+ *
+ * 2. **SurfaceViewRenderer lifecycle**: Created once using `remember`, initialized
+ *    with the singleton EglBase context. Released on disposal via `DisposableEffect`.
+ *
+ * 3. **AndroidView wrapper**: The native SurfaceViewRenderer is embedded inside
+ *    Compose using `AndroidView`, which properly manages the View lifecycle.
+ *
+ * @param webRtcClient The singleton WebRTC client.
+ * @param callState    The current CONNECTED call state.
  */
+@Composable
+private fun VideoRenderLayer(
+    webRtcClient: WebRtcClient,
+    callState: CallState.CONNECTED
+) {
+    // ── Remote Video (Full Screen) ──
+    val remoteSurfaceView = remember { SurfaceViewRenderer(LocalContext.current) }
+
+    DisposableEffect(remoteSurfaceView) {
+        webRtcClient.initRemoteVideoRenderer(remoteSurfaceView)
+        onDispose {
+            webRtcClient.releaseVideoRenderer(remoteSurfaceView, isLocal = false)
+        }
+    }
+
+    // Remote video fills the entire background
+    AndroidView(
+        factory = { remoteSurfaceView },
+        modifier = Modifier.fillMaxSize(),
+        update = { view ->
+            try {
+                webRtcClient.initRemoteVideoRenderer(view)
+            } catch (_: Exception) {
+                // Renderer may already be initialized
+            }
+        }
+    )
+
+    // ── Local Video (Picture-in-Picture) ──
+    if (!callState.isCameraOff) {
+        val localSurfaceView = remember { SurfaceViewRenderer(LocalContext.current) }
+
+        DisposableEffect(localSurfaceView) {
+            webRtcClient.initLocalVideoRenderer(localSurfaceView)
+            onDispose {
+                webRtcClient.releaseVideoRenderer(localSurfaceView, isLocal = true)
+            }
+        }
+
+        // Local video as a small PiP in the top-right corner
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.TopEnd
+        ) {
+            AndroidView(
+                factory = { localSurfaceView },
+                modifier = Modifier
+                    .size(width = 120.dp, height = 160.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(2.dp, NeonMint.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
+                update = { view ->
+                    try {
+                        webRtcClient.initLocalVideoRenderer(view)
+                    } catch (_: Exception) {
+                        // Renderer may already be initialized
+                    }
+                }
+            )
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+// Contact Info Section
+// ════════════════════════════════════════════════════════════════
+
 @Composable
 private fun ContactInfoSection(callState: CallState) {
     val displayName = when (callState) {
@@ -208,7 +322,6 @@ private fun ContactInfoSection(callState: CallState) {
 
     Spacer(modifier = Modifier.height(16.dp))
 
-    // ── Display Name ──
     Text(
         text = displayName.ifBlank { "Unknown" },
         color = TextPrimary,
@@ -219,7 +332,6 @@ private fun ContactInfoSection(callState: CallState) {
 
     Spacer(modifier = Modifier.height(4.dp))
 
-    // ── Call Type Badge ──
     Row(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
@@ -241,12 +353,9 @@ private fun ContactInfoSection(callState: CallState) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// DIALING State — "Calling…" with Pulsing Animation
+// DIALING State
 // ════════════════════════════════════════════════════════════════
 
-/**
- * Pulsing "Calling…" indicator shown while waiting for the remote peer.
- */
 @Composable
 private fun DialingIndicator() {
     val infiniteTransition = rememberInfiniteTransition(label = "dialing_pulse")
@@ -270,20 +379,13 @@ private fun DialingIndicator() {
         label = "dialing_scale"
     )
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Pulsing ring
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
                 .size((80.dp * pulseScale))
                 .clip(CircleShape)
                 .background(NeonMint.copy(alpha = pulseAlpha * 0.2f))
-                .border(
-                    width = 2.dp,
-                    color = NeonMint.copy(alpha = pulseAlpha),
-                    shape = CircleShape
-                ),
+                .border(2.dp, NeonMint.copy(alpha = pulseAlpha), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -293,25 +395,15 @@ private fun DialingIndicator() {
                 modifier = Modifier.size(32.dp)
             )
         }
-
         Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Calling…",
-            color = TextSecondary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium
-        )
+        Text(text = "Calling…", color = TextSecondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
     }
 }
 
 // ════════════════════════════════════════════════════════════════
-// RINGING State — Incoming Call with Accept/Decline
+// RINGING State
 // ════════════════════════════════════════════════════════════════
 
-/**
- * Incoming call UI with "Incoming Call" label and Accept/Decline buttons.
- */
 @Composable
 private fun RingingIndicator(
     onAccept: () -> Unit,
@@ -321,10 +413,7 @@ private fun RingingIndicator(
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.5f,
         targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800),
-            repeatMode = RepeatMode.Reverse
-        ),
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
         label = "ringing_alpha"
     )
 
@@ -337,13 +426,11 @@ private fun RingingIndicator(
 
     Spacer(modifier = Modifier.height(40.dp))
 
-    // ── Accept / Decline Buttons ──
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Decline Button (Red)
         GlassCallButton(
             icon = Icons.Filled.CallEnd,
             contentDescription = "Decline",
@@ -351,8 +438,6 @@ private fun RingingIndicator(
             iconTint = Color.White,
             onClick = onDecline
         )
-
-        // Accept Button (Green)
         GlassCallButton(
             icon = Icons.Filled.Phone,
             contentDescription = "Accept",
@@ -364,39 +449,29 @@ private fun RingingIndicator(
 }
 
 // ════════════════════════════════════════════════════════════════
-// CONNECTED State — Duration Timer + Mute/Camera/Speaker Toggles
+// CONNECTED State
 // ════════════════════════════════════════════════════════════════
 
-/**
- * Active call controls shown while the call is connected.
- *
- * Includes:
- * - Call duration timer
- * - Mute toggle (mic icon)
- * - Camera toggle (video icon)
- * - Speaker toggle (speaker icon)
- * - End call button (red circle with phone icon)
- */
 @Composable
 private fun ConnectedControls(
     callState: CallState.CONNECTED,
+    isVideoCall: Boolean,
     onToggleMute: () -> Unit,
     onToggleCamera: () -> Unit,
     onToggleSpeaker: () -> Unit,
+    onSwitchCamera: () -> Unit,
     onEndCall: () -> Unit,
 ) {
-    // ── Call Duration Timer ──
     CallDurationTimer(connectedAt = callState.connectedAt)
 
     Spacer(modifier = Modifier.height(48.dp))
 
-    // ── Toggle Buttons Row ──
+    // ── Toggle Buttons ──
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Mute Toggle
         GlassToggleCallButton(
             icon = if (callState.isMuted) Icons.Filled.MicOff else Icons.Filled.Mic,
             contentDescription = if (callState.isMuted) "Unmute" else "Mute",
@@ -404,15 +479,23 @@ private fun ConnectedControls(
             onClick = onToggleMute
         )
 
-        // Camera Toggle
-        GlassToggleCallButton(
-            icon = if (callState.isCameraOff) Icons.Outlined.VideocamOff else Icons.Outlined.Videocam,
-            contentDescription = if (callState.isCameraOff) "Turn camera on" else "Turn camera off",
-            isActive = callState.isCameraOff,
-            onClick = onToggleCamera
-        )
+        if (isVideoCall) {
+            GlassToggleCallButton(
+                icon = if (callState.isCameraOff) Icons.Outlined.VideocamOff else Icons.Outlined.Videocam,
+                contentDescription = if (callState.isCameraOff) "Camera on" else "Camera off",
+                isActive = callState.isCameraOff,
+                onClick = onToggleCamera
+            )
 
-        // Speaker Toggle
+            // Switch camera button
+            GlassToggleCallButton(
+                icon = Icons.Filled.SwitchCamera,
+                contentDescription = "Switch camera",
+                isActive = false,
+                onClick = onSwitchCamera
+            )
+        }
+
         GlassToggleCallButton(
             icon = if (callState.isSpeakerOn) Icons.Filled.VolumeUp else Icons.Outlined.VolumeOff,
             contentDescription = if (callState.isSpeakerOn) "Speaker off" else "Speaker on",
@@ -423,7 +506,6 @@ private fun ConnectedControls(
 
     Spacer(modifier = Modifier.height(48.dp))
 
-    // ── End Call Button ──
     GlassCallButton(
         icon = Icons.Filled.CallEnd,
         contentDescription = "End call",
@@ -435,12 +517,9 @@ private fun ConnectedControls(
 }
 
 // ════════════════════════════════════════════════════════════════
-// ENDED State — Brief "Call Ended" Message
+// ENDED State
 // ════════════════════════════════════════════════════════════════
 
-/**
- * Brief "Call Ended" message shown for 2 seconds before auto-dismiss.
- */
 @Composable
 private fun EndedIndicator(callState: CallState.ENDED) {
     val durationText = formatDuration(callState.durationSeconds)
@@ -450,32 +529,18 @@ private fun EndedIndicator(callState: CallState.ENDED) {
         enter = fadeIn(animationSpec = tween(300)) + scaleIn(initialScale = 0.9f),
         exit = fadeOut(animationSpec = tween(300)) + scaleOut(targetScale = 0.9f)
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 imageVector = Icons.Filled.CheckCircle,
                 contentDescription = null,
                 tint = TextSecondary,
                 modifier = Modifier.size(40.dp)
             )
-
             Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "Call Ended",
-                color = TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-
+            Text(text = "Call Ended", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             if (callState.durationSeconds > 0) {
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = durationText,
-                    color = TextSecondary,
-                    fontSize = 14.sp
-                )
+                Text(text = durationText, color = TextSecondary, fontSize = 14.sp)
             }
         }
     }
@@ -485,11 +550,6 @@ private fun EndedIndicator(callState: CallState.ENDED) {
 // Call Duration Timer
 // ════════════════════════════════════════════════════════════════
 
-/**
- * Live-updating call duration timer.
- *
- * Ticks every second starting from [connectedAt] timestamp.
- */
 @Composable
 private fun CallDurationTimer(connectedAt: Long) {
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
@@ -514,24 +574,9 @@ private fun CallDurationTimer(connectedAt: Long) {
 // Glass Call Button Components
 // ════════════════════════════════════════════════════════════════
 
-/** Semi-transparent dark surface for liquid glass panels. */
 private val GlassSurfaceColor = Color(0x1A1A2A32)
-/** High-gloss border for liquid glass panels. */
 private val GlassBorderColor = Color(0x33FFFFFF)
 
-/**
- * Circular glass-styled call action button.
- *
- * Used for Accept, Decline, and End Call buttons with
- * distinct background colors per action.
- *
- * @param icon             The icon to display.
- * @param contentDescription Accessibility description.
- * @param backgroundColor  Circle background color.
- * @param iconTint         Icon tint color.
- * @param size             Button size in dp (default 56.dp).
- * @param onClick          Click callback.
- */
 @Composable
 private fun GlassCallButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -563,18 +608,6 @@ private fun GlassCallButton(
     }
 }
 
-/**
- * Circular glass-styled toggle button for mute/camera/speaker.
- *
- * When [isActive] is true, the button shows a highlighted state
- * with the [NeonMint] accent. When inactive, it shows a subtle
- * glass surface.
- *
- * @param icon             The icon to display.
- * @param contentDescription Accessibility description.
- * @param isActive         Whether the toggle is currently active.
- * @param onClick          Click callback.
- */
 @Composable
 private fun GlassToggleCallButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -608,13 +641,6 @@ private fun GlassToggleCallButton(
     }
 }
 
-// ════════════════════════════════════════════════════════════════
-// Duration Formatter
-// ════════════════════════════════════════════════════════════════
-
-/**
- * Formats a duration in seconds to "MM:SS" or "HH:MM:SS".
- */
 private fun formatDuration(seconds: Long): String {
     val hrs = seconds / 3600
     val mins = (seconds % 3600) / 60

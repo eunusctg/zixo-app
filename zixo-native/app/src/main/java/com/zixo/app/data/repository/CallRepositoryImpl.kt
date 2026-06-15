@@ -106,19 +106,8 @@ class CallRepositoryImpl @Inject constructor(
             )
             emit(_callState.value)
 
-            // Write call signaling data
-            val callData = mapOf(
-                "callId" to callId,
-                "callerUid" to myUid,
-                "callerDisplayName" to (firebaseAuth.currentUser?.displayName ?: ""),
-                "calleeUid" to targetUid,
-                "isVideoCall" to isVideoCall,
-                "status" to "ringing",
-                "createdAt" to System.currentTimeMillis()
-            )
-            realtimeDb.getReference("calls").child(callId).setValue(callData).await()
-
-            // Start foreground service
+            // Start foreground service BEFORE WebRTC initialization
+            // This guarantees Android does not terminate media streams
             CallForegroundService.start(
                 context = context,
                 callType = if (isVideoCall) CallForegroundService.CALL_TYPE_VIDEO else CallForegroundService.CALL_TYPE_AUDIO,
@@ -126,17 +115,47 @@ class CallRepositoryImpl @Inject constructor(
                 callId = callId
             )
 
-            // Initialize WebRTC peer connection and create offer
+            // Create the call entry in Firebase Realtime DB with structured data
+            signalingClient.createCall(callId, myUid, targetUid, isVideoCall)
+
+            // Initialize WebRTC peer connection on Dispatchers.IO
+            // AudioManager is calibrated inside initializePeerConnection
             webRtcClient.initializePeerConnection(isVideoCall)
+
+            // Set up ICE candidate forwarding: local ICE → Firebase signaling
+            webRtcClient.onIceCandidateGenerated = { candidate ->
+                kotlinx.coroutines.runBlocking {
+                    signalingClient.sendIceCandidate(
+                        callId = callId,
+                        senderUid = myUid,
+                        targetUid = targetUid,
+                        sdpMid = candidate.sdpMid,
+                        sdpMLineIndex = candidate.sdpMLineIndex,
+                        sdp = candidate.sdp
+                    )
+                }
+            }
+
+            // Create SDP offer
             val sdpOffer = webRtcClient.createOffer()
 
             // Send the offer via Firebase signaling
-            signalingClient.sendOffer(callId, myUid, sdpOffer)
+            signalingClient.sendOffer(callId, myUid, targetUid, sdpOffer)
+
+            // Update call status to ringing
+            signalingClient.updateCallStatus(callId, "ringing")
+
+            // Observe answer and ICE candidates concurrently
+            var isAnswerReceived = false
 
             // Listen for answer
-            signalingClient.observeAnswer(callId).collect { answer ->
-                if (answer != null) {
-                    webRtcClient.setRemoteAnswer(answer)
+            signalingClient.observeAnswer(callId, myUid).collect { answerData ->
+                if (answerData != null && !isAnswerReceived) {
+                    isAnswerReceived = true
+                    webRtcClient.setRemoteAnswer(answerData.sdp)
+
+                    // Update call status to connected
+                    signalingClient.updateCallStatus(callId, "connected")
 
                     _callState.value = CallState.CONNECTED(
                         callId = callId,
@@ -151,6 +170,9 @@ class CallRepositoryImpl @Inject constructor(
 
                     // Start duration tracking
                     startDurationTracking(callId)
+
+                    // Start observing ICE candidates for this call
+                    observeIceCandidates(callId, myUid)
                 }
             }
         } catch (e: Exception) {
@@ -305,15 +327,21 @@ class CallRepositoryImpl @Inject constructor(
                 (System.currentTimeMillis() - connectedAt) / 1000
             } else 0L
 
-            // Update call status in Firebase
-            realtimeDb.getReference("calls").child(callId).child("status")
-                .setValue("ended").await()
+            // Update call status in Firebase via signaling client
+            signalingClient.updateCallStatus(callId, "ended")
 
-            // Clean up WebRTC resources
+            // Clean up WebRTC resources (releases audio focus too)
             webRtcClient.disconnect()
+
+            // Clean up signaling data from Firebase Realtime DB
+            signalingClient.cleanupSignalingData(callId)
 
             // Stop foreground service
             CallForegroundService.stop(context)
+
+            // Cancel duration tracking
+            durationJob?.cancel()
+            durationJob = null
 
             // Log the call
             logCall(callId, currentState, durationSeconds)
@@ -325,7 +353,12 @@ class CallRepositoryImpl @Inject constructor(
             )
             emit(Result.success(Unit))
         } catch (e: Exception) {
-            Timber.e(e, "Failed to end call")
+            Timber.e(e, "Failed to end call — forcing cleanup")
+            // Force cleanup even if something fails
+            try { webRtcClient.disconnect() } catch (_: Exception) {}
+            try { CallForegroundService.stop(context) } catch (_: Exception) {}
+            try { signalingClient.cleanupSignalingData(callId) } catch (_: Exception) {}
+            _callState.value = CallState.IDLE
             emit(Result.failure(e))
         }
     }.flowOn(Dispatchers.IO)
@@ -431,6 +464,38 @@ class CallRepositoryImpl @Inject constructor(
 
         awaitClose { subscription.remove() }
     }.flowOn(Dispatchers.IO)
+
+    // ── ICE Candidate Observer ──────────────────────────────────────────────
+
+    /**
+     * Observes remote ICE candidates from the signaling server and adds them
+     * to the local PeerConnection. This runs continuously during a call to
+     * ensure that new ICE candidates are processed as they arrive.
+     *
+     * @param callId The call ID.
+     * @param localUid The local user's UID (to filter out self-sent candidates).
+     */
+    private fun observeIceCandidates(callId: String, localUid: String) {
+        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            try {
+                signalingClient.observeIceCandidates(callId, localUid).collect { candidates ->
+                    for (candidate in candidates) {
+                        try {
+                            webRtcClient.addIceCandidate(
+                                candidate.sdpMid,
+                                candidate.sdpMLineIndex,
+                                candidate.sdp
+                            )
+                        } catch (e: Exception) {
+                            Timber.e(e, "Failed to add remote ICE candidate")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "ICE candidate observer failed for call: %s", callId)
+            }
+        }
+    }
 
     // ── Internal Helpers ──────────────────────────────────────────────────────
 

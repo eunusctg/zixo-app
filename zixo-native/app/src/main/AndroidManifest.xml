@@ -29,9 +29,11 @@
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Foreground service for calls -->
+    <!-- Foreground service for WebRTC calls (Camera + Microphone + Phone Call) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- Vibration for calls -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -83,11 +85,16 @@
             </intent-filter>
         </service>
 
-        <!-- WebRTC Call foreground service — runs on Dispatchers.IO, never blocks Main Thread -->
+        <!--
+            WebRTC Call Foreground Service — flags CAMERA + MICROPHONE + PHONE_CALL.
+            This guarantees Android does not terminate the media stream when the user
+            backgrounds the application during an active call.
+            All WebRTC operations run on Dispatchers.IO, never blocking the Main Thread.
+        -->
         <service
             android:name=".data.remote.webrtc.CallForegroundService"
             android:exported="false"
-            android:foregroundServiceType="phoneCall" />
+            android:foregroundServiceType="phoneCall|camera|microphone" />
 
     </application>
 

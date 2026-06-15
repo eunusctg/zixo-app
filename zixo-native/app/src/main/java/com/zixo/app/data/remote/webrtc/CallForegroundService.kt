@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -15,14 +16,19 @@ import com.zixo.app.R
 import timber.log.Timber
 
 /**
- * Foreground service for active WebRTC calls.
+ * Mandatory Foreground Service for active WebRTC calls.
  *
- * Android requires a foreground service with a persistent notification for
- * any ongoing audio/video communication so the system does not kill the
- * process while the user is on a call.
+ * This service is flagged with FOREGROUND_SERVICE_TYPE_CAMERA,
+ * FOREGROUND_SERVICE_TYPE_MICROPHONE, and FOREGROUND_SERVICE_TYPE_PHONE_CALL.
+ * This guarantees Android does not terminate the media stream when a user
+ * backgrounds the application during an active call.
  *
- * Replaces the old LiveKit-based CallForegroundService. This version
- * is pure WebRTC with Firebase Realtime DB signaling.
+ * ## Key Design Decisions:
+ * - Uses all three foreground service types (camera | microphone | phoneCall)
+ *   to ensure the system keeps both media streams alive
+ * - Shows a persistent notification with "End Call" action
+ * - Runs the WebRTC session within this service scope
+ * - Cleanly stops when the call ends
  *
  * All call lifecycle operations run on Dispatchers.IO, never blocking Main Thread.
  */
@@ -44,10 +50,14 @@ class CallForegroundService : Service() {
         /**
          * Start the foreground service for an ongoing WebRTC call.
          *
-         * @param context  Application or activity context.
-         * @param callType One of [CALL_TYPE_AUDIO] or [CALL_TYPE_VIDEO].
+         * The service type is dynamically set based on the call type:
+         * - Audio calls: PHONE_CALL | MICROPHONE
+         * - Video calls: PHONE_CALL | CAMERA | MICROPHONE
+         *
+         * @param context    Application or activity context.
+         * @param callType   One of [CALL_TYPE_AUDIO] or [CALL_TYPE_VIDEO].
          * @param callerName Display name of the remote participant.
-         * @param callId   The WebRTC call ID.
+         * @param callId     The WebRTC call ID.
          */
         fun start(
             context: Context,
@@ -103,11 +113,19 @@ class CallForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel(this)
-        Timber.d("CallForegroundService created (WebRTC)")
+        Timber.d("CallForegroundService created (WebRTC, CAMERA+MIC+PHONE_CALL)")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        // Handle end call action
+        if (intent.action == ACTION_END_CALL) {
+            Timber.d("End call action received via notification")
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -117,9 +135,28 @@ class CallForegroundService : Service() {
         val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: ""
 
         val notification = buildNotification(callType, callerName, callId)
-        startForeground(NOTIFICATION_ID, notification)
-        Timber.d("WebRTC call foreground service started (type=%s, caller=%s)", callType, callerName)
 
+        // Start foreground with the appropriate service types
+        // This ensures Android keeps the camera and microphone streams alive
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // API 34+: Must specify foreground service types at start time
+            val serviceTypes = if (callType == CALL_TYPE_VIDEO) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+            startForeground(NOTIFICATION_ID, notification, serviceTypes)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // API 29-33: Service type declared in manifest, start normally
+            startForeground(NOTIFICATION_ID, notification)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+
+        Timber.d("WebRTC call foreground service started (type=%s, caller=%s, serviceTypes=CAMERA+MIC+PHONE)", callType, callerName)
         return START_STICKY
     }
 
