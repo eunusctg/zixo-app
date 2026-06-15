@@ -9,7 +9,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,10 +43,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,7 +67,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.LaunchedEffect
 import com.zixo.app.domain.repository.AuthState
 import com.zixo.app.ui.theme.AmoledBlack
 import com.zixo.app.ui.theme.NeonMint
@@ -91,8 +89,9 @@ import kotlinx.coroutines.launch
  * - Initial state: frosted "Continue with Google" button (Liquid Glass, rgba(255,255,255,0.07))
  * - Below: thin horizontal divider marked "OR"
  * - Text link: "Login using email and password"
- * - Tapped → AnimatedVisibility(expandVertically + fadeIn) reveals email/password fields
+ * - Tapped -> AnimatedVisibility(expandVertically + fadeIn) reveals email/password fields
  * - Secondary glowing green "Sign in with Email" button
+ * - Auto-fallback: If no Google account on device, email fields auto-expand
  */
 @Composable
 fun AuthScreen(
@@ -101,15 +100,16 @@ fun AuthScreen(
 ) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    var showEmailFields by remember { mutableStateOf(false) }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Auto-show email fields when Google Sign-In fallback is triggered
+    val showEmailFields = uiState.showEmailFallback
 
     // Auto-navigate on successful auth
     LaunchedEffect(authState) {
@@ -292,7 +292,14 @@ fun AuthScreen(
 
             // ── Email Login Toggle Link ────────────────────────────
             TextButton(
-                onClick = { showEmailFields = !showEmailFields }
+                onClick = {
+                    if (uiState.showEmailFallback) {
+                        // Already showing via fallback, toggle to hide
+                        viewModel.clearEmailFallback()
+                    } else {
+                        viewModel.showEmailFallback()
+                    }
+                }
             ) {
                 Text(
                     text = if (showEmailFields) "Hide email login" else "Login using email and password",
@@ -317,7 +324,10 @@ fun AuthScreen(
                     // Email Field
                     OutlinedTextField(
                         value = email,
-                        onValueChange = { email = it },
+                        onValueChange = {
+                            email = it
+                            viewModel.onEmailChange(it)
+                        },
                         label = { Text("Email", color = TextSecondary) },
                         leadingIcon = {
                             Icon(
@@ -349,7 +359,10 @@ fun AuthScreen(
                     // Password Field
                     OutlinedTextField(
                         value = password,
-                        onValueChange = { password = it },
+                        onValueChange = {
+                            password = it
+                            viewModel.onPasswordChange(it)
+                        },
                         label = { Text("Password", color = TextSecondary) },
                         leadingIcon = {
                             Icon(
@@ -377,9 +390,11 @@ fun AuthScreen(
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 keyboardController?.hide()
-                                viewModel.onEmailChange(email)
-                                viewModel.onPasswordChange(password)
-                                viewModel.signInWithEmail()
+                                if (uiState.isEmailSignUp) {
+                                    viewModel.signUpWithEmail()
+                                } else {
+                                    viewModel.signInWithEmail()
+                                }
                             }
                         ),
                         singleLine = true
@@ -387,13 +402,15 @@ fun AuthScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    // ── Sign in with Email Button (Glowing Green) ──
+                    // ── Sign In / Sign Up Button (Glowing Green) ──
                     Button(
                         onClick = {
                             keyboardController?.hide()
-                            viewModel.onEmailChange(email)
-                            viewModel.onPasswordChange(password)
-                            viewModel.signInWithEmail()
+                            if (uiState.isEmailSignUp) {
+                                viewModel.signUpWithEmail()
+                            } else {
+                                viewModel.signInWithEmail()
+                            }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -415,7 +432,7 @@ fun AuthScreen(
                             )
                         } else {
                             Text(
-                                text = "Sign in with Email",
+                                text = if (uiState.isEmailSignUp) "Create Account" else "Sign in with Email",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AmoledBlack
@@ -424,6 +441,22 @@ fun AuthScreen(
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    // ── Toggle Sign In / Sign Up ──────────────────
+                    TextButton(
+                        onClick = { viewModel.toggleEmailSignUpMode() }
+                    ) {
+                        Text(
+                            text = if (uiState.isEmailSignUp) {
+                                "Already have an account? Sign in"
+                            } else {
+                                "Don't have an account? Sign up"
+                            },
+                            color = Color(0xFF5B8DB8),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
 
@@ -434,9 +467,3 @@ fun AuthScreen(
         }
     }
 }
-
-// NOTE: Removed custom offset() extension that was using padding() internally.
-// That caused IllegalArgumentException: Padding must be non-negative
-// when called with negative dp values like offset(x = (-80).dp).
-// The standard Compose Modifier.offset() from foundation.layout is now used instead,
-// which properly supports negative offset values without triggering padding validation.

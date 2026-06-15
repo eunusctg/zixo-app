@@ -11,6 +11,7 @@ import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -51,7 +52,8 @@ data class AuthUiState(
     val email: String = "",                     // Email for email/password fallback
     val password: String = "",                  // Password for email/password fallback
     val isEmailSignIn: Boolean = false,         // Whether using email/password mode
-    val isEmailSignUp: Boolean = false          // Whether in email sign-up mode vs sign-in
+    val isEmailSignUp: Boolean = false,         // Whether in email sign-up mode vs sign-in
+    val showEmailFallback: Boolean = false      // Auto-show email fields when Google unavailable
 )
 
 /**
@@ -110,14 +112,22 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val credentialManager = CredentialManager.create(activity)
+                val serverClientId = "809372450511-lqm5bvb2m2us2av2qc2t6c0hva3gq5fm.apps.googleusercontent.com"
 
+                // Primary: Google ID token from device accounts
                 val googleIdOption = GetGoogleIdOption.Builder()
                     .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId("809372450511-lqm5bvb2m2us2av2qc2t6c0hva3gq5fm.apps.googleusercontent.com")
+                    .setServerClientId(serverClientId)
+                    .build()
+
+                // Secondary: Browser-based "Sign in with Google" flow
+                // This works even when NO Google account is on the device
+                val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(serverClientId)
                     .build()
 
                 val request = GetCredentialRequest.Builder()
                     .addCredentialOption(googleIdOption)
+                    .addCredentialOption(signInWithGoogleOption)
                     .build()
 
                 val result = credentialManager.getCredential(
@@ -127,11 +137,12 @@ class AuthViewModel @Inject constructor(
 
                 handleCredentialResult(result)
             } catch (e: NoCredentialException) {
-                Timber.w(e, "No Google accounts found on device")
+                Timber.w(e, "No Google accounts found on device — falling back to email sign-in")
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = "No Google accounts found on this device. Please add a Google account in Settings, or use email/password sign-in."
+                        showEmailFallback = true,
+                        errorMessage = null
                     )
                 }
             } catch (e: GetCredentialException) {
@@ -449,5 +460,19 @@ class AuthViewModel @Inject constructor(
      */
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    /**
+     * Manually triggers the email fallback UI (e.g., user taps the link).
+     */
+    fun showEmailFallback() {
+        _uiState.update { it.copy(showEmailFallback = true, errorMessage = null) }
+    }
+
+    /**
+     * Hides the email fallback UI when the user wants to dismiss it.
+     */
+    fun clearEmailFallback() {
+        _uiState.update { it.copy(showEmailFallback = false, errorMessage = null) }
     }
 }
