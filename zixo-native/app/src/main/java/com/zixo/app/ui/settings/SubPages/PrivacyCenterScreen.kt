@@ -457,8 +457,14 @@ fun PrivacyCenterScreen(
                         } else {
                             "Premium feature — subscription required"
                         },
-                        checked = settingsState.isIncomingPstnEnabled,
-                        onCheckedChange = { viewModel.updateIncomingPstnEnabled(it) }
+                        checked = if (settingsState.isPremiumSubscriber) settingsState.isIncomingPstnEnabled else false,
+                        onCheckedChange = { enabled ->
+                            if (enabled && !settingsState.isPremiumSubscriber) {
+                                viewModel.showPremiumPaywall()
+                            } else {
+                                viewModel.updateIncomingPstnEnabled(enabled)
+                            }
+                        }
                     )
 
                     if (!settingsState.isPremiumSubscriber) {
@@ -468,7 +474,7 @@ fun PrivacyCenterScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(NeonMint.copy(alpha = 0.1f))
-                                .clickable { viewModel.updateIncomingPstnEnabled(true) }
+                                .clickable { viewModel.showPremiumPaywall() }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {

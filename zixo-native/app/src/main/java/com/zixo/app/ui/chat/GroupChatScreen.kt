@@ -154,15 +154,23 @@ fun GroupChatScreen(
 
     // Auto-scroll to bottom on new messages
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(0)
+        try {
+            if (messages.isNotEmpty()) {
+                listState.animateScrollToItem(0)
+            }
+        } catch (_: Exception) {
+            // Scroll animation failed — non-critical
         }
     }
 
     // Display error messages as snackbars
     LaunchedEffect(errorMessage) {
-        errorMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        try {
+            errorMessage?.let {
+                snackbarHostState.showSnackbar(it)
+                viewModel.clearError()
+            }
+        } catch (_: Exception) {
             viewModel.clearError()
         }
     }

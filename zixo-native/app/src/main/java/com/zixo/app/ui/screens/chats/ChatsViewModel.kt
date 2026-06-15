@@ -69,7 +69,6 @@ class ChatsViewModel @Inject constructor(
                 chatRepository.observeThreadsRealtime()
                     .catch { e ->
                         Timber.e(e, "ChatsViewModel: Failed to observe threads")
-                        _isLoading.value = false
                     }
                     .collect { threadList ->
                         allThreads = threadList.sortedWith(
@@ -78,10 +77,10 @@ class ChatsViewModel @Inject constructor(
                         )
                         applyFilter()
                         _unreadCount.value = allThreads.sumOf { it.unreadCount }
-                        _isLoading.value = false
                     }
             } catch (e: Exception) {
                 Timber.e(e, "ChatsViewModel: Thread observation failed completely")
+            } finally {
                 _isLoading.value = false
             }
         }
@@ -101,10 +100,15 @@ class ChatsViewModel @Inject constructor(
      */
     fun onRefresh() {
         viewModelScope.launch {
-            _isRefreshing.value = true
-            // Snapshot listeners auto-update, so just reset the flag after brief delay
-            kotlinx.coroutines.delay(500)
-            _isRefreshing.value = false
+            try {
+                _isRefreshing.value = true
+                // Snapshot listeners auto-update, so just reset the flag after brief delay
+                kotlinx.coroutines.delay(500)
+            } catch (e: Exception) {
+                Timber.e(e, "ChatsViewModel: Refresh failed")
+            } finally {
+                _isRefreshing.value = false
+            }
         }
     }
 
@@ -128,6 +132,9 @@ class ChatsViewModel @Inject constructor(
     /**
      * Deletes a thread for the current user (soft delete).
      */
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
     fun deleteThread(threadId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -136,6 +143,7 @@ class ChatsViewModel @Inject constructor(
                 Timber.d("ChatsViewModel: Thread %s cleared for current user", threadId)
             } catch (e: Exception) {
                 Timber.e(e, "ChatsViewModel: Failed to clear thread %s", threadId)
+                _errorMessage.value = e.localizedMessage ?: "Failed to clear thread"
             }
         }
     }
@@ -150,6 +158,7 @@ class ChatsViewModel @Inject constructor(
                 Timber.d("ChatsViewModel: Thread %s pin toggled to %s", threadId, isPinned)
             } catch (e: Exception) {
                 Timber.e(e, "ChatsViewModel: Failed to toggle pin for thread %s", threadId)
+                _errorMessage.value = e.localizedMessage ?: "Failed to toggle pin"
             }
         }
     }
@@ -164,8 +173,13 @@ class ChatsViewModel @Inject constructor(
                 Timber.d("ChatsViewModel: Thread %s mute toggled to %s", threadId, isMuted)
             } catch (e: Exception) {
                 Timber.e(e, "ChatsViewModel: Failed to toggle mute for thread %s", threadId)
+                _errorMessage.value = e.localizedMessage ?: "Failed to toggle mute"
             }
         }
+    }
+
+    fun clearError() {
+        _errorMessage.value = null
     }
 
     private fun applyFilter() {

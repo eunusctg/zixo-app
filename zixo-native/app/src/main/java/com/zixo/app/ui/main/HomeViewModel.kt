@@ -86,6 +86,10 @@ class HomeViewModel @Inject constructor(
             } catch (e: Exception) {
                 Timber.e(e, "HomeViewModel: Failed to load current user")
                 _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+            } finally {
+                _uiState.update { current ->
+                    if (current.isLoading) current.copy(isLoading = false) else current
+                }
             }
         }
     }
@@ -121,6 +125,7 @@ class HomeViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Timber.e(e, "HomeViewModel: Contact observation failed")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to observe contacts") }
             }
         }
     }

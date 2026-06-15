@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -184,8 +185,9 @@ class StatusViewModel @Inject constructor(
                 // a trigger point for any additional side-effects such as
                 // clearing stale expired statuses or forcing a cache refresh.
                 statusRepository.getContactStatuses().collect { /* warm the cache */ }
-            } catch (_: Exception) {
-                // Real-time listeners continue regardless; silently handle
+            } catch (e: Exception) {
+                Timber.e(e, "StatusViewModel: Failed to load statuses")
+                // Real-time listeners continue regardless
             }
         }
     }
@@ -219,6 +221,7 @@ class StatusViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "StatusViewModel: Failed to post text status")
                 _errorMessage.update { e.localizedMessage ?: "Failed to post text status" }
             } finally {
                 _isUploading.update { false }
@@ -263,6 +266,7 @@ class StatusViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "StatusViewModel: Failed to post media status")
                 _errorMessage.update { e.localizedMessage ?: "Failed to post media status" }
             } finally {
                 _isUploading.update { false }
@@ -286,10 +290,12 @@ class StatusViewModel @Inject constructor(
             try {
                 statusRepository.deleteStatus(statusId).collect { result ->
                     result.onFailure { e ->
+                        Timber.e(e, "StatusViewModel: Failed to delete status")
                         _errorMessage.update { e.localizedMessage ?: "Failed to delete status" }
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "StatusViewModel: Failed to delete status")
                 _errorMessage.update { e.localizedMessage ?: "Failed to delete status" }
             }
         }
@@ -306,10 +312,12 @@ class StatusViewModel @Inject constructor(
             try {
                 statusRepository.markStatusViewed(statusId).collect { result ->
                     result.onFailure { e ->
+                        Timber.e(e, "StatusViewModel: Failed to mark status as viewed")
                         _errorMessage.update { e.localizedMessage ?: "Failed to mark status as viewed" }
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "StatusViewModel: Failed to mark status as viewed")
                 _errorMessage.update { e.localizedMessage ?: "Failed to mark status as viewed" }
             }
         }
@@ -327,10 +335,12 @@ class StatusViewModel @Inject constructor(
             try {
                 statusRepository.reactToStatus(statusId, emoji).collect { result ->
                     result.onFailure { e ->
+                        Timber.e(e, "StatusViewModel: Failed to add reaction")
                         _errorMessage.update { e.localizedMessage ?: "Failed to add reaction" }
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "StatusViewModel: Failed to add reaction")
                 _errorMessage.update { e.localizedMessage ?: "Failed to add reaction" }
             }
         }
@@ -353,6 +363,7 @@ class StatusViewModel @Inject constructor(
                 // Excluded/share-with lists would be persisted via additional
                 // settings methods when available in the repository layer.
             } catch (e: Exception) {
+                Timber.e(e, "StatusViewModel: Failed to update privacy settings")
                 _errorMessage.update { e.localizedMessage ?: "Failed to update privacy settings" }
             }
         }

@@ -111,6 +111,10 @@ class GroupChatViewModel @Inject constructor(
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Unhandled error loading group")
                 _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+            } finally {
+                _uiState.update { current ->
+                    if (current.isLoading) current.copy(isLoading = false) else current
+                }
             }
         }
     }
@@ -121,6 +125,7 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.getGroupMembers(chatId)
                     .catch { error ->
                         Timber.e(error, "GroupChatViewModel: Failed to load members")
+                        _uiState.update { it.copy(error = error.localizedMessage ?: "Failed to load members") }
                     }
                     .collect { membersList ->
                         val memberInfos = membersList.map { member ->
@@ -143,6 +148,7 @@ class GroupChatViewModel @Inject constructor(
                     }
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to load members")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to load members") }
             }
         }
     }
@@ -150,11 +156,17 @@ class GroupChatViewModel @Inject constructor(
     private fun observeMessages(chatId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                chatRepository.getMessages(chatId).collect { messages ->
-                    _uiState.update { it.copy(messages = messages) }
-                }
+                chatRepository.getMessages(chatId)
+                    .catch { e ->
+                        Timber.e(e, "GroupChatViewModel: Message stream error")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to observe messages") }
+                    }
+                    .collect { messages ->
+                        _uiState.update { it.copy(messages = messages) }
+                    }
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Message observation failed")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to observe messages") }
             }
         }
     }
@@ -201,12 +213,14 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.updateGroupName(chatId, name)
                     .catch { e ->
                         Timber.e(e, "GroupChatViewModel: Failed to update group name")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to update group name") }
                     }
                     .collect { }
                 _uiState.update { it.copy(groupName = name) }
                 Timber.d("GroupChatViewModel: Group name updated to %s", name)
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to update group name")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to update group name") }
             }
         }
     }
@@ -218,12 +232,14 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.updateGroupDescription(chatId, description)
                     .catch { e ->
                         Timber.e(e, "GroupChatViewModel: Failed to update description")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to update description") }
                     }
                     .collect { }
                 _uiState.update { it.copy(groupDescription = description) }
                 Timber.d("GroupChatViewModel: Group description updated")
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to update description")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to update description") }
             }
         }
     }
@@ -234,12 +250,14 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.updateMemberRole(_uiState.value.chatId, userId, ParticipantRole.ADMIN)
                     .catch { e ->
                         Timber.e(e, "GroupChatViewModel: Failed to promote member")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to promote member") }
                     }
                     .collect { }
                 loadMembers(_uiState.value.chatId)
                 Timber.d("GroupChatViewModel: Promoted %s to admin", userId)
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to promote member")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to promote member") }
             }
         }
     }
@@ -250,12 +268,14 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.updateMemberRole(_uiState.value.chatId, userId, ParticipantRole.MEMBER)
                     .catch { e ->
                         Timber.e(e, "GroupChatViewModel: Failed to demote member")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to demote member") }
                     }
                     .collect { }
                 loadMembers(_uiState.value.chatId)
                 Timber.d("GroupChatViewModel: Demoted %s from admin", userId)
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to demote member")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to demote member") }
             }
         }
     }
@@ -266,12 +286,14 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.removeGroupMember(_uiState.value.chatId, userId)
                     .catch { e ->
                         Timber.e(e, "GroupChatViewModel: Failed to remove member")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to remove member") }
                     }
                     .collect { }
                 loadMembers(_uiState.value.chatId)
                 Timber.d("GroupChatViewModel: Removed member %s", userId)
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to remove member")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to remove member") }
             }
         }
     }
@@ -283,11 +305,13 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.leaveGroup(chatId)
                     .catch { e ->
                         Timber.e(e, "GroupChatViewModel: Failed to leave group")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to leave group") }
                     }
                     .collect { }
                 Timber.d("GroupChatViewModel: Left group %s", chatId)
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to leave group")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to leave group") }
             }
         }
     }
@@ -299,12 +323,14 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.toggleMuteChat(chatId, isMuted)
                     .catch { e ->
                         Timber.e(e, "GroupChatViewModel: Failed to toggle mute")
+                        _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to toggle mute") }
                     }
                     .collect { }
                 _uiState.update { it.copy(isMuted = isMuted) }
                 Timber.d("GroupChatViewModel: Mute toggled to %b", isMuted)
             } catch (e: Exception) {
                 Timber.e(e, "GroupChatViewModel: Failed to toggle mute")
+                _uiState.update { it.copy(error = e.localizedMessage ?: "Failed to toggle mute") }
             }
         }
     }

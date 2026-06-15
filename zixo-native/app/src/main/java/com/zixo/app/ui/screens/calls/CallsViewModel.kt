@@ -95,6 +95,8 @@ class CallsViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Timber.e(e, "CallsViewModel: Failed to observe calls")
+            } finally {
+                _uiState.update { it.copy(isLoading = false) }
             }
         }
     }
@@ -112,11 +114,16 @@ class CallsViewModel @Inject constructor(
     /** Pull-to-refresh handler. */
     fun onRefresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
-            // The allCallsFlow is a continuous snapshot listener, so a refresh
-            // essentially just resets the refreshing flag after a brief delay.
-            kotlinx.coroutines.delay(500)
-            _uiState.update { it.copy(isRefreshing = false) }
+            try {
+                _uiState.update { it.copy(isRefreshing = true) }
+                // The allCallsFlow is a continuous snapshot listener, so a refresh
+                // essentially just resets the refreshing flag after a brief delay.
+                kotlinx.coroutines.delay(500)
+            } catch (e: Exception) {
+                Timber.e(e, "CallsViewModel: Refresh failed")
+            } finally {
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
         }
     }
 
@@ -152,6 +159,12 @@ class CallsViewModel @Inject constructor(
                     )
                 }
                 Timber.e(e, "CallsViewModel: Audio call error")
+            } finally {
+                // If still in DIALING after error, clear it
+                val currentState = _uiState.value.activeCallState
+                if (currentState is CallState.DIALING) {
+                    _uiState.update { it.copy(activeCallState = null) }
+                }
             }
         }
     }
@@ -187,6 +200,12 @@ class CallsViewModel @Inject constructor(
                     )
                 }
                 Timber.e(e, "CallsViewModel: Video call error")
+            } finally {
+                // If still in DIALING after error, clear it
+                val currentState = _uiState.value.activeCallState
+                if (currentState is CallState.DIALING) {
+                    _uiState.update { it.copy(activeCallState = null) }
+                }
             }
         }
     }
@@ -205,7 +224,10 @@ class CallsViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(errorMessage = e.localizedMessage ?: "Accept call failed")
+                    it.copy(
+                        activeCallState = null,
+                        errorMessage = e.localizedMessage ?: "Accept call failed"
+                    )
                 }
                 Timber.e(e, "CallsViewModel: Accept call failed")
             }

@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 // ════════════════════════════════════════════════════════════════
@@ -87,7 +88,7 @@ class ContactListViewModel @Inject constructor(
                         _contacts.value = contactList
                     }
             } catch (e: Exception) {
-                // Silently handle — real-time listener will recover
+                Timber.e(e, "ContactListViewModel: Failed to observe contacts")
             }
         }
 
@@ -108,7 +109,7 @@ class ContactListViewModel @Inject constructor(
                         }
                     }
             } catch (e: Exception) {
-                // Silently handle — search will recover on next input
+                Timber.e(e, "ContactListViewModel: Debounced search observation failed")
             }
         }
     }
@@ -148,9 +149,15 @@ class ContactListViewModel @Inject constructor(
                     _addContactState.value = state
                 }
             } catch (e: Exception) {
+                Timber.e(e, "ContactListViewModel: Failed to add contact")
                 _addContactState.value = AddContactState.Error(
                     e.message ?: "Failed to add contact"
                 )
+            } finally {
+                // Ensure Adding state is cleared if collect ends without emitting
+                if (_addContactState.value is AddContactState.Adding) {
+                    _addContactState.value = AddContactState.Idle
+                }
             }
         }
     }
@@ -169,6 +176,7 @@ class ContactListViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "ContactListViewModel: Failed to remove contact")
                 _snackbarMessage.value = e.message ?: "Failed to remove contact"
             }
         }
@@ -189,6 +197,7 @@ class ContactListViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "ContactListViewModel: Failed to block contact")
                 _snackbarMessage.value = e.message ?: "Failed to block contact"
             }
         }
@@ -214,7 +223,8 @@ class ContactListViewModel @Inject constructor(
                 contactRepository.observeContactsRealtime().collect { contactList ->
                     _contacts.value = contactList
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Timber.e(e, "ContactListViewModel: Refresh failed")
                 // Swallow — the real-time listener will recover
             } finally {
                 _isRefreshing.value = false
@@ -241,9 +251,15 @@ class ContactListViewModel @Inject constructor(
                     _searchResult.value = result
                 }
             } catch (e: Exception) {
+                Timber.e(e, "ContactListViewModel: Search failed for number %s", number)
                 _searchResult.value = ContactSearchResult.Error(
                     e.message ?: "Search failed"
                 )
+            } finally {
+                // Ensure Searching state is cleared if collect ends without emitting
+                if (_searchResult.value is ContactSearchResult.Searching) {
+                    _searchResult.value = ContactSearchResult.Idle
+                }
             }
         }
     }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,7 +64,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -435,7 +435,8 @@ fun AuthScreen(
     }
 }
 
-// ── Offset helper (suppressed - used for blob positioning) ──────
-@Suppress("unused")
-private fun Modifier.offset(x: Dp = 0.dp, y: Dp = 0.dp): Modifier =
-    this.then(Modifier.padding(start = x, top = y))
+// NOTE: Removed custom offset() extension that was using padding() internally.
+// That caused IllegalArgumentException: Padding must be non-negative
+// when called with negative dp values like offset(x = (-80).dp).
+// The standard Compose Modifier.offset() from foundation.layout is now used instead,
+// which properly supports negative offset values without triggering padding validation.

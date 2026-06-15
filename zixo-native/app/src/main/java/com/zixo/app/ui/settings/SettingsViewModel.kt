@@ -3,7 +3,6 @@ package com.zixo.app.ui.settings
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.util.Log
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.exceptions.CreateCredentialException
@@ -36,6 +35,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,10 +84,6 @@ class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
-    companion object {
-        private const val TAG = "SettingsViewModel"
-    }
-
     // ── Internal mutable error / loading relay ──────────────────────────────
 
     private val _errorMessage = MutableStateFlow<String?>(null)
@@ -118,7 +114,7 @@ class SettingsViewModel @Inject constructor(
             isPremiumSubscriber = isPremium
         )
     }.catch { throwable ->
-        Log.e(TAG, "Fatal error in settingsFlow combine", throwable)
+        Timber.e(throwable, "Fatal error in settingsFlow combine")
         emit(
             AppSettingsState(
                 isLoading = false,
@@ -139,7 +135,7 @@ class SettingsViewModel @Inject constructor(
      */
     val userProfile: StateFlow<UserProfile> = settingsRepository.userProfileFlow
         .catch { throwable ->
-            Log.e(TAG, "Error observing user profile", throwable)
+            Timber.e(throwable, "Error observing user profile")
             emit(UserProfile())
         }
         .stateIn(
@@ -192,7 +188,7 @@ class SettingsViewModel @Inject constructor(
     val storageBreakdown: StateFlow<StorageBreakdown> =
         settingsRepository.getStorageBreakdown()
             .catch { throwable ->
-                Log.e(TAG, "Error observing storage breakdown", throwable)
+                Timber.e(throwable, "Error observing storage breakdown")
                 emit(StorageBreakdown())
             }
             .stateIn(
@@ -222,7 +218,7 @@ class SettingsViewModel @Inject constructor(
                 _errorMessage.value = null
                 block()
             } catch (t: Throwable) {
-                Log.e(TAG, "Settings mutation failed", t)
+                Timber.e(t, "Settings mutation failed")
                 _errorMessage.value = t.localizedMessage ?: "An unexpected error occurred"
             } finally {
                 _isLoading.value = false
@@ -240,7 +236,7 @@ class SettingsViewModel @Inject constructor(
                     _isPasskeyRegistered.value = registered
                 }
             } catch (t: Throwable) {
-                Log.e(TAG, "Failed to check passkey registration", t)
+                Timber.e(t, "Failed to check passkey registration")
             }
         }
     }
@@ -350,6 +346,7 @@ class SettingsViewModel @Inject constructor(
             try {
                 settingsRepository.updateIncomingPstnEnabled(enabled)
             } catch (e: Exception) {
+                Timber.e(e, "Failed to update PSTN setting")
                 // Revert on failure
                 _errorMessage.value = e.localizedMessage ?: "Failed to update PSTN setting"
             }
@@ -361,13 +358,19 @@ class SettingsViewModel @Inject constructor(
         _showPremiumPaywall.value = false
     }
 
+    /** Shows the premium subscription paywall overlay. */
+    fun showPremiumPaywall() {
+        _showPremiumPaywall.value = true
+    }
+
     /** Simulates a premium subscription check against the server. */
     fun checkPremiumStatus() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val isPremium = settingsRepository.isPremiumSubscriber()
                 _isPremiumSubscriberLocal.value = isPremium
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to check premium status")
                 // Silently handle — defaults to non-premium
             }
         }
@@ -461,7 +464,7 @@ class SettingsViewModel @Inject constructor(
     fun deleteAccount() = runMutation {
         settingsRepository.deleteAccount().fold(
             onSuccess = {
-                Log.i(TAG, "Account deleted successfully")
+                Timber.i("Account deleted successfully")
             },
             onFailure = { throwable ->
                 throw throwable
@@ -491,20 +494,20 @@ class SettingsViewModel @Inject constructor(
                     when (result) {
                         is AuthResult.Success -> {
                             _isPasskeyRegistered.value = true
-                            Log.i(TAG, "Passkey registered successfully")
+                            Timber.i("Passkey registered successfully")
                         }
                         is AuthResult.Error -> {
                             _errorMessage.value = result.message
-                            Log.e(TAG, "Passkey registration failed: ${result.message}")
+                            Timber.e("Passkey registration failed: %s", result.message)
                         }
                         is AuthResult.Loading -> { /* in progress */ }
                     }
                 }
             } catch (e: CreateCredentialException) {
-                Log.e(TAG, "Credential creation failed", e)
+                Timber.e(e, "Credential creation failed")
                 _errorMessage.value = e.localizedMessage ?: "Passkey creation failed"
             } catch (t: Throwable) {
-                Log.e(TAG, "Passkey creation unexpected error", t)
+                Timber.e(t, "Passkey creation unexpected error")
                 _errorMessage.value = t.localizedMessage ?: "An unexpected error occurred"
             } finally {
                 _isLoading.value = false
@@ -575,9 +578,9 @@ class SettingsViewModel @Inject constructor(
                 }
 
                 _qrBitmapState.value = bitmap
-                Log.i(TAG, "QR matrix generated for Zixo Number: %s".format(zixoNumber))
+                Timber.i("QR matrix generated for Zixo Number: %s", zixoNumber)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to generate QR matrix", e)
+                Timber.e(e, "Failed to generate QR matrix")
                 _qrBitmapState.value = null
             }
         }
@@ -616,7 +619,7 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
             } catch (t: Throwable) {
-                Log.e(TAG, "Logout failed", t)
+                Timber.e(t, "Logout failed")
                 _logoutState.value = LogoutState.Error(
                     t.localizedMessage ?: "Logout failed"
                 )

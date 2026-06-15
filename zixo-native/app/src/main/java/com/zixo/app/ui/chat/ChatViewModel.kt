@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -140,9 +141,11 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 callRepository.observeIncomingCalls()
-                    .catch { /* Ignore call observation errors */ }
+                    .catch { e -> Timber.e(e, "ChatViewModel: Incoming call observation error") }
                     .collect { state -> _callState.value = state }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Incoming call observation failed")
+            }
         }
 
         // Observe active call state when callId changes
@@ -151,11 +154,13 @@ class ChatViewModel @Inject constructor(
                 _activeCallId.collect { callId ->
                     if (callId.isNotBlank()) {
                         callRepository.observeCallState(callId)
-                            .catch { /* Ignore call observation errors */ }
+                            .catch { e -> Timber.e(e, "ChatViewModel: Call state observation error") }
                             .collect { state -> _callState.value = state }
                     }
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Active call state observation failed")
+            }
         }
     }
 
@@ -171,9 +176,13 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.observeMessagesRealtime(threadId)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Message stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { messageList -> _messages.value = messageList }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to observe messages")
                 _errorMessage.value = e.localizedMessage ?: "Failed to observe messages"
             }
         }
@@ -182,11 +191,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.observeThreadsRealtime()
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Thread stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { threadList ->
                         _thread.value = threadList.firstOrNull { it.id == threadId }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to observe thread")
                 _errorMessage.value = e.localizedMessage ?: "Failed to observe thread"
             }
         }
@@ -207,12 +220,14 @@ class ChatViewModel @Inject constructor(
             try {
                 contactRepository.verifyMutualContact(otherUid)
                     .catch { e ->
+                        Timber.e(e, "ChatViewModel: Contact verification stream error")
                         _communicationGate.value = CommunicationGate.Error(
                             e.localizedMessage ?: "Gate check failed"
                         )
                     }
                     .collect { gate -> _communicationGate.value = gate }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Contact gate check failed")
                 _communicationGate.value = CommunicationGate.Error(
                     e.localizedMessage ?: "Gate check failed"
                 )
@@ -250,6 +265,7 @@ class ChatViewModel @Inject constructor(
                     var gatePassed = false
                     contactRepository.verifyMutualContact(otherUid)
                         .catch { e ->
+                            Timber.e(e, "ChatViewModel: Send verification stream error")
                             _errorMessage.value = e.localizedMessage ?: "Verification failed"
                         }
                         .collect { gate ->
@@ -274,11 +290,15 @@ class ChatViewModel @Inject constructor(
                 )
 
                 chatRepository.sendMessage(threadId, message)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Send message stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { result ->
                         result.onFailure { e -> _errorMessage.value = e.localizedMessage }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to send message")
                 _errorMessage.value = e.localizedMessage ?: "Failed to send message"
             } finally {
                 _isSending.value = false
@@ -302,11 +322,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.deleteForMe(messageId, threadId)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Delete-for-me stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { result ->
                         result.onFailure { e -> _errorMessage.value = e.localizedMessage }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to delete message for me")
                 _errorMessage.value = e.localizedMessage ?: "Failed to delete message"
             }
         }
@@ -326,11 +350,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.deleteForEveryone(messageId, threadId)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Delete-for-everyone stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { result ->
                         result.onFailure { e -> _errorMessage.value = e.localizedMessage }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to delete message for everyone")
                 _errorMessage.value = e.localizedMessage ?: "Failed to delete message"
             }
         }
@@ -353,11 +381,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.addReaction(messageId, threadId, emoji, isThreeD)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Reaction stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { result ->
                         result.onFailure { e -> _errorMessage.value = e.localizedMessage }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to add reaction")
                 _errorMessage.value = e.localizedMessage ?: "Failed to add reaction"
             }
         }
@@ -412,13 +444,17 @@ class ChatViewModel @Inject constructor(
                     )
                     for (targetThreadId in targetThreadIds) {
                         chatRepository.sendMessage(targetThreadId, forwardedMessage)
-                            .catch { e -> _errorMessage.value = e.localizedMessage }
+                            .catch { e ->
+                                Timber.e(e, "ChatViewModel: Forward message stream error")
+                                _errorMessage.value = e.localizedMessage
+                            }
                             .collect { result ->
                                 result.onFailure { e -> _errorMessage.value = e.localizedMessage }
                             }
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to forward message")
                 _errorMessage.value = e.localizedMessage ?: "Failed to forward message"
             }
         }
@@ -435,11 +471,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 chatRepository.markAsRead(threadId)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Mark-as-read stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { result ->
                         result.onFailure { e -> _errorMessage.value = e.localizedMessage }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to mark as read")
                 _errorMessage.value = e.localizedMessage ?: "Failed to mark as read"
             }
         }
@@ -460,7 +500,10 @@ class ChatViewModel @Inject constructor(
                 when (val gate = _communicationGate.value) {
                     is CommunicationGate.Allowed -> {
                         callRepository.initiateCall(targetUid, isVideoCall = false)
-                            .catch { e -> _errorMessage.value = e.localizedMessage }
+                            .catch { e ->
+                                Timber.e(e, "ChatViewModel: Audio call stream error")
+                                _errorMessage.value = e.localizedMessage
+                            }
                             .collect { state ->
                                 _callState.value = state
                                 if (state is CallState.DIALING) {
@@ -476,6 +519,7 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to start audio call")
                 _errorMessage.value = e.localizedMessage ?: "Failed to start call"
             }
         }
@@ -491,7 +535,10 @@ class ChatViewModel @Inject constructor(
                 when (val gate = _communicationGate.value) {
                     is CommunicationGate.Allowed -> {
                         callRepository.initiateCall(targetUid, isVideoCall = true)
-                            .catch { e -> _errorMessage.value = e.localizedMessage }
+                            .catch { e ->
+                                Timber.e(e, "ChatViewModel: Video call stream error")
+                                _errorMessage.value = e.localizedMessage
+                            }
                             .collect { state ->
                                 _callState.value = state
                                 if (state is CallState.DIALING) {
@@ -507,6 +554,7 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to start video call")
                 _errorMessage.value = e.localizedMessage ?: "Failed to start call"
             }
         }
@@ -520,7 +568,10 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 callRepository.initiateCall(threadId, isVideoCall = false)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Group audio call stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { state ->
                         _callState.value = state
                         if (state is CallState.DIALING) {
@@ -528,6 +579,7 @@ class ChatViewModel @Inject constructor(
                         }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to start group audio call")
                 _errorMessage.value = e.localizedMessage ?: "Failed to start group call"
             }
         }
@@ -541,7 +593,10 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 callRepository.initiateCall(threadId, isVideoCall = true)
-                    .catch { e -> _errorMessage.value = e.localizedMessage }
+                    .catch { e ->
+                        Timber.e(e, "ChatViewModel: Group video call stream error")
+                        _errorMessage.value = e.localizedMessage
+                    }
                     .collect { state ->
                         _callState.value = state
                         if (state is CallState.DIALING) {
@@ -549,6 +604,7 @@ class ChatViewModel @Inject constructor(
                         }
                     }
             } catch (e: Exception) {
+                Timber.e(e, "ChatViewModel: Failed to start group video call")
                 _errorMessage.value = e.localizedMessage ?: "Failed to start group call"
             }
         }

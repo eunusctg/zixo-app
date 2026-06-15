@@ -7,6 +7,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -125,6 +126,14 @@ class AuthViewModel @Inject constructor(
                 )
 
                 handleCredentialResult(result)
+            } catch (e: NoCredentialException) {
+                Timber.w(e, "No Google accounts found on device")
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = "No Google accounts found on this device. Please add a Google account in Settings, or use email/password sign-in."
+                    )
+                }
             } catch (e: GetCredentialException) {
                 Timber.e(e, "Google Sign-In credential request failed")
                 _uiState.update {
@@ -140,6 +149,11 @@ class AuthViewModel @Inject constructor(
                         isLoading = false,
                         errorMessage = "An unexpected error occurred. Please try again."
                     )
+                }
+            } finally {
+                // Safety net: ensure isLoading is always reset even if an update was missed
+                _uiState.update { current ->
+                    if (current.isLoading) current.copy(isLoading = false) else current
                 }
             }
         }
@@ -192,19 +206,30 @@ class AuthViewModel @Inject constructor(
      */
     private fun authenticateWithBackend(idToken: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            authRepository.signInWithGoogle(idToken).collect { result ->
-                when (result) {
-                    is AuthResult.Loading -> {
-                        _uiState.update { it.copy(isLoading = true) }
-                    }
-                    is AuthResult.Success -> {
-                        _uiState.update { it.copy(isLoading = false, errorMessage = null) }
-                    }
-                    is AuthResult.Error -> {
-                        _uiState.update {
-                            it.copy(isLoading = false, errorMessage = result.message)
+            try {
+                authRepository.signInWithGoogle(idToken).collect { result ->
+                    when (result) {
+                        is AuthResult.Loading -> {
+                            _uiState.update { it.copy(isLoading = true) }
+                        }
+                        is AuthResult.Success -> {
+                            _uiState.update { it.copy(isLoading = false, errorMessage = null) }
+                        }
+                        is AuthResult.Error -> {
+                            _uiState.update {
+                                it.copy(isLoading = false, errorMessage = result.message)
+                            }
                         }
                     }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Backend authentication failed")
+                _uiState.update {
+                    it.copy(isLoading = false, errorMessage = "Authentication failed. Please try again.")
+                }
+            } finally {
+                _uiState.update { current ->
+                    if (current.isLoading) current.copy(isLoading = false) else current
                 }
             }
         }
@@ -244,6 +269,10 @@ class AuthViewModel @Inject constructor(
                 Timber.e(e, "Email sign-in failed")
                 _uiState.update {
                     it.copy(isLoading = false, errorMessage = e.localizedMessage ?: "Sign-in failed")
+                }
+            } finally {
+                _uiState.update { current ->
+                    if (current.isLoading) current.copy(isLoading = false) else current
                 }
             }
         }
@@ -303,6 +332,10 @@ class AuthViewModel @Inject constructor(
                 Timber.e(e, "Email sign-up failed")
                 _uiState.update {
                     it.copy(isLoading = false, errorMessage = e.localizedMessage ?: "Sign-up failed")
+                }
+            } finally {
+                _uiState.update { current ->
+                    if (current.isLoading) current.copy(isLoading = false) else current
                 }
             }
         }
@@ -380,6 +413,10 @@ class AuthViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(isLoading = false, errorMessage = "Failed to save display name")
                 }
+            } finally {
+                _uiState.update { current ->
+                    if (current.isLoading) current.copy(isLoading = false) else current
+                }
             }
         }
     }
@@ -400,7 +437,8 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 authRepository.signOut()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Timber.e(e, "Sign-out failed")
                 // Auth state flow will handle the transition to Unauthenticated
             }
         }

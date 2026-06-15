@@ -111,8 +111,12 @@ fun ContactListScreen(
 
     // Handle snackbar messages from ViewModel
     LaunchedEffect(snackbarMessage) {
-        snackbarMessage?.let { message ->
-            snackbarHostState.showSnackbar(message)
+        try {
+            snackbarMessage?.let { message ->
+                snackbarHostState.showSnackbar(message)
+                viewModel.clearSnackbar()
+            }
+        } catch (_: Exception) {
             viewModel.clearSnackbar()
         }
     }

@@ -138,29 +138,37 @@ fun AccountSecurityScreen(
 
     // ── Check biometric availability on composition ──
     LaunchedEffect(Unit) {
-        val biometricManager = BiometricManager.from(context)
-        val canAuthenticate = biometricManager.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                    BiometricManager.Authenticators.BIOMETRIC_WEAK
-        )
-        biometricStatus = when (canAuthenticate) {
-            BiometricManager.BIOMETRIC_SUCCESS -> BiometricStatus.Available
-            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricStatus.HwUnavailable
-            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BiometricStatus.HwUnavailable
-            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricStatus.NoEnrolled
-            BiometricManager.BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED -> BiometricStatus.HwUnavailable
-            BiometricManager.BIOMETRIC_ERROR_UNSUPPORTED -> BiometricStatus.HwUnavailable
-            BiometricManager.BIOMETRIC_STATUS_UNKNOWN -> BiometricStatus.Unknown
-            else -> BiometricStatus.Unknown
+        try {
+            val biometricManager = BiometricManager.from(context)
+            val canAuthenticate = biometricManager.canAuthenticate(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                        BiometricManager.Authenticators.BIOMETRIC_WEAK
+            )
+            biometricStatus = when (canAuthenticate) {
+                BiometricManager.BIOMETRIC_SUCCESS -> BiometricStatus.Available
+                BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricStatus.HwUnavailable
+                BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> BiometricStatus.HwUnavailable
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricStatus.NoEnrolled
+                BiometricManager.BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED -> BiometricStatus.HwUnavailable
+                BiometricManager.BIOMETRIC_ERROR_UNSUPPORTED -> BiometricStatus.HwUnavailable
+                BiometricManager.BIOMETRIC_STATUS_UNKNOWN -> BiometricStatus.Unknown
+                else -> BiometricStatus.Unknown
+            }
+        } catch (_: Exception) {
+            biometricStatus = BiometricStatus.Unknown
         }
     }
 
     // ── Update passkeys when registration state changes ──
     LaunchedEffect(isPasskeyRegistered) {
-        if (isPasskeyRegistered && passkeys.isEmpty()) {
-            passkeys = listOf(
-                PasskeyEntry(id = "pk_001", name = "Primary Device", createdAt = "Today")
-            )
+        try {
+            if (isPasskeyRegistered && passkeys.isEmpty()) {
+                passkeys = listOf(
+                    PasskeyEntry(id = "pk_001", name = "Primary Device", createdAt = "Today")
+                )
+            }
+        } catch (_: Exception) {
+            // Non-critical — passkey list will be empty
         }
     }
 
@@ -325,7 +333,7 @@ fun AccountSecurityScreen(
                     onRegisterPasskey = {
                         viewModel.createPasskey(
                             context = context,
-                            requestJson = """{"publicKey":{"rp":{"name":"Zixo"},"user":{"name":"user","displayName":"User"},"challenge":"placeholder","pubKeyCredParams":[{"type":"public-key","alg":-7}],"timeout":60000,"attestation":"none"}}"""
+                            requestJson = """{"publicKey":{"rp":{"name":"Zixo","id":"web.zixo.eu.cc"},"user":{"name":"user","displayName":"User"},"challenge":"placeholder","pubKeyCredParams":[{"type":"public-key","alg":-7}],"timeout":60000,"attestation":"none"}}"""
                         )
                     },
                     onDeletePasskey = { passkey -> showDeletePasskeyDialog = passkey },
@@ -617,8 +625,13 @@ private fun launchBiometricPrompt(
     }
 
     val executor = androidx.core.content.ContextCompat.getMainExecutor(context)
+    val activity = context as? androidx.fragment.app.FragmentActivity
+    if (activity == null) {
+        onError(BiometricPrompt.ERROR_HW_UNAVAILABLE, "Unable to launch biometric prompt: not an Activity context")
+        return
+    }
     val biometricPrompt = BiometricPrompt(
-        context as androidx.fragment.app.FragmentActivity,
+        activity,
         executor,
         callback
     )

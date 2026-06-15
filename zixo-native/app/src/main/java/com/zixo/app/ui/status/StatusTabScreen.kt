@@ -170,8 +170,12 @@ fun StatusTabScreen(
 
     // Clear error on consumption
     LaunchedEffect(errorMessage) {
-        if (errorMessage != null) {
-            delay(3_000L)
+        try {
+            if (errorMessage != null) {
+                delay(3_000L)
+                viewModel.clearError()
+            }
+        } catch (_: Exception) {
             viewModel.clearError()
         }
     }
@@ -1197,9 +1201,13 @@ private fun MediaStatusComposer(
     }
 
     LaunchedEffect(Unit) {
-        pickerLauncher.launch(
-            PickVisualMediaRequest(mediaType)
-        )
+        try {
+            pickerLauncher.launch(
+                PickVisualMediaRequest(mediaType)
+            )
+        } catch (_: Exception) {
+            // Media picker launch failed — non-critical
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -1392,26 +1400,34 @@ private fun StatusViewerOverlay(
 
     // Sync pager state with ViewModel index
     LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage != currentIndex) {
-            onIndexChange(pagerState.currentPage)
+        try {
+            if (pagerState.currentPage != currentIndex) {
+                onIndexChange(pagerState.currentPage)
+            }
+        } catch (_: Exception) {
+            // Pager sync failed — non-critical
         }
     }
 
     // Auto-advance timer
     LaunchedEffect(pagerState.currentPage, currentStatus.id, isPaused) {
         if (isPaused) return@LaunchedEffect
-        val duration = if (currentStatus.type == StatusContentType.VIDEO) {
-            30_000L // Longer for video; real duration would come from media metadata
-        } else {
-            STATUS_AUTO_ADVANCE_MS
-        }
-        delay(duration)
-        if (!isPaused) {
-            if (pagerState.currentPage < group.statuses.size - 1) {
-                onIndexChange(pagerState.currentPage + 1)
+        try {
+            val duration = if (currentStatus.type == StatusContentType.VIDEO) {
+                30_000L // Longer for video; real duration would come from media metadata
             } else {
-                onClose()
+                STATUS_AUTO_ADVANCE_MS
             }
+            delay(duration)
+            if (!isPaused) {
+                if (pagerState.currentPage < group.statuses.size - 1) {
+                    onIndexChange(pagerState.currentPage + 1)
+                } else {
+                    onClose()
+                }
+            }
+        } catch (_: Exception) {
+            // Auto-advance interrupted — non-critical
         }
     }
 

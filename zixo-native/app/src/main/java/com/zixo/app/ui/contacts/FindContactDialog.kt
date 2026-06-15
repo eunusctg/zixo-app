@@ -97,16 +97,24 @@ fun FindContactDialog(
 
     // Auto-trigger search when exactly 8 digits are entered (debounced in ViewModel)
     LaunchedEffect(zixoNumberInput) {
-        onSearchQueryChanged(zixoNumberInput)
-        if (zixoNumberInput.length == 8 && zixoNumberInput.all { it.isDigit() }) {
-            onSearch(zixoNumberInput)
+        try {
+            onSearchQueryChanged(zixoNumberInput)
+            if (zixoNumberInput.length == 8 && zixoNumberInput.all { it.isDigit() }) {
+                onSearch(zixoNumberInput)
+            }
+        } catch (_: Exception) {
+            // Search trigger failed — non-critical
         }
     }
 
     // Reset input when dialog opens
     LaunchedEffect(Unit) {
-        zixoNumberInput = ""
-        onResetSearch()
+        try {
+            zixoNumberInput = ""
+            onResetSearch()
+        } catch (_: Exception) {
+            // Reset failed — non-critical
+        }
     }
 
     Dialog(
