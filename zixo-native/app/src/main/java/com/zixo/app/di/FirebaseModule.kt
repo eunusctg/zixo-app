@@ -24,7 +24,7 @@ import javax.inject.Singleton
  * via `google-services.json`. No manual [FirebaseApp.initializeApp] calls
  * are needed.
  *
- * No LiveKit-related providers exist in this module.
+ * All Firebase SDK singletons are provided as application-scoped instances.
  */
 @Module
 @InstallIn(SingletonComponent::class)

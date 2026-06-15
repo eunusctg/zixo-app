@@ -60,7 +60,7 @@
     <string name="cellular">Cellular</string>
     <string name="never">Never</string>
     <string name="ask_every_time">Ask Every Time</string>
-    <string name="livekit_sip_call">LiveKit SIP Call</string>
+    <string name="pstn_call">PSTN Call</string>
     <string name="webrtc_video">WebRTC Video</string>
     <string name="all">All</string>
     <string name="missed">Missed</string>

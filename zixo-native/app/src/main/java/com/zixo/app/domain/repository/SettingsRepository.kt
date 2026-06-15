@@ -62,6 +62,11 @@ interface SettingsRepository {
     suspend fun updateProtectIpInCalls(enabled: Boolean)
     suspend fun updateDisableLinkPreviews(enabled: Boolean)
 
+    // ── Premium / Freemium Billing ───────────────────────────────────────────
+
+    suspend fun updateIncomingPstnEnabled(enabled: Boolean)
+    suspend fun isPremiumSubscriber(): Boolean
+
     // ── Chat Behavior ─────────────────────────────────────────────────────────
 
     suspend fun updateEnterIsSend(enabled: Boolean)

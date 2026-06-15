@@ -1,11 +1,13 @@
 package com.zixo.app.domain.usecase
 
 import com.zixo.app.domain.model.AddContactState
+import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.model.ContactModel
 import com.zixo.app.domain.model.ContactSearchResult
 import com.zixo.app.domain.repository.ContactRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import timber.log.Timber
 import javax.inject.Inject
@@ -79,20 +81,50 @@ class GetContactsUseCase @Inject constructor(
      * Verifies that two users are mutual contacts before allowing
      * communication (messaging, calling, status viewing).
      * This is the primary zero-trust enforcement boundary.
+     *
+     * Collects the first emission from the Flow-based repository method
+     * and returns true only if the gate result is [CommunicationGate.Allowed].
      */
     suspend fun invokeVerifyMutualContact(targetUserId: String): Boolean = try {
-        contactRepository.verifyMutualContact(targetUserId)
+        val gateResult = contactRepository.verifyMutualContact(targetUserId).first()
+        gateResult is CommunicationGate.Allowed
     } catch (e: Exception) {
         Timber.e(e, "GetContactsUseCase: Mutual verification failed for: %s", targetUserId)
         false
     }
 
     /**
-     * Blocks or unblocks a contact. Blocked contacts cannot send messages
+     * Blocks a contact. Blocked contacts cannot send messages
      * or initiate calls through the zero-trust gate.
      */
+    suspend fun invokeBlockContact(contactUserId: String): Result<Unit> = try {
+        contactRepository.blockContact(contactUserId).first()
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Timber.e(e, "GetContactsUseCase: Block contact failed")
+        Result.failure(e)
+    }
+
+    /**
+     * Unblocks a previously blocked contact.
+     */
+    suspend fun invokeUnblockContact(contactUserId: String): Result<Unit> = try {
+        contactRepository.unblockContact(contactUserId).first()
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Timber.e(e, "GetContactsUseCase: Unblock contact failed")
+        Result.failure(e)
+    }
+
+    /**
+     * Toggles the blocked state of a contact.
+     */
     suspend fun invokeSetBlocked(contactUserId: String, isBlocked: Boolean): Result<Unit> = try {
-        contactRepository.setBlocked(contactUserId, isBlocked)
+        if (isBlocked) {
+            contactRepository.blockContact(contactUserId).first()
+        } else {
+            contactRepository.unblockContact(contactUserId).first()
+        }
         Result.success(Unit)
     } catch (e: Exception) {
         Timber.e(e, "GetContactsUseCase: Block toggle failed")

@@ -1,9 +1,13 @@
 package com.zixo.app.domain.usecase
 
 import com.zixo.app.domain.model.CallState
+import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.repository.CallRepository
 import com.zixo.app.domain.repository.ContactRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -29,12 +33,30 @@ class InitiateCallUseCase @Inject constructor(
 ) {
     /**
      * Initiates a call to the target user.
+     * Returns a Flow of CallState transitions for real-time UI updates.
      *
      * @param targetUserId The UID of the user to call.
      * @param isVideoCall Whether this is a video call (true) or audio-only (false).
-     * @return [Result] containing the initial [CallState] on success.
+     * @return A Flow emitting [CallState] transitions, or a failed Result flow.
      */
-    suspend operator fun invoke(
+    operator fun invoke(
+        targetUserId: String,
+        isVideoCall: Boolean
+    ): Flow<CallState> = try {
+        callRepository.initiateCall(targetUserId, isVideoCall)
+            .flowOn(Dispatchers.IO)
+    } catch (e: Exception) {
+        Timber.e(e, "InitiateCallUseCase: Unhandled error initiating call")
+        kotlinx.coroutines.flow.flowOf(CallState.FAILED(e.localizedMessage ?: "Call initiation failed"))
+    }
+
+    /**
+     * Verifies mutual contact and initiates a call in one suspend operation.
+     * Used when the caller needs a single suspend point rather than a Flow.
+     *
+     * @return Result with the initial CallState on success.
+     */
+    suspend fun invokeWithVerification(
         targetUserId: String,
         isVideoCall: Boolean
     ): Result<CallState> = withContext(Dispatchers.IO) {
@@ -43,25 +65,21 @@ class InitiateCallUseCase @Inject constructor(
                 if (isVideoCall) "video" else "audio", targetUserId)
 
             // ── Step 1: Zero-trust contact verification ──────────────────
-            val isMutual = contactRepository.verifyMutualContact(targetUserId)
+            val gateResult = contactRepository.verifyMutualContact(targetUserId).first()
+            val isMutual = gateResult is CommunicationGate.Allowed
             if (!isMutual) {
-                Timber.w("InitiateCallUseCase: Rejected — not mutual contact with %s", targetUserId)
+                val reason = (gateResult as? CommunicationGate.Blocked)?.reason
+                    ?: "Contact is not mutually verified"
+                Timber.w("InitiateCallUseCase: Rejected — %s", reason)
                 return@withContext Result.failure(
-                    SecurityException("Cannot call: contact is not mutually verified")
+                    SecurityException("Cannot call: $reason")
                 )
             }
 
             // ── Step 2: Initialize call via repository ───────────────────
-            val callResult = callRepository.initiateCall(targetUserId, isVideoCall)
-            callResult.fold(
-                onSuccess = { callState ->
-                    Timber.d("InitiateCallUseCase: Call initiated, state=%s", callState)
-                },
-                onFailure = { error ->
-                    Timber.e(error, "InitiateCallUseCase: Repository call initiation failed")
-                }
-            )
-            callResult
+            val initialState = callRepository.initiateCall(targetUserId, isVideoCall).first()
+            Timber.d("InitiateCallUseCase: Call initiated, state=%s", initialState)
+            Result.success(initialState)
         } catch (e: SecurityException) {
             Timber.w(e, "InitiateCallUseCase: Security gate blocked call")
             Result.failure(e)
@@ -74,20 +92,26 @@ class InitiateCallUseCase @Inject constructor(
     /**
      * Accepts an incoming call after verifying mutual contact status.
      */
-    suspend fun acceptCall(callId: String, callerId: String): Result<CallState> =
+    suspend fun acceptCall(callId: String, callerId: String): Flow<CallState> =
         withContext(Dispatchers.IO) {
             try {
-                val isMutual = contactRepository.verifyMutualContact(callerId)
+                val gateResult = contactRepository.verifyMutualContact(callerId).first()
+                val isMutual = gateResult is CommunicationGate.Allowed
                 if (!isMutual) {
-                    Timber.w("InitiateCallUseCase: Cannot accept — not mutual with %s", callerId)
-                    return@withContext Result.failure(
-                        SecurityException("Cannot accept call: not mutually verified")
+                    val reason = (gateResult as? CommunicationGate.Blocked)?.reason
+                        ?: "Not mutually verified"
+                    Timber.w("InitiateCallUseCase: Cannot accept — %s", reason)
+                    kotlinx.coroutines.flow.flowOf(
+                        CallState.FAILED("Cannot accept call: $reason")
                     )
+                } else {
+                    callRepository.answerCall(callId)
                 }
-                callRepository.acceptCall(callId)
             } catch (e: Exception) {
                 Timber.e(e, "InitiateCallUseCase: Accept call failed")
-                Result.failure(e)
+                kotlinx.coroutines.flow.flowOf(
+                    CallState.FAILED(e.localizedMessage ?: "Accept call failed")
+                )
             }
         }
 
@@ -96,10 +120,23 @@ class InitiateCallUseCase @Inject constructor(
      */
     suspend fun endCall(callId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            callRepository.endCall(callId)
+            callRepository.endCall(callId).first()
             Result.success(Unit)
         } catch (e: Exception) {
             Timber.e(e, "InitiateCallUseCase: End call failed")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Declines an incoming call.
+     */
+    suspend fun declineCall(callId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            callRepository.declineCall(callId).first()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Timber.e(e, "InitiateCallUseCase: Decline call failed")
             Result.failure(e)
         }
     }

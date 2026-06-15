@@ -65,7 +65,11 @@ data class AppSettingsState(
     val autoDownloadRoaming: Set<MediaType> = emptySet(),
     val mediaUploadQuality: UploadQuality = UploadQuality.BALANCED,
     val isLoading: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    // ── Premium / Freemium Billing Fields ──
+    val isIncomingPstnEnabled: Boolean = false,
+    val isPremiumSubscriber: Boolean = false,
+    val showPremiumPaywall: Boolean = false
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

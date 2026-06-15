@@ -170,6 +170,16 @@ class PreferencesDataStore @Inject constructor(
         dataStore.edit { prefs -> prefs[KEY_DISABLE_LINK_PREVIEWS] = enabled }
     }
 
+    // ── Premium / Freemium Billing ───────────────────────────────────────────
+
+    val isIncomingPstnEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[KEY_INCOMING_PSTN_ENABLED] ?: false
+    }
+
+    suspend fun setIncomingPstnEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[KEY_INCOMING_PSTN_ENABLED] = enabled }
+    }
+
     // ── Chat Behavior ─────────────────────────────────────────────────────────
 
     val enterIsSend: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -321,6 +331,7 @@ class PreferencesDataStore @Inject constructor(
         // Advanced
         private val KEY_PROTECT_IP_IN_CALLS = booleanPreferencesKey("protect_ip_in_calls")
         private val KEY_DISABLE_LINK_PREVIEWS = booleanPreferencesKey("disable_link_previews")
+        private val KEY_INCOMING_PSTN_ENABLED = booleanPreferencesKey("incoming_pstn_enabled")
 
         // Chat Behavior
         private val KEY_ENTER_IS_SEND = booleanPreferencesKey("enter_is_send")

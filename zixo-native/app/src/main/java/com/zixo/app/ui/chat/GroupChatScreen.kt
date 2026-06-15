@@ -115,7 +115,7 @@ private val AdminBadgeColor = NeonMint
  * - "Add participant" button (admin only, mutual contacts)
  * - "Leave group" option
  * - Participant avatars in the top bar
- * - Group calling: audio/video call buttons start LiveKit Room sessions
+ * - Group calling: audio/video call buttons start pure WebRTC peer connections
  * - WebRTC group call button in top bar
  * - Group info button in top bar (navigates to group details)
  * - Ephemeral timer indicator

@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt.android)
     alias(libs.plugins.google.services)
 }
 
@@ -100,6 +101,8 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     implementation(libs.hilt.navigation.compose)
+    implementation(libs.hilt.work)
+    ksp(libs.hilt.compiler)
 
     // ── DataStore Preferences ──
     implementation("androidx.datastore:datastore-preferences:1.1.1")
@@ -131,8 +134,10 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 
-    // ── Image Loading ──
+    // ── Image Loading (Coil 3) ──
     implementation(libs.coil.compose)
+    implementation("io.coil-kt.coil3:coil-compose:3.0.4")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
 
     // ── Biometric Authentication ──
     implementation(libs.biometric)
@@ -145,6 +150,11 @@ dependencies {
 
     // ── Logging ──
     implementation("com.jakewharton.timber:timber:5.0.1")
+
+    // ── Media3 ExoPlayer ──
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("androidx.media3:media3-common:1.5.1")
 
     // ── Compose Tooling (Debug) ──
     debugImplementation(libs.compose.ui.tooling)

@@ -319,6 +319,58 @@ class SettingsViewModel @Inject constructor(
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    //  Premium / Freemium Billing
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Toggles the "Receive regular calls via Zixo number" premium feature.
+     *
+     * Freemium Business Logic:
+     * - If the user is a premium subscriber, the toggle updates normally.
+     * - If the user is NOT a premium subscriber and tries to enable the feature,
+     *   the toggle is frozen and the premium paywall overlay is shown.
+     * - Disabling the feature is always allowed regardless of subscription status.
+     */
+    fun updateIncomingPstnEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            if (enabled && !_settingsState.value.isPremiumSubscriber) {
+                // Intercept: freeze toggle, show paywall
+                _settingsState.update { it.copy(showPremiumPaywall = true) }
+                return@launch
+            }
+            _settingsState.update { it.copy(isIncomingPstnEnabled = enabled) }
+            try {
+                settingsRepository.updateIncomingPstnEnabled(enabled)
+            } catch (e: Exception) {
+                // Revert on failure
+                _settingsState.update {
+                    it.copy(
+                        isIncomingPstnEnabled = !enabled,
+                        errorMessage = e.localizedMessage ?: "Failed to update PSTN setting"
+                    )
+                }
+            }
+        }
+    }
+
+    /** Dismisses the premium subscription paywall overlay. */
+    fun dismissPremiumPaywall() {
+        _settingsState.update { it.copy(showPremiumPaywall = false) }
+    }
+
+    /** Simulates a premium subscription check against the server. */
+    fun checkPremiumStatus() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val isPremium = settingsRepository.isPremiumSubscriber()
+                _settingsState.update { it.copy(isPremiumSubscriber = isPremium) }
+            } catch (_: Exception) {
+                // Silently handle — defaults to non-premium
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     //  Chat Config
     // ════════════════════════════════════════════════════════════════════════
 

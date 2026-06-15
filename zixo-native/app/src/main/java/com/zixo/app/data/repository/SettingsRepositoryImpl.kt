@@ -19,6 +19,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
@@ -194,6 +195,33 @@ class SettingsRepositoryImpl @Inject constructor(
     override suspend fun updateDisableLinkPreviews(enabled: Boolean) {
         try { preferencesDataStore.setDisableLinkPreviews(enabled) }
         catch (e: Exception) { Timber.e(e, "Failed to update disable link previews") }
+    }
+
+    // ── Premium / Freemium Billing ───────────────────────────────────────────
+
+    override suspend fun updateIncomingPstnEnabled(enabled: Boolean) {
+        try {
+            preferencesDataStore.setIncomingPstnEnabled(enabled)
+            // Update Firestore user profile field
+            val uid = firebaseAuthService.getCurrentUser()?.uid ?: return
+            firestoreService.updateUserProfile(uid, mapOf("isIncomingPstnEnabled" to enabled))
+                .flowOn(Dispatchers.IO)
+                .collect {}
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update incoming PSTN setting")
+        }
+    }
+
+    override suspend fun isPremiumSubscriber(): Boolean {
+        return try {
+            val uid = firebaseAuthService.getCurrentUser()?.uid ?: return false
+            val profile = firestoreService.getUserProfile(uid).flowOn(Dispatchers.IO).first()
+            // Check the premium flag from the User model
+            profile?.let { false } ?: false // Default to false until Firestore model is updated
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to check premium subscriber status")
+            false
+        }
     }
 
     // ── Chat Behavior ─────────────────────────────────────────────────────────

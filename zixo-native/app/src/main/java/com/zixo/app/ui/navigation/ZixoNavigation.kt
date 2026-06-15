@@ -50,6 +50,8 @@ import com.zixo.app.ui.settings.SubPages.NotificationManagerScreen
 import com.zixo.app.ui.settings.SubPages.PrivacyCenterScreen
 import com.zixo.app.ui.settings.SubPages.PrivacyPolicyScreen
 import com.zixo.app.ui.settings.SubPages.StorageDataHubScreen
+import com.zixo.app.ui.settings.SubPages.OpenSourceLicensesScreen
+import com.zixo.app.ui.settings.SubPages.TermsOfServiceScreen
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.graphics.Color
 
@@ -83,6 +85,8 @@ sealed class ZixoRoute(val route: String) {
     data object AboutUs : ZixoRoute("about_us")
     data object ContactUs : ZixoRoute("contact_us")
     data object PrivacyPolicy : ZixoRoute("privacy_policy")
+    data object TermsOfService : ZixoRoute("terms_of_service")
+    data object OpenSourceLicenses : ZixoRoute("open_source_licenses")
     data object CallScreen : ZixoRoute("call/{callId}") {
         fun createRoute(callId: String) = "call/$callId"
     }
@@ -256,10 +260,12 @@ fun ZixoNavHost(
                 },
                 onContactClick = { contactUserId ->
                     // Zero-trust: only mutual contacts can navigate to chat
-                    // TODO: Create or find existing thread with this contact
+                    // Navigate to the contact list to find or create a thread
+                    navController.navigate(ZixoRoute.ContactList.route)
                 },
                 onNewChatClick = {
-                    // TODO: Open new chat / find contact flow
+                    // Open contact list for new chat creation
+                    navController.navigate(ZixoRoute.ContactList.route)
                 },
                 onCallClick = { callId ->
                     navController.navigate(ZixoRoute.CallScreen.createRoute(callId))
@@ -361,10 +367,10 @@ fun ZixoNavHost(
                     navController.navigate(ZixoRoute.PrivacyPolicy.route)
                 },
                 onTermsOfServiceClick = {
-                    // TODO: Navigate to Terms of Service when created
+                    navController.navigate(ZixoRoute.TermsOfService.route)
                 },
                 onLicensesClick = {
-                    // TODO: Navigate to Open Source Licenses when created
+                    navController.navigate(ZixoRoute.OpenSourceLicenses.route)
                 },
             )
         }
@@ -379,6 +385,20 @@ fun ZixoNavHost(
         // ── Privacy Policy ─────────────────────────────────────
         composable(route = ZixoRoute.PrivacyPolicy.route) {
             PrivacyPolicyScreen(
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        // ── Terms of Service ──────────────────────────────────
+        composable(route = ZixoRoute.TermsOfService.route) {
+            TermsOfServiceScreen(
+                onBackClick = { navController.popBackStack() },
+            )
+        }
+
+        // ── Open Source Licenses ───────────────────────────────
+        composable(route = ZixoRoute.OpenSourceLicenses.route) {
+            OpenSourceLicensesScreen(
                 onBackClick = { navController.popBackStack() },
             )
         }

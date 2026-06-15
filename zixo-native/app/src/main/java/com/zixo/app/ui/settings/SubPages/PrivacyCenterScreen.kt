@@ -1,5 +1,10 @@
 package com.zixo.app.ui.settings.SubPages
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,19 +19,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -425,6 +435,73 @@ fun PrivacyCenterScreen(
                     )
                 }
             }
+
+            // ── Section 8: Premium PSTN Calling ─────────────────────────
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidGlassCard()
+                        .padding(16.dp)
+                ) {
+                    SectionLabel("PREMIUM CALLING")
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    PrivacySwitchRow(
+                        icon = Icons.Default.Call,
+                        title = "Receive regular calls via Zixo number",
+                        subtitle = if (settingsState.isPremiumSubscriber) {
+                            "Allow PSTN calls to ring through your Zixo number"
+                        } else {
+                            "Premium feature — subscription required"
+                        },
+                        checked = settingsState.isIncomingPstnEnabled,
+                        onCheckedChange = { viewModel.updateIncomingPstnEnabled(it) }
+                    )
+
+                    if (!settingsState.isPremiumSubscriber) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(NeonMint.copy(alpha = 0.1f))
+                                .clickable { viewModel.updateIncomingPstnEnabled(true) }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = NeonMint,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Upgrade to Zixo Premium",
+                                color = NeonMint,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Premium Paywall Overlay ────────────────────────────────────────
+        AnimatedVisibility(
+            visible = settingsState.showPremiumPaywall,
+            enter = fadeIn() + scaleIn(initialScale = 0.9f),
+            exit = fadeOut() + scaleOut(targetScale = 0.9f)
+        ) {
+            PremiumPaywallOverlay(
+                onDismiss = { viewModel.dismissPremiumPaywall() },
+                onSubscribe = {
+                    viewModel.dismissPremiumPaywall()
+                    // TODO: Launch Google Play Billing flow
+                }
+            )
         }
     }
 }
@@ -550,4 +627,155 @@ private fun Int.toStatusPrivacyOption(): StatusPrivacyOption = when (this) {
     0 -> StatusPrivacyOption.ALL_CONTACTS
     1 -> StatusPrivacyOption.EXCLUDE_SOME
     else -> StatusPrivacyOption.ONLY_SHARE_WITH
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Premium Paywall Overlay — Glassmorphic Subscription Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Ultra-premium glassmorphic subscription purchase sheet overlay.
+ *
+ * Displayed when a non-premium user attempts to enable the
+ * "Receive regular calls via Zixo number" feature. Features:
+ * - Liquid Glass card with blur and border
+ * - Neon emerald accent highlights
+ * - Feature list with check icons
+ * - Subscribe button with neon glow
+ * - Dismiss via close button or tapping outside
+ */
+@Composable
+private fun PremiumPaywallOverlay(
+    onDismiss: () -> Unit,
+    onSubscribe: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xAA000000))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0x3B1A2A32))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
+                .clickable(enabled = false) { /* consume clicks inside */ }
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Close button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = TextSecondary
+                    )
+                }
+            }
+
+            // Premium icon
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(NeonMint),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Zixo Premium",
+                color = TextPrimary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Unlock PSTN calling and receive regular\nphone calls through your Zixo number",
+                color = TextSecondary,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Feature list
+            listOf(
+                "Receive PSTN calls via Zixo number",
+                "Dedicated phone line forwarding",
+                "G.711 & Opus narrowband audio",
+                "Priority call routing",
+                "Premium support"
+            ).forEach { feature ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        tint = NeonMint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = feature,
+                        color = TextPrimary,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Subscribe button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(NeonMint)
+                    .clickable(onClick = onSubscribe)
+                    .padding(vertical = 16.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Subscribe Now",
+                    color = Color.Black,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Billed through Google Play • Cancel anytime",
+                color = TextSecondary,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
 }

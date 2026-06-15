@@ -97,7 +97,7 @@ class ChatViewModel @Inject constructor(
     /** Active call ID for tracking the current call state. */
     private val _activeCallId = MutableStateFlow("")
 
-    /** Real-time call state from the LiveKit WebRTC engine. */
+    /** Real-time call state from the pure WebRTC engine. */
     private val _callState = MutableStateFlow<CallState>(CallState.IDLE)
     val callState: StateFlow<CallState> = _callState.asStateFlow()
 
@@ -505,7 +505,7 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Initiates a group audio call via LiveKit Room.
+     * Initiates a group audio call via pure WebRTC peer connection.
      */
     fun startGroupAudioCall() {
         if (threadId.isBlank()) return
@@ -526,7 +526,7 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Initiates a group video call via LiveKit Room.
+     * Initiates a group video call via pure WebRTC peer connection.
      */
     fun startGroupVideoCall() {
         if (threadId.isBlank()) return

@@ -1,10 +1,12 @@
 package com.zixo.app.domain.usecase
 
+import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.model.Message
 import com.zixo.app.domain.model.MessageType
 import com.zixo.app.domain.repository.ChatRepository
 import com.zixo.app.domain.repository.ContactRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -48,11 +50,14 @@ class SendMessageUseCase @Inject constructor(
         try {
             // ── Step 1: Zero-trust contact verification gate ──────────────
             if (recipientId != null) {
-                val isMutual = contactRepository.verifyMutualContact(recipientId)
+                val gateResult = contactRepository.verifyMutualContact(recipientId).first()
+                val isMutual = gateResult is CommunicationGate.Allowed
                 if (!isMutual) {
-                    Timber.w("SendMessageUseCase: Rejected — not mutual contact with %s", recipientId)
+                    val reason = (gateResult as? CommunicationGate.Blocked)?.reason
+                        ?: "Contact is not mutually verified"
+                    Timber.w("SendMessageUseCase: Rejected — %s", reason)
                     return@withContext Result.failure(
-                        SecurityException("Cannot send message: contact is not mutually verified")
+                        SecurityException("Cannot send message: $reason")
                     )
                 }
                 Timber.d("SendMessageUseCase: Mutual contact verified for %s", recipientId)

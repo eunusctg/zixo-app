@@ -2,11 +2,14 @@ package com.zixo.app.ui.screens.calls
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.zixo.app.data.repository.CallRepository
 import com.zixo.app.domain.model.CallFilter
 import com.zixo.app.domain.model.CallLogEntry
+import com.zixo.app.domain.model.CallState
+import com.zixo.app.domain.repository.CallRepository
+import com.zixo.app.domain.usecase.InitiateCallUseCase
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +18,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 data class CallsUiState(
@@ -22,12 +26,22 @@ data class CallsUiState(
     val selectedFilter: CallFilter = CallFilter.ALL,
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
-    val currentUserId: String? = null
+    val currentUserId: String? = null,
+    val activeCallState: CallState? = null,
+    val errorMessage: String? = null
 )
 
+/**
+ * ViewModel for the Calls tab screen — displays call history with filters
+ * and supports call initiation through [InitiateCallUseCase].
+ *
+ * Uses Clean Architecture Use Cases instead of direct repository access
+ * for decoupled testability and zero-trust contact verification.
+ */
 @HiltViewModel
 class CallsViewModel @Inject constructor(
     private val callRepository: CallRepository,
+    private val initiateCallUseCase: InitiateCallUseCase,
     private val firebaseAuth: FirebaseAuth
 ) : ViewModel() {
 
@@ -71,7 +85,9 @@ class CallsViewModel @Inject constructor(
                     selectedFilter = filter,
                     isLoading = false,
                     isRefreshing = false,
-                    currentUserId = firebaseAuth.currentUser?.uid
+                    currentUserId = firebaseAuth.currentUser?.uid,
+                    activeCallState = _uiState.value.activeCallState,
+                    errorMessage = _uiState.value.errorMessage
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -98,6 +114,135 @@ class CallsViewModel @Inject constructor(
             kotlinx.coroutines.delay(500)
             _uiState.update { it.copy(isRefreshing = false) }
         }
+    }
+
+    /**
+     * Initiates an audio call to a mutual contact via [InitiateCallUseCase].
+     * The use case enforces zero-trust contact verification before signaling.
+     *
+     * @param targetUserId The UID of the contact to call.
+     */
+    fun initiateAudioCall(targetUserId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(activeCallState = CallState.DIALING(targetUserId, false)) }
+            try {
+                initiateCallUseCase.invokeWithVerification(targetUserId, isVideoCall = false)
+                    .onSuccess { callState ->
+                        _uiState.update { it.copy(activeCallState = callState) }
+                        Timber.d("CallsViewModel: Audio call initiated to %s", targetUserId)
+                    }
+                    .onFailure { error ->
+                        _uiState.update {
+                            it.copy(
+                                activeCallState = null,
+                                errorMessage = error.localizedMessage ?: "Call failed"
+                            )
+                        }
+                        Timber.w(error, "CallsViewModel: Audio call failed to %s", targetUserId)
+                    }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        activeCallState = null,
+                        errorMessage = e.localizedMessage ?: "Call initiation error"
+                    )
+                }
+                Timber.e(e, "CallsViewModel: Audio call error")
+            }
+        }
+    }
+
+    /**
+     * Initiates a video call to a mutual contact via [InitiateCallUseCase].
+     *
+     * @param targetUserId The UID of the contact to call.
+     */
+    fun initiateVideoCall(targetUserId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(activeCallState = CallState.DIALING(targetUserId, true)) }
+            try {
+                initiateCallUseCase.invokeWithVerification(targetUserId, isVideoCall = true)
+                    .onSuccess { callState ->
+                        _uiState.update { it.copy(activeCallState = callState) }
+                        Timber.d("CallsViewModel: Video call initiated to %s", targetUserId)
+                    }
+                    .onFailure { error ->
+                        _uiState.update {
+                            it.copy(
+                                activeCallState = null,
+                                errorMessage = error.localizedMessage ?: "Call failed"
+                            )
+                        }
+                        Timber.w(error, "CallsViewModel: Video call failed to %s", targetUserId)
+                    }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        activeCallState = null,
+                        errorMessage = e.localizedMessage ?: "Call initiation error"
+                    )
+                }
+                Timber.e(e, "CallsViewModel: Video call error")
+            }
+        }
+    }
+
+    /**
+     * Accepts an incoming call via the [InitiateCallUseCase].
+     *
+     * @param callId The ID of the incoming call.
+     * @param callerId The UID of the caller.
+     */
+    fun acceptCall(callId: String, callerId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                initiateCallUseCase.acceptCall(callId, callerId).collect { state ->
+                    _uiState.update { it.copy(activeCallState = state) }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(errorMessage = e.localizedMessage ?: "Accept call failed")
+                }
+                Timber.e(e, "CallsViewModel: Accept call failed")
+            }
+        }
+    }
+
+    /**
+     * Declines an incoming call.
+     *
+     * @param callId The ID of the call to decline.
+     */
+    fun declineCall(callId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                initiateCallUseCase.declineCall(callId)
+                _uiState.update { it.copy(activeCallState = null) }
+            } catch (e: Exception) {
+                Timber.e(e, "CallsViewModel: Decline call failed")
+            }
+        }
+    }
+
+    /**
+     * Ends the active call and releases WebRTC resources.
+     *
+     * @param callId The ID of the call to end.
+     */
+    fun endCall(callId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                initiateCallUseCase.endCall(callId)
+                _uiState.update { it.copy(activeCallState = null) }
+            } catch (e: Exception) {
+                Timber.e(e, "CallsViewModel: End call failed")
+            }
+        }
+    }
+
+    /** Clears the error message after it has been displayed. */
+    fun clearError() {
+        _uiState.update { it.copy(errorMessage = null) }
     }
 
     fun clearCallHistory() {
