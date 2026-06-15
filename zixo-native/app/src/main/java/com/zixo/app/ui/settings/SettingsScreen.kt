@@ -1,12 +1,13 @@
 package com.zixo.app.ui.settings
 
 import android.content.Intent
+import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,11 +47,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -67,10 +66,8 @@ import com.zixo.app.ui.components.GlassSegmentedPicker
 import com.zixo.app.ui.components.GlassSwitch
 import com.zixo.app.ui.components.ZixoGlassBackground
 import com.zixo.app.ui.components.diagonalMeshGradient
-import com.zixo.app.ui.components.liquidGlassCard
 import com.zixo.app.ui.components.liquidGlassContainer
 import com.zixo.app.ui.navigation.ZixoRoutes
-import com.zixo.app.ui.theme.DestructiveBackground
 import com.zixo.app.ui.theme.DestructiveText
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
@@ -100,6 +97,8 @@ fun SettingsScreen(
     val settingsState by viewModel.settingsState.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val showQrPopup by viewModel.showQrPopup.collectAsStateWithLifecycle()
+    val qrBitmap by viewModel.qrBitmapState.collectAsStateWithLifecycle()
+    val inviteLink by viewModel.inviteLink.collectAsStateWithLifecycle()
     val logoutState by viewModel.logoutState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -331,6 +330,8 @@ fun SettingsScreen(
             QrCodePopup(
                 displayName = userProfile.displayName,
                 zixoNumber = userProfile.zixoNumber,
+                qrBitmap = qrBitmap,
+                inviteLink = inviteLink,
                 onClose = { viewModel.toggleQrPopup() }
             )
         }
@@ -523,16 +524,30 @@ private fun SettingsNavItem(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Frosted liquid glass modal overlay displaying the user's QR code
- * rendered in brand emerald green (#00E676) with account identification URI encoded.
+ * Frosted liquid glass modal overlay displaying the user's dynamically computed
+ * neon green QR bitmap centered inside an ultra-glossy frosted glass panel.
+ *
+ * The QR code is generated in real-time by [SettingsViewModel.generateRealtimeQrMatrix]
+ * using the ZXing library, encoding the secure URI `zixo://profile/{zixoNumber}`.
+ * It is rendered in brand emerald green (#00E676) for high-contrast visibility.
+ *
+ * Features:
+ * - Real bitmap rendered from ZXing (not a placeholder pattern)
+ * - Frosted glass container with liquid glass styling
+ * - "Copy Invite Link" action row at the baseline
+ * - "Share" button for system share sheet
+ * - Close button in the top-right corner
  */
 @Composable
 private fun QrCodePopup(
     displayName: String,
     zixoNumber: String,
+    qrBitmap: Bitmap?,
+    inviteLink: String,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
 
     Box(
         modifier = Modifier
@@ -580,8 +595,7 @@ private fun QrCodePopup(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // QR code rendered in brand emerald green
-            val qrData = "zixo://user/$zixoNumber"
+            // QR code — Real bitmap from ZXing or fallback
             Box(
                 modifier = Modifier
                     .size(220.dp)
@@ -589,11 +603,23 @@ private fun QrCodePopup(
                     .padding(12.dp),
                 contentAlignment = Alignment.Center
             ) {
-                SimpleQrCanvas(
-                    data = qrData,
-                    color = Color(0xFF00E676),
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (qrBitmap != null) {
+                    Image(
+                        painter = BitmapPainter(qrBitmap.asImageBitmap()),
+                        contentDescription = "QR Code",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                } else {
+                    // Fallback: placeholder while bitmap generates
+                    Text(
+                        text = "Generating…",
+                        color = TextSecondary,
+                        fontSize = 14.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -618,7 +644,40 @@ private fun QrCodePopup(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Share button
+            // ── Action Row: Copy Invite Link ─────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0x1A1A2A32))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp))
+                    .clickable {
+                        if (inviteLink.isNotBlank()) {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(inviteLink))
+                        }
+                    }
+                    .padding(vertical = 14.dp, horizontal = 16.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    tint = NeonMint,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Copy Invite Link",
+                    color = NeonMint,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ── Share Button ─────────────────────────────────────────────
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -627,7 +686,7 @@ private fun QrCodePopup(
                     .clickable {
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, "Add me on Zixo: $qrData")
+                            putExtra(Intent.EXTRA_TEXT, "Add me on Zixo: $inviteLink")
                         }
                         context.startActivity(Intent.createChooser(shareIntent, "Share via"))
                     }
@@ -648,62 +707,6 @@ private fun QrCodePopup(
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Simple QR Canvas (Placeholder — generates a visual QR-like pattern)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Draws a placeholder QR-code-like pattern for the account identification URI.
- * In production, this would use a real QR code library (e.g., zxing).
- */
-@Composable
-private fun SimpleQrCanvas(
-    data: String,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Canvas(modifier = modifier) {
-        val gridSize = 21 // Standard QR Version 1
-        val cellSize = size.minDimension / gridSize
-        val hash = data.hashCode()
-
-        for (row in 0 until gridSize) {
-            for (col in 0 until gridSize) {
-                val isFinderPattern = (
-                    (row < 7 && col < 7) ||
-                    (row < 7 && col > gridSize - 8) ||
-                    (row > gridSize - 8 && col < 7)
-                )
-                val isFinderBorder = isFinderPattern && (
-                    row == 0 || row == 6 || col == 0 || col == 6 ||
-                    (row < 7 && col < 7 && (row == 0 || row == 6 || col == 0 || col == 6)) ||
-                    (row < 7 && col > gridSize - 8 && (row == 0 || row == 6 || col == gridSize - 7 || col == gridSize - 1)) ||
-                    (row > gridSize - 8 && col < 7 && (row == gridSize - 7 || row == gridSize - 1 || col == 0 || col == 6))
-                )
-                val isFinderInner = isFinderPattern && (
-                    (row in 2..4 && col in 2..4) ||
-                    (row in 2..4 && col in gridSize - 5..gridSize - 3) ||
-                    (row in gridSize - 5..gridSize - 3 && col in 2..4)
-                )
-
-                val cellHash = (hash * 31 + row * 17 + col * 7) and 0xFF
-                val shouldFill = isFinderBorder || isFinderInner || (!isFinderPattern && cellHash % 3 != 0)
-
-                if (shouldFill) {
-                    drawRect(
-                        color = color,
-                        topLeft = androidx.compose.ui.geometry.Offset(
-                            x = col * cellSize,
-                            y = row * cellSize
-                        ),
-                        size = Size(cellSize, cellSize)
-                    )
-                }
             }
         }
     }

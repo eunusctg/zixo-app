@@ -17,6 +17,7 @@ import com.zixo.app.domain.repository.CallRepository
 import com.zixo.app.domain.repository.ContactRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
@@ -28,8 +29,10 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import org.webrtc.IceCandidate
 import timber.log.Timber
 import java.util.UUID
 import javax.inject.Inject
@@ -71,6 +74,203 @@ class CallRepositoryImpl @Inject constructor(
     private var connectedAt: Long = 0L
 
     private val callLogCollection get() = firestore.collection("call_log")
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Firebase Realtime DB Signaling Flows — Thread-Isolated
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Observes the real-time state of a call session from Firebase Realtime DB.
+     *
+     * Provides a continuous [com.google.firebase.database.ValueEventListener] on
+     * `/calls/{callId}/`, streaming every state change as a Map. All listener
+     * operations are safely decoupled from the UI thread via [callbackFlow] on
+     * [Dispatchers.IO].
+     *
+     * This is the primary mechanism by which the calling UI reacts to remote
+     * state transitions without polling.
+     */
+    override fun observeCallSession(callId: String): Flow<Map<String, Any>> = callbackFlow {
+        val callRef = realtimeDb.getReference("calls/$callId")
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                try {
+                    val data = snapshot.value as? Map<String, Any> ?: emptyMap()
+                    trySend(data)
+                } catch (e: Exception) {
+                    Timber.e(e, "Error parsing call session data for callId: %s", callId)
+                }
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Timber.e(error.toException(), "Call session listener cancelled for callId: %s", callId)
+                close(error.toException())
+            }
+        }
+        callRef.addValueEventListener(listener)
+        awaitClose { callRef.removeEventListener(listener) }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Observes ICE candidates for a specific call from Firebase Realtime DB.
+     *
+     * Listens to `/calls/{callId}/iceCandidates/` with a [com.google.firebase.database.ChildEventListener],
+     * streaming each newly added ICE candidate as it arrives from the remote peer.
+     * Candidates are parsed into [IceCandidate] objects and forwarded to the
+     * WebRTC engine for addition to the PeerConnection.
+     */
+    override fun observeIceCandidates(callId: String): Flow<IceCandidate> = callbackFlow {
+        val candidatesRef = realtimeDb.getReference("calls/$callId/iceCandidates")
+        val childListener = object : com.google.firebase.database.ChildEventListener {
+            override fun onChildAdded(
+                snapshot: com.google.firebase.database.DataSnapshot,
+                previousChildName: String?
+            ) {
+                try {
+                    val sdpMid = snapshot.child("sdpMid").getValue(String::class.java) ?: ""
+                    val sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Int::class.java) ?: 0
+                    val sdp = snapshot.child("sdp").getValue(String::class.java) ?: ""
+                    if (sdp.isNotBlank()) {
+                        trySend(IceCandidate(sdpMid, sdpMLineIndex, sdp))
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Error parsing ICE candidate for callId: %s", callId)
+                }
+            }
+
+            override fun onChildChanged(
+                snapshot: com.google.firebase.database.DataSnapshot,
+                previousChildName: String?
+            ) { /* ICE candidates are append-only */ }
+
+            override fun onChildRemoved(snapshot: com.google.firebase.database.DataSnapshot) {}
+
+            override fun onChildMoved(
+                snapshot: com.google.firebase.database.DataSnapshot,
+                previousChildName: String?
+            ) {}
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Timber.e(error.toException(), "ICE candidate listener cancelled for callId: %s", callId)
+                close(error.toException())
+            }
+        }
+        candidatesRef.addChildEventListener(childListener)
+        awaitClose { candidatesRef.removeEventListener(childListener) }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Emits a call state update to Firebase Realtime DB.
+     *
+     * Writes the state string to `/calls/{callId}/callState`.
+     * This operation runs on [Dispatchers.IO] and never blocks the Main Thread.
+     */
+    override suspend fun emitCallState(callId: String, state: String) = withContext(Dispatchers.IO) {
+        try {
+            realtimeDb.getReference("calls/$callId/callState").setValue(state)
+            Timber.d("Call state emitted: %s for callId: %s", state, callId)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to emit call state: %s for callId: %s", state, callId)
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Firebase Realtime DB Signaling Flows — Thread-Isolated
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Observes the real-time state of a call session from Firebase Realtime DB.
+     *
+     * Provides a continuous [ValueEventListener] on `/calls/{callId}/`,
+     * streaming every state change as a Map. All listener operations are
+     * safely decoupled from the UI thread via [callbackFlow] on [Dispatchers.IO].
+     *
+     * This is the primary mechanism by which the calling UI reacts to remote
+     * state transitions without polling.
+     */
+    override fun observeCallSession(callId: String): Flow<Map<String, Any>> = callbackFlow {
+        val callRef = realtimeDb.getReference("calls/$callId")
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
+                try {
+                    val data = snapshot.value as? Map<String, Any> ?: emptyMap()
+                    trySend(data)
+                } catch (e: Exception) {
+                    Timber.e(e, "Error parsing call session data for callId: %s", callId)
+                }
+            }
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Timber.e(error.toException(), "Call session listener cancelled for callId: %s", callId)
+                close(error.toException())
+            }
+        }
+        callRef.addValueEventListener(listener)
+        awaitClose { callRef.removeEventListener(listener) }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Observes ICE candidates for a specific call from Firebase Realtime DB.
+     *
+     * Listens to `/calls/{callId}/iceCandidates/` with a [ChildEventListener],
+     * streaming each newly added ICE candidate as it arrives from the remote peer.
+     * Candidates are parsed into [IceCandidate] objects and forwarded to the
+     * WebRTC engine for addition to the PeerConnection.
+     */
+    override fun observeIceCandidates(callId: String): Flow<IceCandidate> = callbackFlow {
+        val candidatesRef = realtimeDb.getReference("calls/$callId/iceCandidates")
+        val childListener = object : com.google.firebase.database.ChildEventListener {
+            override fun onChildAdded(
+                snapshot: com.google.firebase.database.DataSnapshot,
+                previousChildName: String?
+            ) {
+                try {
+                    val sdpMid = snapshot.child("sdpMid").getValue(String::class.java) ?: ""
+                    val sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Int::class.java) ?: 0
+                    val sdp = snapshot.child("sdp").getValue(String::class.java) ?: ""
+                    if (sdp.isNotBlank()) {
+                        trySend(IceCandidate(sdpMid, sdpMLineIndex, sdp))
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Error parsing ICE candidate for callId: %s", callId)
+                }
+            }
+
+            override fun onChildChanged(
+                snapshot: com.google.firebase.database.DataSnapshot,
+                previousChildName: String?
+            ) { /* ICE candidates are append-only */ }
+
+            override fun onChildRemoved(snapshot: com.google.firebase.database.DataSnapshot) {}
+
+            override fun onChildMoved(
+                snapshot: com.google.firebase.database.DataSnapshot,
+                previousChildName: String?
+            ) {}
+
+            override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                Timber.e(error.toException(), "ICE candidate listener cancelled for callId: %s", callId)
+                close(error.toException())
+            }
+        }
+        candidatesRef.addChildEventListener(childListener)
+        awaitClose { candidatesRef.removeEventListener(childListener) }
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Emits a call state update to Firebase Realtime DB.
+     *
+     * Writes the state string to `/calls/{callId}/callState`.
+     * This operation runs on [Dispatchers.IO] and never blocks the Main Thread.
+     */
+    override suspend fun emitCallState(callId: String, state: String) = withContext(Dispatchers.IO) {
+        try {
+            realtimeDb.getReference("calls/$callId/callState").setValue(state)
+            Timber.d("Call state emitted: %s for callId: %s", state, callId)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to emit call state: %s for callId: %s", state, callId)
+        }
+    }
 
     // ── Initiate Call ─────────────────────────────────────────────────────────
 
@@ -124,15 +324,19 @@ class CallRepositoryImpl @Inject constructor(
 
             // Set up ICE candidate forwarding: local ICE → Firebase signaling
             webRtcClient.onIceCandidateGenerated = { candidate ->
-                kotlinx.coroutines.runBlocking {
-                    signalingClient.sendIceCandidate(
-                        callId = callId,
-                        senderUid = myUid,
-                        targetUid = targetUid,
-                        sdpMid = candidate.sdpMid,
-                        sdpMLineIndex = candidate.sdpMLineIndex,
-                        sdp = candidate.sdp
-                    )
+                GlobalScope.launch(Dispatchers.IO) {
+                    try {
+                        signalingClient.sendIceCandidate(
+                            callId = callId,
+                            senderUid = myUid,
+                            targetUid = targetUid,
+                            sdpMid = candidate.sdpMid,
+                            sdpMLineIndex = candidate.sdpMLineIndex,
+                            sdp = candidate.sdp
+                        )
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to forward ICE candidate to signaling")
+                    }
                 }
             }
 

@@ -27,9 +27,21 @@ import javax.inject.Singleton
  * under `users/{uid}/contacts/`. All Firebase operations run on
  * [Dispatchers.IO] and are wrapped in try/catch to prevent crashes.
  *
- * Communication is ONLY allowed between verified mutual contacts. The
- * [verifyMutualContact] method is the primary boundary that enforces
- * this rule across all messaging, calling, and status features.
+ * ## Core Architectural Rules:
+ *
+ * 1. **No Email-Based Lookups:** Email-based queries are explicitly forbidden
+ *    by the privacy architecture. Users can ONLY find other users by their
+ *    exact 8-digit Zixo Number. All email query paths have been removed.
+ *
+ * 2. **Atomic Mutual Contact Writing:** The contact-adding framework performs
+ *    atomic two-way Firestore Batch writes. When User A adds User B, verified
+ *    links are written to BOTH users' `/contacts/` subcollections simultaneously.
+ *    If either write fails, the entire transaction rolls back to prevent
+ *    single-sided sync states.
+ *
+ * 3. **Zero-Trust Enforcement:** Communication is ONLY allowed between verified
+ *    mutual contacts. The [verifyMutualContact] method is the primary boundary
+ *    that enforces this rule across all messaging, calling, and status features.
  */
 @Singleton
 class ContactRepositoryImpl @Inject constructor(
@@ -45,7 +57,7 @@ class ContactRepositoryImpl @Inject constructor(
 
     private fun usersCollection() = firestore.collection("users")
 
-    // ── Search ────────────────────────────────────────────────────────────────
+    // ── Search (Zixo Number ONLY — No Email, No Name, No Phone) ────────────
 
     override fun searchByZixoNumber(zixoNumber: String): Flow<ContactSearchResult> = flow {
         if (!zixoNumber.matches(Regex("^\\d{8}$"))) {
@@ -95,7 +107,7 @@ class ContactRepositoryImpl @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    // ── Add Contact ───────────────────────────────────────────────────────────
+    // ── Add Contact by UID (Atomic Two-Way Batch Write) ────────────────────
 
     override fun addContact(targetUid: String): Flow<AddContactState> = flow {
         val myUid = currentUid
@@ -107,6 +119,7 @@ class ContactRepositoryImpl @Inject constructor(
         emit(AddContactState.Adding)
 
         try {
+            // Check if already added
             val myContactDoc = contactsCollection(myUid).document(targetUid).get().await()
             if (myContactDoc.exists()) {
                 val existing = mapToContactModel(myContactDoc, myUid)
@@ -114,14 +127,17 @@ class ContactRepositoryImpl @Inject constructor(
                 return@flow
             }
 
+            // Fetch both profiles for denormalization
             val contactProfile = usersCollection().document(targetUid).get().await()
             val myProfile = usersCollection().document(myUid).get().await()
 
+            // Check if the target already has us as a contact (mutual check)
             val reverseDoc = contactsCollection(targetUid).document(myUid).get().await()
             val isMutual = reverseDoc.exists()
 
             val now = System.currentTimeMillis()
 
+            // Current user's view of the contact
             val myContactData = hashMapOf(
                 "userId" to myUid,
                 "contactUserId" to targetUid,
@@ -131,6 +147,7 @@ class ContactRepositoryImpl @Inject constructor(
                 "contactAvatarUrl" to (contactProfile.getString("photoUrl") ?: ""),
                 "contactBio" to (contactProfile.getString("bio") ?: ""),
                 "isMutual" to isMutual,
+                "isVerifiedContact" to true,
                 "addedAt" to now,
                 "mutualVerifiedAt" to if (isMutual) now else null,
                 "isBlocked" to false,
@@ -138,6 +155,7 @@ class ContactRepositoryImpl @Inject constructor(
                 "isMuted" to false
             )
 
+            // Target user's view of the current user (reverse link)
             val reverseContactData = hashMapOf(
                 "userId" to targetUid,
                 "contactUserId" to myUid,
@@ -147,6 +165,7 @@ class ContactRepositoryImpl @Inject constructor(
                 "contactAvatarUrl" to (myProfile.getString("photoUrl") ?: ""),
                 "contactBio" to (myProfile.getString("bio") ?: ""),
                 "isMutual" to true,
+                "isVerifiedContact" to true,
                 "addedAt" to now,
                 "mutualVerifiedAt" to now,
                 "isBlocked" to false,
@@ -154,14 +173,19 @@ class ContactRepositoryImpl @Inject constructor(
                 "isMuted" to false
             )
 
+            // ── ATOMIC BATCH WRITE ──────────────────────────────────────
+            // Both sides are written in a single Firestore Batch.
+            // If either write fails, the entire transaction rolls back,
+            // preventing single-sided sync states.
             val batch = firestore.batch()
             batch.set(contactsCollection(myUid).document(targetUid), myContactData)
             batch.set(contactsCollection(targetUid).document(myUid), reverseContactData)
 
+            // If the target already had us as a contact, update their mutual flag
             if (isMutual) {
-                batch.update(contactsCollection(contactUid = myUid).document(myUid), "isMutual", true)
                 batch.update(
-                    contactsCollection(contactUid = myUid).document(myUid),
+                    contactsCollection(targetUid).document(myUid),
+                    "isMutual", true,
                     "mutualVerifiedAt", now
                 )
             }
@@ -189,12 +213,149 @@ class ContactRepositoryImpl @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    // ── Add Contact by Zixo Number (Combined Search + Atomic Add) ──────────
+
+    override suspend fun addContactByZixoNumber(
+        currentUserId: String,
+        zixoNumber: String
+    ): Result<ContactModel> = withContext(Dispatchers.IO) {
+        try {
+            // Verify formatting — must be exactly 8 digits
+            if (zixoNumber.length != 8 || !zixoNumber.all { it.isDigit() }) {
+                return@withContext Result.failure(
+                    Exception("Invalid format. Zixo Number must be exactly 8 digits.")
+                )
+            }
+
+            // Query global index for matching token
+            val snapshot = usersCollection()
+                .whereEqualTo("zixoNumber", zixoNumber)
+                .limit(1)
+                .get()
+                .await()
+
+            if (snapshot.isEmpty) {
+                return@withContext Result.failure(
+                    Exception("Zixo Number not found. No user is associated with this number.")
+                )
+            }
+
+            val targetDoc = snapshot.documents.first()
+            val targetUserId = targetDoc.id
+            val targetDisplayName = targetDoc.getString("displayName") ?: "Zixo User"
+
+            if (targetUserId == currentUserId) {
+                return@withContext Result.failure(
+                    Exception("You cannot add your own Zixo Number.")
+                )
+            }
+
+            // Check if already a contact
+            val existingContact = contactsCollection(currentUserId)
+                .document(targetUserId)
+                .get()
+                .await()
+
+            if (existingContact.exists()) {
+                // Already added — return the existing contact
+                val existing = mapToContactModel(existingContact, currentUserId)
+                return@withContext Result.success(existing)
+            }
+
+            // Fetch current user's profile for reverse denormalization
+            val myProfile = usersCollection().document(currentUserId).get().await()
+
+            // Check if the target already has us as a contact (mutual check)
+            val reverseDoc = contactsCollection(targetUserId).document(currentUserId).get().await()
+            val isMutual = reverseDoc.exists()
+
+            val now = System.currentTimeMillis()
+
+            // ── ATOMIC BATCH WRITE ──────────────────────────────────────
+            // Execute atomic batch to bind the connection mutually across both profiles.
+            // If either write fails, the entire transaction rolls back.
+            val batch = firestore.batch()
+
+            val currentUserContactRef = contactsCollection(currentUserId).document(targetUserId)
+            val targetUserContactRef = contactsCollection(targetUserId).document(currentUserId)
+
+            // Current user's view of the contact
+            batch.set(currentUserContactRef, hashMapOf(
+                "userId" to currentUserId,
+                "contactUserId" to targetUserId,
+                "contactDisplayName" to targetDisplayName,
+                "contactUsername" to (targetDoc.getString("username") ?: ""),
+                "contactZixoNumber" to zixoNumber,
+                "contactAvatarUrl" to (targetDoc.getString("photoUrl") ?: ""),
+                "contactBio" to (targetDoc.getString("bio") ?: ""),
+                "isMutual" to isMutual,
+                "isVerifiedContact" to true,
+                "addedAt" to now,
+                "mutualVerifiedAt" to if (isMutual) now else null,
+                "isBlocked" to false,
+                "isPinned" to false,
+                "isMuted" to false
+            ))
+
+            // Target user's view of the current user (reverse link)
+            batch.set(targetUserContactRef, hashMapOf(
+                "userId" to targetUserId,
+                "contactUserId" to currentUserId,
+                "contactDisplayName" to (myProfile.getString("displayName") ?: ""),
+                "contactUsername" to (myProfile.getString("username") ?: ""),
+                "contactZixoNumber" to (myProfile.getString("zixoNumber") ?: ""),
+                "contactAvatarUrl" to (myProfile.getString("photoUrl") ?: ""),
+                "contactBio" to (myProfile.getString("bio") ?: ""),
+                "isMutual" to true,
+                "isVerifiedContact" to true,
+                "addedAt" to now,
+                "mutualVerifiedAt" to now,
+                "isBlocked" to false,
+                "isPinned" to false,
+                "isMuted" to false
+            ))
+
+            // If the target already had us as a contact, update their mutual flag
+            if (isMutual) {
+                batch.update(
+                    targetUserContactRef,
+                    "isMutual", true,
+                    "mutualVerifiedAt", now
+                )
+            }
+
+            batch.commit().await()
+
+            Timber.d("Atomic mutual contact write completed: %s -> %s (mutual=%s)", currentUserId, targetUserId, isMutual)
+
+            Result.success(
+                ContactModel(
+                    id = generateCompositeKey(currentUserId, targetUserId),
+                    userId = currentUserId,
+                    contactUserId = targetUserId,
+                    contactDisplayName = targetDisplayName,
+                    contactUsername = targetDoc.getString("username") ?: "",
+                    contactZixoNumber = zixoNumber,
+                    contactAvatarUrl = targetDoc.getString("photoUrl") ?: "",
+                    contactBio = targetDoc.getString("bio") ?: "",
+                    isMutual = isMutual,
+                    addedAt = now,
+                    mutualVerifiedAt = if (isMutual) now else null
+                )
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Atomic mutual contact write failed for Zixo Number: %s", zixoNumber)
+            Result.failure(e)
+        }
+    }
+
     // ── Remove Contact ────────────────────────────────────────────────────────
 
     override fun removeContact(contactUid: String): Flow<Result<Unit>> = flow {
         try {
             val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
 
+            // Atomic batch: remove from my side, break mutual on their side
             val batch = firestore.batch()
             batch.delete(contactsCollection(myUid).document(contactUid))
             batch.update(
@@ -204,7 +365,7 @@ class ContactRepositoryImpl @Inject constructor(
             )
             batch.commit().await()
 
-            Timber.d("Contact removed: %s", contactUid)
+            Timber.d("Contact removed atomically: %s", contactUid)
             emit(Result.success(Unit))
         } catch (e: Exception) {
             Timber.e(e, "Failed to remove contact: %s", contactUid)
@@ -264,7 +425,6 @@ class ContactRepositoryImpl @Inject constructor(
                 return@flow
             }
 
-            // Check if the target has also added the current user (mutual verification)
             val isMutualFromMySide = myContactDoc.getBoolean("isMutual") ?: false
             val isBlocked = myContactDoc.getBoolean("isBlocked") ?: false
 
@@ -273,6 +433,7 @@ class ContactRepositoryImpl @Inject constructor(
                 return@flow
             }
 
+            // Check if the target has also added the current user (mutual verification)
             val reverseDoc = contactsCollection(targetUid).document(myUid).get().await()
             val isMutualFromOtherSide = reverseDoc.exists() &&
                 (reverseDoc.getBoolean("isMutual") ?: false)

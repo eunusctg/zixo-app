@@ -33,13 +33,35 @@ interface ContactRepository {
     /**
      * Adds a contact by their UID after a successful search.
      *
-     * This records a one-directional "add" in Firestore. The contact
-     * is only considered "mutual" when the other user also adds back.
+     * This performs an atomic two-way Firestore Batch write:
+     * - Writes a verified link to the current user's /contacts/ subcollection
+     * - Writes a reverse verified link to the target user's /contacts/ subcollection
+     *
+     * If either write fails, the entire transaction rolls back to prevent
+     * single-sided sync states. The contact is only considered "mutual"
+     * when the other user also adds back.
      *
      * @param targetUid The UID of the user to add as a contact.
      * @return An [AddContactState] flow tracking the operation progress.
      */
     fun addContact(targetUid: String): Flow<AddContactState>
+
+    /**
+     * Adds a contact by their 8-digit Zixo Number.
+     *
+     * This is the primary user-facing entry point for adding contacts.
+     * It combines the search (by Zixo Number) and the atomic mutual
+     * write into a single operation, eliminating the need for the caller
+     * to first search then add separately.
+     *
+     * If the Zixo Number format is invalid, not found, or the user tries
+     * to add their own number, an appropriate error is returned.
+     *
+     * @param currentUserId The currently authenticated user's UID.
+     * @param zixoNumber The exact 8-digit Zixo Number of the target user.
+     * @return A [Result] containing the [ContactModel] on success, or an exception on failure.
+     */
+    suspend fun addContactByZixoNumber(currentUserId: String, zixoNumber: String): Result<ContactModel>
 
     /**
      * Removes a contact from the current user's contact list.

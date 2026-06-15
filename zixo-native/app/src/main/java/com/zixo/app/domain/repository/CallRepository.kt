@@ -108,4 +108,40 @@ interface CallRepository {
      * @return A flow emitting the list of past [CallLogEntry] entries.
      */
     fun getCallHistory(): Flow<List<CallLogEntry>>
+
+    /**
+     * Observes the real-time state of a call session from Firebase Realtime DB.
+     *
+     * This provides a continuous [ValueEventListener] on the call document
+     * at `/calls/{callId}/`, streaming every state change as a Map.
+     * Used by the UI to react to remote call state transitions.
+     *
+     * All listener operations are safely decoupled from the UI thread.
+     *
+     * @param callId The unique call identifier.
+     * @return A flow emitting the call session data as a Map.
+     */
+    fun observeCallSession(callId: String): Flow<Map<String, Any>>
+
+    /**
+     * Observes ICE candidates for a specific call from Firebase Realtime DB.
+     *
+     * Listens to `/calls/{callId}/iceCandidates/` with a [ChildEventListener],
+     * streaming each newly added ICE candidate as it arrives from the remote peer.
+     *
+     * @param callId The unique call identifier.
+     * @return A flow emitting individual [org.webrtc.IceCandidate] instances.
+     */
+    fun observeIceCandidates(callId: String): Flow<org.webrtc.IceCandidate>
+
+    /**
+     * Emits a call state update to Firebase Realtime DB.
+     *
+     * Writes the state string to `/calls/{callId}/callState`.
+     * This operation runs on [Dispatchers.IO] and never blocks the Main Thread.
+     *
+     * @param callId The unique call identifier.
+     * @param state The call state string (e.g., "ringing", "connected", "ended").
+     */
+    suspend fun emitCallState(callId: String, state: String)
 }

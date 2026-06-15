@@ -1,12 +1,16 @@
 package com.zixo.app.ui.settings
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.util.Log
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.exceptions.CreateCredentialException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import com.zixo.app.domain.model.AppSettingsState
 import com.zixo.app.domain.model.ConversationStorageEntry
 import com.zixo.app.domain.model.MediaType
@@ -144,6 +148,27 @@ class SettingsViewModel @Inject constructor(
 
     private val _showQrPopup = MutableStateFlow(false)
     val showQrPopup: StateFlow<Boolean> = _showQrPopup.asStateFlow()
+
+    // ── Real-time QR Code Matrix State ──────────────────────────────────────
+
+    /**
+     * Reactive QR bitmap state generated from the user's live Zixo Number.
+     * The QR encodes the secure URI `zixo://profile/{zixoNumber}` and is
+     * rendered in high-contrast Neon Emerald Green (#00E676) on a transparent
+     * background for maximum visual fidelity inside the frosted glass modal.
+     *
+     * The bitmap is regenerated instantly whenever the popup is toggled on
+     * or when the Zixo Number changes, ensuring it always reflects the
+     * current profile state.
+     */
+    private val _qrBitmapState = MutableStateFlow<Bitmap?>(null)
+    val qrBitmapState: StateFlow<Bitmap?> = _qrBitmapState.asStateFlow()
+
+    /**
+     * The current invite link URI derived from the user's Zixo Number.
+     */
+    private val _inviteLink = MutableStateFlow("")
+    val inviteLink: StateFlow<String> = _inviteLink.asStateFlow()
 
     // ── Logout state ────────────────────────────────────────────────────────
 
@@ -437,6 +462,69 @@ class SettingsViewModel @Inject constructor(
 
     fun toggleQrPopup() {
         _showQrPopup.update { !it }
+        // Generate QR on popup open with live Zixo Number
+        if (!_showQrPopup.value) {
+            // Popup closing — no action needed
+        } else {
+            // Popup opening — regenerate QR from live profile
+            val zixoNumber = userProfile.value.zixoNumber
+            generateRealtimeQrMatrix(zixoNumber)
+        }
+    }
+
+    /**
+     * Generates a real-time QR code bitmap from the user's Zixo Number.
+     *
+     * The QR encodes the secure URI `zixo://profile/{zixoNumber}` and is
+     * rendered using the ZXing library with high-contrast Neon Emerald Green
+     * (#00E676) on a transparent background.
+     *
+     * This method is thread-safe and runs on [Dispatchers.IO].
+     * If the Zixo Number is empty or an error occurs, the bitmap state
+     * is set to null gracefully without crashing.
+     *
+     * @param zixoNumber The user's 8-digit Zixo Number.
+     */
+    fun generateRealtimeQrMatrix(zixoNumber: String) {
+        if (zixoNumber.isEmpty()) {
+            _qrBitmapState.value = null
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val qrCodeContentUri = "zixo://profile/$zixoNumber"
+                _inviteLink.value = qrCodeContentUri
+
+                val writer = QRCodeWriter()
+                val bitMatrix = writer.encode(
+                    qrCodeContentUri,
+                    BarcodeFormat.QR_CODE,
+                    512,
+                    512
+                )
+                val width = bitMatrix.width
+                val height = bitMatrix.height
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+
+                // Match app's brand accent color: High-contrast Neon Emerald Green (#00E676)
+                val brandGreen = Color.parseColor("#00E676")
+                for (x in 0 until width) {
+                    for (y in 0 until height) {
+                        bitmap.setPixel(
+                            x, y,
+                            if (bitMatrix.get(x, y)) brandGreen else Color.TRANSPARENT
+                        )
+                    }
+                }
+
+                _qrBitmapState.value = bitmap
+                Log.i(TAG, "QR matrix generated for Zixo Number: %s".format(zixoNumber))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to generate QR matrix", e)
+                _qrBitmapState.value = null
+            }
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════

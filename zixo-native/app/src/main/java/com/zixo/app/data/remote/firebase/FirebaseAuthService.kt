@@ -4,7 +4,6 @@ import com.google.firebase.auth.AuthResult
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.firebase.auth.UserProfileChangeRequest
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -17,11 +16,19 @@ import javax.inject.Singleton
 /**
  * Firebase Authentication Service — Pure FirebaseAuth + Google Sign-In via CredentialManager.
  *
- * NO LiveKit references. All authentication flows use FirebaseAuth directly.
- * Google Sign-In is handled via CredentialManager on the UI layer, which provides
- * the ID token that is then verified here.
+ * ## Privacy Architecture — No Email-Based Auth:
  *
- * All operations run on Dispatchers.IO via the calling repository.
+ * Email-based lookups are explicitly forbidden by the Zixo privacy architecture.
+ * The following methods have been REMOVED:
+ * - `signInWithEmail()` — Users sign in via Google Sign-In only
+ * - `signUpWithEmail()` — Registration uses Google Sign-In + Cloudflare verification
+ * - `sendPasswordResetEmail()` — No email-based recovery; passkeys are used instead
+ *
+ * All authentication flows use FirebaseAuth directly with Google credentials
+ * obtained via Android CredentialManager. The email field exists in FirebaseAuth
+ * internally but is NEVER exposed as a lookup or search mechanism.
+ *
+ * NO LiveKit references. All operations run on Dispatchers.IO via the calling repository.
  */
 @Singleton
 class FirebaseAuthService @Inject constructor(
@@ -32,6 +39,8 @@ class FirebaseAuthService @Inject constructor(
      * Sign in with a Google ID token obtained via CredentialManager.
      * Converts the ID token to a Firebase credential and authenticates.
      *
+     * This is the ONLY supported sign-in method. No email/password, no anonymous auth.
+     *
      * @param idToken The Google Sign-In ID token.
      * @return The Firebase [AuthResult].
      */
@@ -41,31 +50,6 @@ class FirebaseAuthService @Inject constructor(
         Timber.d("Google Sign-In successful for: %s", result.user?.uid)
         emit(result)
     }
-
-    /**
-     * Sign in with email and password.
-     * Emits the [AuthResult] on success or throws on failure.
-     */
-    fun signInWithEmail(email: String, password: String): Flow<AuthResult> = flow {
-        val result = firebaseAuth.signInWithEmailAndPassword(email, password).await()
-        emit(result)
-    }
-
-    /**
-     * Sign up with email, password, and display name.
-     * Creates the user, updates the display name profile, and emits the [AuthResult].
-     */
-    fun signUpWithEmail(email: String, password: String, displayName: String): Flow<AuthResult> =
-        flow {
-            val result = firebaseAuth.createUserWithEmailAndPassword(email, password).await()
-
-            val profileUpdate = UserProfileChangeRequest.Builder()
-                .setDisplayName(displayName)
-                .build()
-            result.user?.updateProfile(profileUpdate)?.await()
-
-            emit(result)
-        }
 
     /**
      * Sign out the current user.
@@ -102,14 +86,5 @@ class FirebaseAuthService @Inject constructor(
         firebaseAuth.addAuthStateListener(listener)
         trySend(firebaseAuth.currentUser)
         awaitClose { firebaseAuth.removeAuthStateListener(listener) }
-    }
-
-    /**
-     * Send a password-reset email to the given address.
-     * Emits [Unit] on success.
-     */
-    fun sendPasswordResetEmail(email: String): Flow<Unit> = flow {
-        firebaseAuth.sendPasswordResetEmail(email).await()
-        emit(Unit)
     }
 }
