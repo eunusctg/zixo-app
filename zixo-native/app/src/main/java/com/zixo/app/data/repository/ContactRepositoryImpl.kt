@@ -28,7 +28,7 @@ import javax.inject.Singleton
  * [Dispatchers.IO] and are wrapped in try/catch to prevent crashes.
  *
  * Communication is ONLY allowed between verified mutual contacts. The
- * [checkCommunicationGate] method is the primary boundary that enforces
+ * [verifyMutualContact] method is the primary boundary that enforces
  * this rule across all messaging, calling, and status features.
  */
 @Singleton
@@ -97,7 +97,7 @@ class ContactRepositoryImpl @Inject constructor(
 
     // ── Add Contact ───────────────────────────────────────────────────────────
 
-    override fun addContact(contactUid: String): Flow<AddContactState> = flow {
+    override fun addContact(targetUid: String): Flow<AddContactState> = flow {
         val myUid = currentUid
         if (myUid == null) {
             emit(AddContactState.Error("Not authenticated"))
@@ -107,24 +107,24 @@ class ContactRepositoryImpl @Inject constructor(
         emit(AddContactState.Adding)
 
         try {
-            val myContactDoc = contactsCollection(myUid).document(contactUid).get().await()
+            val myContactDoc = contactsCollection(myUid).document(targetUid).get().await()
             if (myContactDoc.exists()) {
                 val existing = mapToContactModel(myContactDoc, myUid)
                 emit(AddContactState.AlreadyAdded(existing))
                 return@flow
             }
 
-            val contactProfile = usersCollection().document(contactUid).get().await()
+            val contactProfile = usersCollection().document(targetUid).get().await()
             val myProfile = usersCollection().document(myUid).get().await()
 
-            val reverseDoc = contactsCollection(contactUid).document(myUid).get().await()
+            val reverseDoc = contactsCollection(targetUid).document(myUid).get().await()
             val isMutual = reverseDoc.exists()
 
             val now = System.currentTimeMillis()
 
             val myContactData = hashMapOf(
                 "userId" to myUid,
-                "contactUserId" to contactUid,
+                "contactUserId" to targetUid,
                 "contactDisplayName" to (contactProfile.getString("displayName") ?: ""),
                 "contactUsername" to (contactProfile.getString("username") ?: ""),
                 "contactZixoNumber" to (contactProfile.getString("zixoNumber") ?: ""),
@@ -139,7 +139,7 @@ class ContactRepositoryImpl @Inject constructor(
             )
 
             val reverseContactData = hashMapOf(
-                "userId" to contactUid,
+                "userId" to targetUid,
                 "contactUserId" to myUid,
                 "contactDisplayName" to (myProfile.getString("displayName") ?: ""),
                 "contactUsername" to (myProfile.getString("username") ?: ""),
@@ -155,13 +155,13 @@ class ContactRepositoryImpl @Inject constructor(
             )
 
             val batch = firestore.batch()
-            batch.set(contactsCollection(myUid).document(contactUid), myContactData)
-            batch.set(contactsCollection(contactUid).document(myUid), reverseContactData)
+            batch.set(contactsCollection(myUid).document(targetUid), myContactData)
+            batch.set(contactsCollection(targetUid).document(myUid), reverseContactData)
 
             if (isMutual) {
-                batch.update(contactsCollection(contactUid).document(myUid), "isMutual", true)
+                batch.update(contactsCollection(contactUid = myUid).document(myUid), "isMutual", true)
                 batch.update(
-                    contactsCollection(contactUid).document(myUid),
+                    contactsCollection(contactUid = myUid).document(myUid),
                     "mutualVerifiedAt", now
                 )
             }
@@ -169,9 +169,9 @@ class ContactRepositoryImpl @Inject constructor(
             batch.commit().await()
 
             val contact = ContactModel(
-                id = generateCompositeKey(myUid, contactUid),
+                id = generateCompositeKey(myUid, targetUid),
                 userId = myUid,
-                contactUserId = contactUid,
+                contactUserId = targetUid,
                 contactDisplayName = contactProfile.getString("displayName") ?: "",
                 contactUsername = contactProfile.getString("username") ?: "",
                 contactZixoNumber = contactProfile.getString("zixoNumber") ?: "",
@@ -184,14 +184,37 @@ class ContactRepositoryImpl @Inject constructor(
 
             emit(AddContactState.Success(contact))
         } catch (e: Exception) {
-            Timber.e(e, "Failed to add contact: %s", contactUid)
+            Timber.e(e, "Failed to add contact: %s", targetUid)
             emit(AddContactState.Error(e.localizedMessage ?: "Failed to add contact"))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Remove Contact ────────────────────────────────────────────────────────
+
+    override fun removeContact(contactUid: String): Flow<Result<Unit>> = flow {
+        try {
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            val batch = firestore.batch()
+            batch.delete(contactsCollection(myUid).document(contactUid))
+            batch.update(
+                contactsCollection(contactUid).document(myUid),
+                "isMutual", false,
+                "mutualVerifiedAt", null
+            )
+            batch.commit().await()
+
+            Timber.d("Contact removed: %s", contactUid)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to remove contact: %s", contactUid)
+            emit(Result.failure(e))
         }
     }.flowOn(Dispatchers.IO)
 
     // ── Observe Contacts ──────────────────────────────────────────────────────
 
-    override fun observeContacts(): Flow<List<ContactModel>> = callbackFlow {
+    override fun getContacts(): Flow<List<ContactModel>> = callbackFlow {
         val myUid = currentUid
         if (myUid == null) {
             trySend(emptyList())
@@ -222,126 +245,83 @@ class ContactRepositoryImpl @Inject constructor(
         awaitClose { subscription.remove() }
     }.flowOn(Dispatchers.IO)
 
-    override fun observeContact(contactUid: String): Flow<ContactModel?> = callbackFlow {
+    override fun observeContactsRealtime(): Flow<List<ContactModel>> = getContacts()
+
+    // ── Communication Gate (Zero-Trust) ───────────────────────────────────────
+
+    override fun verifyMutualContact(targetUid: String): Flow<CommunicationGate> = flow {
         val myUid = currentUid
         if (myUid == null) {
-            trySend(null)
-            close()
-            return@callbackFlow
+            emit(CommunicationGate.Error("Not authenticated"))
+            return@flow
         }
 
-        val subscription = contactsCollection(myUid).document(contactUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Timber.e(error, "Error observing contact: %s", contactUid)
-                    trySend(null)
-                    return@addSnapshotListener
-                }
-
-                trySend(
-                    if (snapshot != null && snapshot.exists()) {
-                        try {
-                            mapToContactModel(snapshot, myUid)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to map contact document: %s", contactUid)
-                            null
-                        }
-                    } else {
-                        null
-                    }
-                )
-            }
-
-        awaitClose { subscription.remove() }
-    }.flowOn(Dispatchers.IO)
-
-    // ── Communication Gate ────────────────────────────────────────────────────
-
-    override suspend fun checkCommunicationGate(targetUid: String): CommunicationGate =
-        withContext(Dispatchers.IO) {
-            val myUid = currentUid
-            if (myUid == null) {
-                return@withContext CommunicationGate.Error("Not authenticated")
-            }
-
-            try {
-                val myContactDoc = contactsCollection(myUid).document(targetUid).get().await()
-                if (!myContactDoc.exists()) {
-                    return@withContext CommunicationGate.Blocked(
-                        "Not a contact — communication denied"
-                    )
-                }
-
-                val isMutualFromMySide = myContactDoc.getBoolean("isMutual") ?: false
-
-                val reverseDoc = contactsCollection(targetUid).document(myUid).get().await()
-                val isMutualFromOtherSide = reverseDoc.exists() &&
-                    (reverseDoc.getBoolean("isMutual") ?: false)
-
-                if (isMutualFromMySide && isMutualFromOtherSide) {
-                    val contact = mapToContactModel(myContactDoc, myUid)
-                    return@withContext CommunicationGate.Allowed(contact)
-                }
-
-                return@withContext CommunicationGate.Blocked(
-                    "Mutual contact verification failed — communication denied"
-                )
-            } catch (e: Exception) {
-                Timber.e(e, "Communication gate check failed for: %s", targetUid)
-                return@withContext CommunicationGate.Error(
-                    e.localizedMessage ?: "Gate check failed"
-                )
-            }
-        }
-
-    // ── Remove Contact ────────────────────────────────────────────────────────
-
-    override suspend fun removeContact(contactUid: String) {
         try {
-            val myUid = currentUid ?: return
+            // Check if the target is in the current user's contacts
+            val myContactDoc = contactsCollection(myUid).document(targetUid).get().await()
+            if (!myContactDoc.exists()) {
+                emit(CommunicationGate.Blocked("Not a contact — communication denied"))
+                return@flow
+            }
 
-            val batch = firestore.batch()
-            batch.delete(contactsCollection(myUid).document(contactUid))
-            batch.update(
-                contactsCollection(contactUid).document(myUid),
-                "isMutual", false,
-                "mutualVerifiedAt", null
-            )
-            batch.commit().await()
+            // Check if the target has also added the current user (mutual verification)
+            val isMutualFromMySide = myContactDoc.getBoolean("isMutual") ?: false
+            val isBlocked = myContactDoc.getBoolean("isBlocked") ?: false
 
-            Timber.d("Contact removed: %s", contactUid)
+            if (isBlocked) {
+                emit(CommunicationGate.Blocked("Contact is blocked — communication denied"))
+                return@flow
+            }
+
+            val reverseDoc = contactsCollection(targetUid).document(myUid).get().await()
+            val isMutualFromOtherSide = reverseDoc.exists() &&
+                (reverseDoc.getBoolean("isMutual") ?: false)
+
+            if (isMutualFromMySide && isMutualFromOtherSide) {
+                val contact = mapToContactModel(myContactDoc, myUid)
+                emit(CommunicationGate.Allowed(contact))
+            } else {
+                emit(CommunicationGate.Blocked(
+                    "Mutual contact verification failed — communication denied"
+                ))
+            }
         } catch (e: Exception) {
-            Timber.e(e, "Failed to remove contact: %s", contactUid)
+            Timber.e(e, "Communication gate check failed for: %s", targetUid)
+            emit(CommunicationGate.Error(e.localizedMessage ?: "Gate check failed"))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
     // ── Block / Unblock ───────────────────────────────────────────────────────
 
-    override suspend fun blockContact(contactUid: String) {
+    override fun blockContact(contactUid: String): Flow<Result<Unit>> = flow {
         try {
-            val myUid = currentUid ?: return
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
             contactsCollection(myUid).document(contactUid)
                 .update("isBlocked", true)
                 .await()
             Timber.d("Contact blocked: %s", contactUid)
+            emit(Result.success(Unit))
         } catch (e: Exception) {
             Timber.e(e, "Failed to block contact: %s", contactUid)
+            emit(Result.failure(e))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
-    override suspend fun unblockContact(contactUid: String) {
+    override fun unblockContact(contactUid: String): Flow<Result<Unit>> = flow {
         try {
-            val myUid = currentUid ?: return
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
             contactsCollection(myUid).document(contactUid)
                 .update("isBlocked", false)
                 .await()
             Timber.d("Contact unblocked: %s", contactUid)
+            emit(Result.success(Unit))
         } catch (e: Exception) {
             Timber.e(e, "Failed to unblock contact: %s", contactUid)
+            emit(Result.failure(e))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
-    override fun observeBlockedContacts(): Flow<List<ContactModel>> = callbackFlow {
+    override fun getBlockedContacts(): Flow<List<ContactModel>> = callbackFlow {
         val myUid = currentUid
         if (myUid == null) {
             trySend(emptyList())
@@ -368,56 +348,6 @@ class ContactRepositoryImpl @Inject constructor(
                 } ?: emptyList()
 
                 trySend(blocked)
-            }
-
-        awaitClose { subscription.remove() }
-    }.flowOn(Dispatchers.IO)
-
-    // ── Pin / Mute ────────────────────────────────────────────────────────────
-
-    override suspend fun setContactPinned(contactUid: String, isPinned: Boolean) {
-        try {
-            val myUid = currentUid ?: return
-            contactsCollection(myUid).document(contactUid)
-                .update("isPinned", isPinned)
-                .await()
-            Timber.d("Contact pin state updated: %s → %s", contactUid, isPinned)
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set contact pinned: %s", contactUid)
-        }
-    }
-
-    override suspend fun setContactMuted(contactUid: String, isMuted: Boolean) {
-        try {
-            val myUid = currentUid ?: return
-            contactsCollection(myUid).document(contactUid)
-                .update("isMuted", isMuted)
-                .await()
-            Timber.d("Contact mute state updated: %s → %s", contactUid, isMuted)
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set contact muted: %s", contactUid)
-        }
-    }
-
-    // ── Mutual Contact Count ──────────────────────────────────────────────────
-
-    override fun getMutualContactCount(): Flow<Int> = callbackFlow {
-        val myUid = currentUid
-        if (myUid == null) {
-            trySend(0)
-            close()
-            return@callbackFlow
-        }
-
-        val subscription = contactsCollection(myUid)
-            .whereEqualTo("isMutual", true)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Timber.e(error, "Error counting mutual contacts")
-                    trySend(0)
-                    return@addSnapshotListener
-                }
-                trySend(snapshot?.size() ?: 0)
             }
 
         awaitClose { subscription.remove() }

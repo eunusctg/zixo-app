@@ -11,6 +11,21 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
+/**
+ * Hilt module providing Firebase SDK singletons.
+ *
+ * Provides:
+ * - [FirebaseAuth] — User authentication
+ * - [FirebaseFirestore] — Document database with offline persistence
+ * - [FirebaseDatabase] — Realtime Database for call signaling
+ * - [FirebaseStorage] — Media file storage
+ *
+ * Firebase is auto-initialized by the `google-services` Gradle plugin
+ * via `google-services.json`. No manual [FirebaseApp.initializeApp] calls
+ * are needed.
+ *
+ * No LiveKit-related providers exist in this module.
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object FirebaseModule {

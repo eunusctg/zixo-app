@@ -1,0 +1,736 @@
+     1→package com.zixo.app.ui.settings
+     2→
+     3→import android.content.ClipData
+     4→import android.content.ClipboardManager
+     5→import android.content.Context
+     6→import android.graphics.Bitmap
+     7→import android.graphics.Color as AndroidColor
+     8→import androidx.activity.compose.rememberLauncherForActivityResult
+     9→import androidx.activity.result.PickVisualMediaRequest
+    10→import androidx.activity.result.contract.ActivityResultContracts
+    11→import androidx.compose.foundation.background
+    12→import androidx.compose.foundation.border
+    13→import androidx.compose.foundation.clickable
+    14→import androidx.compose.foundation.interaction.MutableInteractionSource
+    15→import androidx.compose.foundation.layout.Arrangement
+    16→import androidx.compose.foundation.layout.Box
+    17→import androidx.compose.foundation.layout.Column
+    18→import androidx.compose.foundation.layout.Row
+    19→import androidx.compose.foundation.layout.Spacer
+    20→import androidx.compose.foundation.layout.fillMaxSize
+    21→import androidx.compose.foundation.layout.fillMaxWidth
+    22→import androidx.compose.foundation.layout.height
+    23→import androidx.compose.foundation.layout.padding
+    24→import androidx.compose.foundation.layout.size
+    25→import androidx.compose.foundation.layout.width
+    26→import androidx.compose.foundation.rememberScrollState
+    27→import androidx.compose.foundation.shape.CircleShape
+    28→import androidx.compose.foundation.shape.RoundedCornerShape
+    29→import androidx.compose.foundation.verticalScroll
+    30→import androidx.compose.material.icons.Icons
+    31→import androidx.compose.material.icons.filled.CameraAlt
+    32→import androidx.compose.material.icons.filled.ContentCopy
+    33→import androidx.compose.material.icons.filled.QrCode2
+    34→import androidx.compose.material3.Button
+    35→import androidx.compose.material3.ButtonDefaults
+    36→import androidx.compose.material3.CircularProgressIndicator
+    37→import androidx.compose.material3.ExperimentalMaterial3Api
+    38→import androidx.compose.material3.Icon
+    39→import androidx.compose.material3.MaterialTheme
+    40→import androidx.compose.material3.Scaffold
+    41→import androidx.compose.material3.Snackbar
+    42→import androidx.compose.material3.SnackbarDuration
+    43→import androidx.compose.material3.SnackbarHost
+    44→import androidx.compose.material3.SnackbarHostState
+    45→import androidx.compose.material3.Text
+    46→import androidx.compose.runtime.Composable
+    47→import androidx.compose.runtime.LaunchedEffect
+    48→import androidx.compose.runtime.getValue
+    49→import androidx.compose.runtime.remember
+    50→import androidx.compose.runtime.rememberCoroutineScope
+    51→import androidx.compose.ui.Alignment
+    52→import androidx.compose.ui.Modifier
+    53→import androidx.compose.ui.draw.clip
+    54→import androidx.compose.ui.graphics.Color
+    55→import androidx.compose.ui.layout.ContentScale
+    56→import androidx.compose.ui.platform.LocalContext
+    57→import androidx.compose.ui.platform.LocalDensity
+    58→import androidx.compose.ui.text.font.FontFamily
+    59→import androidx.compose.ui.text.font.FontWeight
+    60→import androidx.compose.ui.text.style.TextAlign
+    61→import androidx.compose.ui.text.style.TextOverflow
+    62→import androidx.compose.ui.unit.dp
+    63→import androidx.compose.ui.unit.sp
+    64→import androidx.hilt.navigation.compose.hiltViewModel
+    65→import androidx.lifecycle.compose.collectAsStateWithLifecycle
+    66→import androidx.navigation.NavController
+    67→import coil.compose.AsyncImage
+    68→import coil.request.ImageRequest
+    69→import com.google.zxing.BarcodeFormat
+    70→import com.google.zxing.qrcode.QRCodeWriter
+    71→import com.zixo.app.ui.components.GlassOutlinedTextField
+    72→import com.zixo.app.ui.components.ZixoGlassBackground
+    73→import com.zixo.app.ui.components.ZixoTopBar
+    74→import com.zixo.app.ui.components.diagonalMeshGradient
+    75→import com.zixo.app.ui.components.liquidGlassCard
+    76→import com.zixo.app.ui.screens.editprofile.EditProfileViewModel
+    77→import com.zixo.app.ui.theme.BackgroundGradientEnd
+    78→import com.zixo.app.ui.theme.BackgroundGradientStart
+    79→import com.zixo.app.ui.theme.NeonMint
+    80→import com.zixo.app.ui.theme.TextPrimary
+    81→import com.zixo.app.ui.theme.TextSecondary
+    82→import com.zixo.app.ui.theme.TextTertiary
+    83→import kotlinx.coroutines.launch
+    84→
+    85→// ════════════════════════════════════════════════════════════════
+    86→// Color constants for the Edit Profile glass design
+    87→// ════════════════════════════════════════════════════════════════
+    88→
+    89→private val SnackbarBackground = Color(0xFF1E3239)
+    90→private val DisabledFieldBackground = Color(0x0D1A2A32)
+    91→private val DestructiveRed = Color(0xFFFF5252)
+    92→
+    93→// ════════════════════════════════════════════════════════════════
+    94→// Edit Profile Screen — iOS Liquid Glass Aesthetic
+    95→// ════════════════════════════════════════════════════════════════
+    96→
+    97→@OptIn(ExperimentalMaterial3Api::class)
+    98→@Composable
+    99→fun EditProfileScreen(
+   100→    navController: NavController,
+   101→    viewModel: EditProfileViewModel = hiltViewModel()
+   102→) {
+   103→    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+   104→    val snackbarHostState = remember { SnackbarHostState() }
+   105→    val scope = rememberCoroutineScope()
+   106→    val context = LocalContext.current
+   107→    val scrollState = rememberScrollState()
+   108→
+   109→    // ── Photo picker launcher ──────────────────────────────────────
+   110→    val photoPicker = rememberLauncherForActivityResult(
+   111→        contract = ActivityResultContracts.PickVisualMedia()
+   112→    ) { uri: android.net.Uri? ->
+   113→        viewModel.onImageSelected(uri)
+   114→    }
+   115→
+   116→    // ── Snackbar for save success ─────────────────────────────────
+   117→    LaunchedEffect(uiState.saveSuccess) {
+   118→        if (uiState.saveSuccess) {
+   119→            scope.launch {
+   120→                snackbarHostState.showSnackbar(
+   121→                    message = "Profile updated successfully!",
+   122→                    duration = SnackbarDuration.Short
+   123→                )
+   124→            }
+   125→            viewModel.clearSaveSuccess()
+   126→        }
+   127→    }
+   128→
+   129→    // ── Snackbar for save error ────────────────────────────────────
+   130→    LaunchedEffect(uiState.saveError) {
+   131→        if (uiState.saveError != null) {
+   132→            scope.launch {
+   133→                snackbarHostState.showSnackbar(
+   134→                    message = uiState.saveError ?: "Failed to update profile. Please try again.",
+   135→                    duration = SnackbarDuration.Short
+   136→                )
+   137→            }
+   138→            viewModel.clearSaveError()
+   139→        }
+   140→    }
+   141→
+   142→    Scaffold(
+   143→        topBar = {
+   144→            ZixoTopBar(
+   145→                title = "Edit Profile",
+   146→                showBackButton = true,
+   147→                onBackClick = { navController.popBackStack() },
+   148→            )
+   149→        },
+   150→        snackbarHost = {
+   151→            SnackbarHost(hostState = snackbarHostState) { data ->
+   152→                Snackbar(
+   153→                    snackbarData = data,
+   154→                    containerColor = SnackbarBackground,
+   155→                    contentColor = TextPrimary,
+   156→                    shape = RoundedCornerShape(12.dp),
+   157→                )
+   158→            }
+   159→        },
+   160→        containerColor = Color.Transparent,
+   161→    ) { innerPadding ->
+   162→        Box(
+   163→            modifier = Modifier
+   164→                .fillMaxSize()
+   165→        ) {
+   166→            // Animated glass background
+   167→            ZixoGlassBackground()
+   168→
+   169→            Column(
+   170→                modifier = Modifier
+   171→                    .fillMaxSize()
+   172→                    .verticalScroll(scrollState)
+   173→                    .padding(innerPadding)
+   174→                    .padding(horizontal = 20.dp),
+   175→                horizontalAlignment = Alignment.CenterHorizontally,
+   176→            ) {
+   177→                Spacer(modifier = Modifier.height(16.dp))
+   178→
+   179→                // ──────────────────────────────────────────────────
+   180→                // 1. Profile Photo Section (diagonalMeshGradient)
+   181→                // ──────────────────────────────────────────────────
+   182→                ProfilePhotoGlassSection(
+   183→                    photoUrl = if (uiState.selectedImageUri != null) {
+   184→                        uiState.selectedImageUri.toString()
+   185→                    } else {
+   186→                        uiState.photoUrl
+   187→                    },
+   188→                    selectedImageUri = uiState.selectedImageUri,
+   189→                    displayName = uiState.displayName,
+   190→                    onPickImage = {
+   191→                        photoPicker.launch(
+   192→                            PickVisualMediaRequest(
+   193→                                ActivityResultContracts.PickVisualMedia.ImageOnly
+   194→                            )
+   195→                        )
+   196→                    }
+   197→                )
+   198→
+   199→                Spacer(modifier = Modifier.height(24.dp))
+   200→
+   201→                // ──────────────────────────────────────────────────
+   202→                // 2. Zixo Number Card (read-only, liquidGlassCard)
+   203→                // ──────────────────────────────────────────────────
+   204→                ZixoNumberGlassCard(
+   205→                    zixoNumber = uiState.zixoNumber,
+   206→                    onCopyToClipboard = {
+   207→                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+   208→                        val clip = ClipData.newPlainText("Zixo Number", uiState.zixoNumber)
+   209→                        clipboard.setPrimaryClip(clip)
+   210→                        scope.launch {
+   211→                            snackbarHostState.showSnackbar(
+   212→                                message = "Zixo number copied!",
+   213→                                duration = SnackbarDuration.Short
+   214→                            )
+   215→                        }
+   216→                    }
+   217→                )
+   218→
+   219→                Spacer(modifier = Modifier.height(20.dp))
+   220→
+   221→                // ──────────────────────────────────────────────────
+   222→                // 3. Form Fields Card (liquidGlassCard)
+   223→                // ──────────────────────────────────────────────────
+   224→                FormFieldsGlassCard(
+   225→                    displayName = uiState.displayName,
+   226→                    onDisplayNameChanged = viewModel::onDisplayNameChange,
+   227→                    username = uiState.username,
+   228→                    phoneNumber = uiState.phoneNumber,
+   229→                    bio = uiState.bio,
+   230→                    onBioChanged = viewModel::onBioChange,
+   231→                )
+   232→
+   233→                Spacer(modifier = Modifier.height(24.dp))
+   234→
+   235→                // ──────────────────────────────────────────────────
+   236→                // 4. Save Changes Button
+   237→                // ──────────────────────────────────────────────────
+   238→                SaveChangesGlassButton(
+   239→                    enabled = uiState.hasChanges && !uiState.isSaving,
+   240→                    isSaving = uiState.isSaving,
+   241→                    onClick = viewModel::onSaveChanges
+   242→                )
+   243→
+   244→                Spacer(modifier = Modifier.height(32.dp))
+   245→            }
+   246→        }
+   247→    }
+   248→}
+   249→
+   250→// ════════════════════════════════════════════════════════════════
+   251→// Profile Photo Glass Section — diagonalMeshGradient card
+   252→// ════════════════════════════════════════════════════════════════
+   253→
+   254→@Composable
+   255→private fun ProfilePhotoGlassSection(
+   256→    photoUrl: String?,
+   257→    selectedImageUri: android.net.Uri?,
+   258→    displayName: String,
+   259→    onPickImage: () -> Unit
+   260→) {
+   261→    Column(
+   262→        modifier = Modifier
+   263→            .fillMaxWidth()
+   264→            .diagonalMeshGradient()
+   265→            .clip(RoundedCornerShape(20.dp))
+   266→            .border(
+   267→                width = 1.dp,
+   268→                color = Color(0x33FFFFFF),
+   269→                shape = RoundedCornerShape(20.dp)
+   270→            )
+   271→            .clickable(
+   272→                interactionSource = remember { MutableInteractionSource() },
+   273→                indication = null,
+   274→                onClick = onPickImage
+   275→            )
+   276→            .padding(vertical = 28.dp),
+   277→        horizontalAlignment = Alignment.CenterHorizontally
+   278→    ) {
+   279→        // 96dp circular avatar with camera icon overlay
+   280→        Box(
+   281→            modifier = Modifier.size(96.dp),
+   282→            contentAlignment = Alignment.BottomEnd
+   283→        ) {
+   284→            // Avatar circle
+   285→            Box(
+   286→                modifier = Modifier
+   287→                    .size(96.dp)
+   288→                    .clip(CircleShape)
+   289→                    .background(Color(0xFF1A2A32)),
+   290→                contentAlignment = Alignment.Center
+   291→            ) {
+   292→                if (selectedImageUri != null) {
+   293→                    AsyncImage(
+   294→                        model = ImageRequest.Builder(LocalContext.current)
+   295→                            .data(selectedImageUri)
+   296→                            .crossfade(true)
+   297→                            .build(),
+   298→                        contentDescription = "Profile photo",
+   299→                        modifier = Modifier
+   300→                            .size(96.dp)
+   301→                            .clip(CircleShape),
+   302→                        contentScale = ContentScale.Crop,
+   303→                    )
+   304→                } else if (!photoUrl.isNullOrBlank()) {
+   305→                    AsyncImage(
+   306→                        model = ImageRequest.Builder(LocalContext.current)
+   307→                            .data(photoUrl)
+   308→                            .crossfade(true)
+   309→                            .build(),
+   310→                        contentDescription = "Profile photo",
+   311→                        modifier = Modifier
+   312→                            .size(96.dp)
+   313→                            .clip(CircleShape),
+   314→                        contentScale = ContentScale.Crop,
+   315→                    )
+   316→                } else {
+   317→                    Text(
+   318→                        text = displayName.firstOrNull()?.uppercase() ?: "?",
+   319→                        color = TextPrimary,
+   320→                        fontSize = 38.sp,
+   321→                        fontWeight = FontWeight.SemiBold,
+   322→                    )
+   323→                }
+   324→            }
+   325→
+   326→            // Camera icon overlay
+   327→            Box(
+   328→                modifier = Modifier
+   329→                    .size(30.dp)
+   330→                    .clip(CircleShape)
+   331→                    .background(NeonMint)
+   332→                    .border(
+   333→                        width = 2.dp,
+   334→                        color = BackgroundGradientEnd,
+   335→                        shape = CircleShape
+   336→                    ),
+   337→                contentAlignment = Alignment.Center
+   338→            ) {
+   339→                Icon(
+   340→                    imageVector = Icons.Filled.CameraAlt,
+   341→                    contentDescription = "Change profile photo",
+   342→                    tint = Color(0xFF003A1F),
+   343→                    modifier = Modifier.size(16.dp)
+   344→                )
+   345→            }
+   346→        }
+   347→
+   348→        Spacer(modifier = Modifier.height(10.dp))
+   349→
+   350→        Text(
+   351→            text = "Tap to change profile photo",
+   352→            color = TextSecondary,
+   353→            fontSize = 13.sp,
+   354→            fontWeight = FontWeight.Normal,
+   355→            textAlign = TextAlign.Center,
+   356→        )
+   357→    }
+   358→}
+   359→
+   360→// ════════════════════════════════════════════════════════════════
+   361→// Zixo Number Glass Card — read-only with QR thumbnail & copy
+   362→// ════════════════════════════════════════════════════════════════
+   363→
+   364→@Composable
+   365→private fun ZixoNumberGlassCard(
+   366→    zixoNumber: String,
+   367→    onCopyToClipboard: () -> Unit
+   368→) {
+   369→    val formattedNumber = formatZixoNumber(zixoNumber)
+   370→
+   371→    Column(
+   372→        modifier = Modifier
+   373→            .fillMaxWidth()
+   374→            .liquidGlassCard()
+   375→            .clip(RoundedCornerShape(16.dp))
+   376→            .border(
+   377→                width = 1.dp,
+   378→                color = NeonMint.copy(alpha = 0.25f),
+   379→                shape = RoundedCornerShape(16.dp)
+   380→            )
+   381→            .padding(20.dp),
+   382→        horizontalAlignment = Alignment.CenterHorizontally
+   383→    ) {
+   384→        // Label
+   385→        Text(
+   386→            text = "Zixo Number",
+   387→            color = TextSecondary,
+   388→            fontSize = 12.sp,
+   389→            fontWeight = FontWeight.Medium,
+   390→            letterSpacing = 0.5.sp,
+   391→        )
+   392→
+   393→        Spacer(modifier = Modifier.height(6.dp))
+   394→
+   395→        // Formatted number in monospace NeonMint
+   396→        Text(
+   397→            text = formattedNumber,
+   398→            color = NeonMint,
+   399→            fontSize = 24.sp,
+   400→            fontWeight = FontWeight.Bold,
+   401→            fontFamily = FontFamily.Monospace,
+   402→            letterSpacing = 2.sp,
+   403→        )
+   404→
+   405→        Spacer(modifier = Modifier.height(16.dp))
+   406→
+   407→        // QR code thumbnail + Copy button row
+   408→        Row(
+   409→            modifier = Modifier.fillMaxWidth(),
+   410→            horizontalArrangement = Arrangement.Center,
+   411→            verticalAlignment = Alignment.CenterVertically
+   412→        ) {
+   413→            // QR code thumbnail
+   414→            if (zixoNumber.isNotBlank()) {
+   415→                QrCodeThumbnail(
+   416→                    data = "zixo://user/$zixoNumber",
+   417→                    size = 56.dp
+   418→                )
+   419→            }
+   420→
+   421→            Spacer(modifier = Modifier.width(16.dp))
+   422→
+   423→            // Copy button
+   424→            Row(
+   425→                modifier = Modifier
+   426→                    .clip(RoundedCornerShape(10.dp))
+   427→                    .background(NeonMint.copy(alpha = 0.12f))
+   428→                    .border(
+   429→                        width = 1.dp,
+   430→                        color = NeonMint.copy(alpha = 0.25f),
+   431→                        shape = RoundedCornerShape(10.dp)
+   432→                    )
+   433→                    .clickable(onClick = onCopyToClipboard)
+   434→                    .padding(horizontal = 16.dp, vertical = 10.dp),
+   435→                verticalAlignment = Alignment.CenterVertically,
+   436→                horizontalArrangement = Arrangement.Center,
+   437→            ) {
+   438→                Icon(
+   439→                    imageVector = Icons.Filled.ContentCopy,
+   440→                    contentDescription = "Copy",
+   441→                    tint = NeonMint,
+   442→                    modifier = Modifier.size(16.dp)
+   443→                )
+   444→                Spacer(modifier = Modifier.width(6.dp))
+   445→                Text(
+   446→                    text = "Copy",
+   447→                    color = NeonMint,
+   448→                    fontSize = 13.sp,
+   449→                    fontWeight = FontWeight.SemiBold,
+   450→                )
+   451→            }
+   452→        }
+   453→    }
+   454→}
+   455→
+   456→// ════════════════════════════════════════════════════════════════
+   457→// QR Code Thumbnail (small version for the Zixo number card)
+   458→// ════════════════════════════════════════════════════════════════
+   459→
+   460→@Composable
+   461→private fun QrCodeThumbnail(
+   462→    data: String,
+   463→    size: androidx.compose.ui.unit.Dp,
+   464→    modifier: Modifier = Modifier
+   465→) {
+   466→    if (data.isBlank()) return
+   467→
+   468→    val density = LocalDensity.current
+   469→    val sizePx = with(density) { size.roundToPx() }
+   470→
+   471→    val qrBitmap = remember(data, sizePx) {
+   472→        generateQrBitmapThumbnail(data, sizePx)
+   473→    }
+   474→
+   475→    Box(
+   476→        modifier = modifier
+   477→            .size(size)
+   478→            .clip(RoundedCornerShape(8.dp))
+   479→            .background(Color.White)
+   480→            .padding(4.dp),
+   481→        contentAlignment = Alignment.Center
+   482→    ) {
+   483→        androidx.compose.foundation.Image(
+   484→            bitmap = qrBitmap.asImageBitmap(),
+   485→            contentDescription = "QR Code",
+   486→            modifier = Modifier
+   487→                .size(size - 8.dp)
+   488→                .clip(RoundedCornerShape(4.dp)),
+   489→            contentScale = ContentScale.Fit
+   490→        )
+   491→    }
+   492→}
+   493→
+   494→private fun generateQrBitmapThumbnail(data: String, sizePx: Int): Bitmap {
+   495→    val writer = QRCodeWriter()
+   496→    val bitMatrix = writer.encode(data, BarcodeFormat.QR_CODE, sizePx, sizePx)
+   497→    val width = bitMatrix.width
+   498→    val height = bitMatrix.height
+   499→    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+   500→    for (x in 0 until width) {
+   501→        for (y in 0 until height) {
+   502→            bitmap.setPixel(
+   503→                x, y,
+   504→                if (bitMatrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE
+   505→            )
+   506→        }
+   507→    }
+   508→    return bitmap
+   509→}
+   510→
+   511→// ════════════════════════════════════════════════════════════════
+   512→// Form Fields Glass Card — Display Name, Username, Phone, Bio
+   513→// ════════════════════════════════════════════════════════════════
+   514→
+   515→@Composable
+   516→private fun FormFieldsGlassCard(
+   517→    displayName: String,
+   518→    onDisplayNameChanged: (String) -> Unit,
+   519→    username: String,
+   520→    phoneNumber: String?,
+   521→    bio: String,
+   522→    onBioChanged: (String) -> Unit,
+   523→) {
+   524→    Column(
+   525→        modifier = Modifier
+   526→            .fillMaxWidth()
+   527→            .liquidGlassCard()
+   528→            .clip(RoundedCornerShape(16.dp))
+   529→            .border(
+   530→                width = 1.dp,
+   531→                color = Color(0x33FFFFFF),
+   532→                shape = RoundedCornerShape(16.dp)
+   533→            )
+   534→            .padding(20.dp)
+   535→    ) {
+   536→        // ── Display Name ───────────────────────────────────────────
+   537→        FieldLabel(text = "Display Name")
+   538→
+   539→        Spacer(modifier = Modifier.height(6.dp))
+   540→
+   541→        GlassOutlinedTextField(
+   542→            value = displayName,
+   543→            onValueChange = onDisplayNameChanged,
+   544→            modifier = Modifier.fillMaxWidth(),
+   545→            placeholder = {
+   546→                Text(
+   547→                    text = "Enter display name",
+   548→                    color = TextSecondary.copy(alpha = 0.5f),
+   549→                    fontSize = 15.sp
+   550→                )
+   551→            },
+   552→            maxLength = EditProfileViewModel.DISPLAY_NAME_MAX_LENGTH,
+   553→            singleLine = true,
+   554→        )
+   555→
+   556→        // Character counter
+   557→        CharacterCounter(
+   558→            current = displayName.length,
+   559→            max = EditProfileViewModel.DISPLAY_NAME_MAX_LENGTH
+   560→        )
+   561→
+   562→        Spacer(modifier = Modifier.height(20.dp))
+   563→
+   564→        // ── Username (read-only) ────────────────────────────────────
+   565→        FieldLabel(text = "Username")
+   566→
+   567→        Spacer(modifier = Modifier.height(6.dp))
+   568→
+   569→        GlassOutlinedTextField(
+   570→            value = username,
+   571→            onValueChange = {},
+   572→            modifier = Modifier
+   573→                .fillMaxWidth()
+   574→                .background(DisabledFieldBackground, RoundedCornerShape(12.dp)),
+   575→            readOnly = true,
+   576→            enabled = false,
+   577→        )
+   578→
+   579→        FieldNote(text = "Username cannot be changed.")
+   580→
+   581→        Spacer(modifier = Modifier.height(20.dp))
+   582→
+   583→        // ── Phone Number (read-only) ────────────────────────────────
+   584→        FieldLabel(text = "Phone")
+   585→
+   586→        Spacer(modifier = Modifier.height(6.dp))
+   587→
+   588→        GlassOutlinedTextField(
+   589→            value = phoneNumber ?: "Not set",
+   590→            onValueChange = {},
+   591→            modifier = Modifier
+   592→                .fillMaxWidth()
+   593→                .background(DisabledFieldBackground, RoundedCornerShape(12.dp)),
+   594→            readOnly = true,
+   595→            enabled = false,
+   596→        )
+   597→
+   598→        FieldNote(text = "Phone number cannot be changed.")
+   599→
+   600→        Spacer(modifier = Modifier.height(20.dp))
+   601→
+   602→        // ── Bio / Status (multi-line) ───────────────────────────────
+   603→        FieldLabel(text = "Bio")
+   604→
+   605→        Spacer(modifier = Modifier.height(6.dp))
+   606→
+   607→        GlassOutlinedTextField(
+   608→            value = bio,
+   609→            onValueChange = onBioChanged,
+   610→            modifier = Modifier.fillMaxWidth(),
+   611→            placeholder = {
+   612→                Text(
+   613→                    text = "Write something about yourself\u2026",
+   614→                    color = TextSecondary.copy(alpha = 0.5f),
+   615→                    fontSize = 15.sp
+   616→                )
+   617→            },
+   618→            maxLength = EditProfileViewModel.BIO_MAX_LENGTH,
+   619→            singleLine = false,
+   620→        )
+   621→
+   622→        // Character counter
+   623→        CharacterCounter(
+   624→            current = bio.length,
+   625→            max = EditProfileViewModel.BIO_MAX_LENGTH
+   626→        )
+   627→    }
+   628→}
+   629→
+   630→// ════════════════════════════════════════════════════════════════
+   631→// Reusable field label & note composables
+   632→// ════════════════════════════════════════════════════════════════
+   633→
+   634→@Composable
+   635→private fun FieldLabel(text: String) {
+   636→    Text(
+   637→        text = text,
+   638→        color = TextSecondary,
+   639→        fontSize = 12.sp,
+   640→        fontWeight = FontWeight.Medium,
+   641→        letterSpacing = 0.5.sp,
+   642→    )
+   643→}
+   644→
+   645→@Composable
+   646→private fun FieldNote(text: String) {
+   647→    Text(
+   648→        text = text,
+   649→        color = TextTertiary,
+   650→        fontSize = 11.sp,
+   651→        fontWeight = FontWeight.Normal,
+   652→        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+   653→    )
+   654→}
+   655→
+   656→@Composable
+   657→private fun CharacterCounter(current: Int, max: Int) {
+   658→    Row(
+   659→        modifier = Modifier
+   660→            .fillMaxWidth()
+   661→            .padding(top = 4.dp, start = 4.dp, end = 4.dp),
+   662→        horizontalArrangement = Arrangement.End
+   663→    ) {
+   664→        Text(
+   665→            text = "$current/$max",
+   666→            color = if (current >= max) {
+   667→                DestructiveRed
+   668→            } else {
+   669→                TextTertiary
+   670→            },
+   671→            fontSize = 11.sp,
+   672→            fontWeight = FontWeight.Normal,
+   673→            fontFamily = FontFamily.Monospace,
+   674→        )
+   675→    }
+   676→}
+   677→
+   678→// ════════════════════════════════════════════════════════════════
+   679→// Save Changes Glass Button
+   680→// ════════════════════════════════════════════════════════════════
+   681→
+   682→@Composable
+   683→private fun SaveChangesGlassButton(
+   684→    enabled: Boolean,
+   685→    isSaving: Boolean,
+   686→    onClick: () -> Unit
+   687→) {
+   688→    Button(
+   689→        onClick = onClick,
+   690→        enabled = enabled,
+   691→        modifier = Modifier
+   692→            .fillMaxWidth()
+   693→            .height(52.dp),
+   694→        shape = RoundedCornerShape(14.dp),
+   695→        colors = ButtonDefaults.buttonColors(
+   696→            containerColor = NeonMint,
+   697→            contentColor = Color(0xFF003A1F),
+   698→            disabledContainerColor = NeonMint.copy(alpha = 0.35f),
+   699→            disabledContentColor = Color(0xFF003A1F).copy(alpha = 0.5f),
+   700→        ),
+   701→        elevation = ButtonDefaults.buttonElevation(
+   702→            defaultElevation = 0.dp,
+   703→            pressedElevation = 0.dp,
+   704→            disabledElevation = 0.dp,
+   705→        ),
+   706→    ) {
+   707→        if (isSaving) {
+   708→            CircularProgressIndicator(
+   709→                modifier = Modifier.size(22.dp),
+   710→                color = Color(0xFF003A1F),
+   711→                strokeWidth = 2.5.dp,
+   712→            )
+   713→        } else {
+   714→            Text(
+   715→                text = "Save Changes",
+   716→                fontSize = 16.sp,
+   717→                fontWeight = FontWeight.Bold,
+   718→                letterSpacing = 0.3.sp,
+   719→            )
+   720→        }
+   721→    }
+   722→}
+   723→
+   724→// ════════════════════════════════════════════════════════════════
+   725→// Helper: Format 8-digit number as "XXXX XXXX"
+   726→// ════════════════════════════════════════════════════════════════
+   727→
+   728→private fun formatZixoNumber(number: String): String {
+   729→    val digits = number.filter { it.isDigit() }
+   730→    return if (digits.length >= 8) {
+   731→        "${digits.substring(0, 4)} ${digits.substring(4, 8)}"
+   732→    } else {
+   733→        digits
+   734→    }
+   735→}
+   736→

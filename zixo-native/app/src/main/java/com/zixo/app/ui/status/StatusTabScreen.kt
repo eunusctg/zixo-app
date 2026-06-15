@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -33,6 +34,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -78,11 +82,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.zixo.app.domain.model.StatusContentType
 import com.zixo.app.domain.model.StatusGroupModel
 import com.zixo.app.domain.model.StatusModel
+import com.zixo.app.domain.model.StatusShapeType
 import com.zixo.app.ui.components.AvatarComponent
 import com.zixo.app.ui.components.GlassOutlinedTextField
 import com.zixo.app.ui.components.ZixoGlassBackground
@@ -93,8 +99,8 @@ import com.zixo.app.ui.theme.EmeraldGreen
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
+import com.zixo.app.ui.theme.TextTertiary
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 // ──────────────────────────────────────────────
 // Design Tokens
@@ -102,8 +108,13 @@ import kotlinx.coroutines.launch
 
 private val GlassBackground = Color(0x1A1A2A32)
 private val GlassBorder = Color(0x33FFFFFF)
-private val ViewedRingColor = Color(0xFF546E7A)
+private val ViewedRingColor = TextTertiary
 private val StatusProgressBackground = Color(0x33FFFFFF)
+
+/** Unviewed status ring gradient: EmeraldGreen → NeonMint */
+private val UnviewedRingBrush = Brush.linearGradient(
+    colors = listOf(EmeraldGreen, NeonMint)
+)
 
 /** Preset background colors for text statuses. */
 private val TextStatusBackgroundColors = listOf(
@@ -116,6 +127,15 @@ private val TextStatusBackgroundColors = listOf(
 /** Available font families for text statuses. */
 private val TextStatusFonts = listOf("Default", "Serif", "Monospace", "Cursive")
 
+/** Available shapes for shape-based statuses. */
+private val ShapeOptions = StatusShapeType.entries
+
+/** 3D Emoji options for emoji statuses. */
+private val Emoji3dOptions = listOf("✨", "🔥", "❤️", "🎉", "🌟", "💎", "🦋", "🌈")
+
+/** Quick reaction emojis for the viewer. */
+private val QuickReactionEmojis = listOf("❤️", "😂", "😍", "😮")
+
 /** Auto-advance duration for text/image statuses in milliseconds. */
 private const val STATUS_AUTO_ADVANCE_MS = 5_000L
 
@@ -126,10 +146,12 @@ private const val STATUS_AUTO_ADVANCE_MS = 5_000L
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatusTabScreen(
+    navController: NavController,
     viewModel: StatusViewModel = hiltViewModel()
 ) {
-    val statusFeed by viewModel.statusFeed.collectAsStateWithLifecycle()
+    val contactStatuses by viewModel.contactStatuses.collectAsStateWithLifecycle()
     val myStatuses by viewModel.myStatuses.collectAsStateWithLifecycle()
+    val mutualContacts by viewModel.mutualContacts.collectAsStateWithLifecycle()
     val isUploading by viewModel.isUploading.collectAsStateWithLifecycle()
     val uploadProgress by viewModel.uploadProgress.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
@@ -173,6 +195,14 @@ fun StatusTabScreen(
                 onAddClick = { showAddSheet = true }
             )
 
+            // ── My Status Thumbnails (horizontal scroll) ──
+            if (myStatuses.myStatuses.isNotEmpty()) {
+                MyStatusThumbnailsRow(
+                    statuses = myStatuses.myStatuses,
+                    onDelete = { statusId -> viewModel.deleteStatus(statusId) }
+                )
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // ── Recent Updates Header ──────────────
@@ -185,7 +215,9 @@ fun StatusTabScreen(
             )
 
             // ── Status Feed ────────────────────────
-            if (statusFeed.isEmpty()) {
+            // ONLY statuses from mutual contacts are shown —
+            // contact-gated at the repository boundary
+            if (contactStatuses.isEmpty()) {
                 EmptyStatusFeed()
             } else {
                 LazyColumn(
@@ -194,7 +226,7 @@ fun StatusTabScreen(
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
                     items(
-                        items = statusFeed,
+                        items = contactStatuses,
                         key = { it.senderUid }
                     ) { group ->
                         StatusGroupItem(
@@ -270,11 +302,8 @@ fun StatusTabScreen(
             uploadProgress = uploadProgress,
             onDismiss = { showMediaComposer = false },
             onPost = { filePath, caption ->
-                if (isVideoMode) {
-                    viewModel.postVideoStatus(filePath, caption)
-                } else {
-                    viewModel.postImageStatus(filePath, caption)
-                }
+                val type = if (isVideoMode) StatusContentType.VIDEO else StatusContentType.IMAGE
+                viewModel.postMediaStatus(filePath, caption, type)
                 showMediaComposer = false
             }
         )
@@ -289,8 +318,9 @@ fun StatusTabScreen(
             onReplyTextChange = { replyText = it },
             onPrevious = viewModel::previousStatus,
             onNext = viewModel::nextStatus,
+            onIndexChange = viewModel::setViewingIndex,
             onClose = viewModel::stopViewing,
-            onReaction = { statusId, emoji -> viewModel.addReaction(statusId, emoji) }
+            onReaction = { statusId, emoji -> viewModel.reactToStatus(statusId, emoji) }
         )
     }
 }
@@ -324,7 +354,8 @@ private fun MyStatusCard(
                     name = "You",
                     size = 64.dp,
                     segmentCount = myStatuses.size,
-                    ringColor = NeonMint
+                    isUnviewed = true,  // Own statuses always show active ring
+                    useGradient = true
                 )
             } else {
                 AvatarComponent(
@@ -352,7 +383,7 @@ private fun MyStatusCard(
                 }
             }
 
-            // Add button overlay
+            // Add button overlay (+ badge)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -399,6 +430,120 @@ private fun MyStatusCard(
 }
 
 // ──────────────────────────────────────────────
+// My Status Thumbnails (Horizontal Scroll Row)
+// ──────────────────────────────────────────────
+
+@Composable
+private fun MyStatusThumbnailsRow(
+    statuses: List<StatusModel>,
+    onDelete: (String) -> Unit
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items(items = statuses, key = { it.id }) { status ->
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .liquidGlassCard()
+                    .clickable { onDelete(status.id) },
+                contentAlignment = Alignment.Center
+            ) {
+                when (status.type) {
+                    StatusContentType.TEXT -> {
+                        val bgColor = status.backgroundColor?.let { parseHexColor(it) }
+                            ?: EmeraldGreen
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(bgColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = status.textContent?.take(2) ?: "",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    StatusContentType.IMAGE -> {
+                        if (!status.mediaThumbnailUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(status.mediaThumbnailUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Status thumbnail",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(DarkPetrolCharcoal),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Image,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                    StatusContentType.VIDEO -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(DarkPetrolCharcoal),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Videocam,
+                                contentDescription = null,
+                                tint = TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    StatusContentType.SHAPE -> {
+                        val bgColor = status.backgroundColor?.let { parseHexColor(it) }
+                            ?: EmeraldGreen
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(bgColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            ShapeIcon(shapeType = status.shapeType, tint = Color.White, size = 20.dp)
+                        }
+                    }
+                    StatusContentType.EMOJI_3D -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(DarkPetrolCharcoal),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = status.emoji3dCode ?: "✨",
+                                fontSize = 24.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ──────────────────────────────────────────────
 // Status Group Item in Feed
 // ──────────────────────────────────────────────
 
@@ -414,12 +559,15 @@ private fun StatusGroupItem(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Gradient ring for unviewed (EmeraldGreen → NeonMint),
+        // grey ring for viewed (TextTertiary)
         StatusRingAvatar(
             avatarUrl = group.senderAvatarUrl,
             name = group.senderDisplayName,
             size = 56.dp,
             segmentCount = group.statusCount,
-            ringColor = if (group.hasUnviewedStatuses) NeonMint else ViewedRingColor
+            isUnviewed = group.hasUnviewedStatuses,
+            useGradient = true
         )
 
         Spacer(modifier = Modifier.width(14.dp))
@@ -444,16 +592,23 @@ private fun StatusGroupItem(
 }
 
 // ──────────────────────────────────────────────
-// Status Ring Avatar
+// Status Ring Avatar with Gradient Ring
 // ──────────────────────────────────────────────
 
+/**
+ * Avatar with colored ring segments around it.
+ *
+ * - **Unviewed**: gradient ring (EmeraldGreen → NeonMint)
+ * - **Viewed**: solid grey ring (TextTertiary)
+ */
 @Composable
 private fun StatusRingAvatar(
     avatarUrl: String,
     name: String,
     size: Dp,
     segmentCount: Int,
-    ringColor: Color
+    isUnviewed: Boolean,
+    useGradient: Boolean = false
 ) {
     val strokeWidth = 3.dp
     val gapAngle = 6f
@@ -466,16 +621,39 @@ private fun StatusRingAvatar(
             Canvas(modifier = Modifier.size(size + strokeWidth * 2)) {
                 var startAngle = -90f
                 for (i in 0 until segmentCount) {
-                    drawArc(
-                        color = ringColor,
-                        startAngle = startAngle,
-                        sweepAngle = segmentSweep,
-                        useCenter = false,
-                        style = Stroke(
-                            width = strokeWidth.toPx(),
-                            cap = StrokeCap.Round
+                    val brush = if (isUnviewed && useGradient) {
+                        // Each segment gets its own gradient slice
+                        UnviewedRingBrush
+                    } else if (isUnviewed) {
+                        null
+                    } else {
+                        null
+                    }
+
+                    if (isUnviewed && useGradient) {
+                        drawArc(
+                            brush = UnviewedRingBrush,
+                            startAngle = startAngle,
+                            sweepAngle = segmentSweep,
+                            useCenter = false,
+                            style = Stroke(
+                                width = strokeWidth.toPx(),
+                                cap = StrokeCap.Round
+                            )
                         )
-                    )
+                    } else {
+                        val color = if (isUnviewed) NeonMint else ViewedRingColor
+                        drawArc(
+                            color = color,
+                            startAngle = startAngle,
+                            sweepAngle = segmentSweep,
+                            useCenter = false,
+                            style = Stroke(
+                                width = strokeWidth.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                        )
+                    }
                     startAngle += segmentSweep + gapAngle
                 }
             }
@@ -519,7 +697,7 @@ private fun EmptyStatusFeed() {
 }
 
 // ──────────────────────────────────────────────
-// Add Status Bottom Sheet
+// Add Status Bottom Sheet (with liquid glass styling)
 // ──────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -551,6 +729,7 @@ private fun AddStatusBottomSheet(
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
+            // Text status option
             AddOptionRow(
                 icon = Icons.Filled.TextFields,
                 label = "Text",
@@ -560,6 +739,7 @@ private fun AddStatusBottomSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Photo status option
             AddOptionRow(
                 icon = Icons.Filled.Image,
                 label = "Photo",
@@ -569,11 +749,26 @@ private fun AddStatusBottomSheet(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Video status option
             AddOptionRow(
                 icon = Icons.Filled.Videocam,
                 label = "Video",
                 description = "Share a video clip",
                 onClick = onVideoClick
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Shape selector
+            AddShapeOptionRow(
+                onClick = onTextClick // Shapes are composed in text composer
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 3D Emoji selector
+            AddEmoji3dOptionRow(
+                onClick = onTextClick // 3D emojis are composed in text composer
             )
         }
     }
@@ -618,6 +813,96 @@ private fun AddOptionRow(
     }
 }
 
+@Composable
+private fun AddShapeOptionRow(
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(GlassBackground)
+            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(NeonMint.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            ShapeIcon(shapeType = StatusShapeType.STAR, tint = NeonMint, size = 22.dp)
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column {
+            Text(text = "Shape", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "Share a shape overlay", color = TextSecondary, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun AddEmoji3dOptionRow(
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(GlassBackground)
+            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(NeonMint.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(text = "✨", fontSize = 22.sp)
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column {
+            Text(text = "3D Emoji", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(text = "Share an animated emoji", color = TextSecondary, fontSize = 13.sp)
+        }
+    }
+}
+
+// ──────────────────────────────────────────────
+// Shape Icon Renderer (for list items and thumbnails)
+// ──────────────────────────────────────────────
+
+@Composable
+private fun ShapeIcon(
+    shapeType: StatusShapeType?,
+    tint: Color,
+    size: Dp
+) {
+    val icon = when (shapeType) {
+        StatusShapeType.CIRCLE -> "⬤"
+        StatusShapeType.SQUARE -> "■"
+        StatusShapeType.TRIANGLE -> "▲"
+        StatusShapeType.STAR -> "★"
+        StatusShapeType.HEART -> "♥"
+        StatusShapeType.DIAMOND -> "◆"
+        StatusShapeType.HEXAGON -> "⬡"
+        null -> "★"
+    }
+    Text(
+        text = icon,
+        color = tint,
+        fontSize = (size.value * 0.8f).sp,
+        textAlign = TextAlign.Center
+    )
+}
+
 // ──────────────────────────────────────────────
 // Text Status Composer
 // ──────────────────────────────────────────────
@@ -631,6 +916,8 @@ private fun TextStatusComposer(
     var text by remember { mutableStateOf("") }
     var selectedColorIndex by remember { mutableIntStateOf(0) }
     var selectedFontIndex by remember { mutableIntStateOf(0) }
+    var selectedShapeIndex by remember { mutableIntStateOf(-1) } // -1 = no shape
+    var selectedEmoji3dIndex by remember { mutableIntStateOf(-1) } // -1 = no 3D emoji
 
     Box(
         modifier = Modifier
@@ -669,11 +956,40 @@ private fun TextStatusComposer(
             enabled = !isUploading
         )
 
+        // Shape selector
+        if (selectedShapeIndex >= 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(top = 80.dp)
+            ) {
+                ShapeIcon(
+                    shapeType = ShapeOptions.getOrNull(selectedShapeIndex),
+                    tint = Color.White.copy(alpha = 0.3f),
+                    size = 80.dp
+                )
+            }
+        }
+
+        // 3D Emoji selector display
+        if (selectedEmoji3dIndex >= 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(top = 80.dp)
+            ) {
+                Text(
+                    text = Emoji3dOptions.getOrElse(selectedEmoji3dIndex) { "✨" },
+                    fontSize = 60.sp
+                )
+            }
+        }
+
         // Color picker
         LazyRow(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 100.dp)
+                .padding(bottom = 140.dp)
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -703,7 +1019,7 @@ private fun TextStatusComposer(
         LazyRow(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 64.dp)
+                .padding(bottom = 104.dp)
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -735,6 +1051,76 @@ private fun TextStatusComposer(
                         fontFamily = fontFamily,
                         fontSize = 14.sp
                     )
+                }
+            }
+        }
+
+        // Shape/3D Emoji selector row
+        LazyRow(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 68.dp)
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Shape options
+            itemsIndexed(ShapeOptions) { index, shape ->
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (index == selectedShapeIndex) NeonMint.copy(alpha = 0.3f)
+                            else GlassBackground
+                        )
+                        .border(
+                            1.dp,
+                            if (index == selectedShapeIndex) NeonMint else GlassBorder,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .clickable {
+                            selectedShapeIndex = if (selectedShapeIndex == index) -1 else index
+                            selectedEmoji3dIndex = -1 // Mutually exclusive
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    ShapeIcon(shapeType = shape, tint = Color.White, size = 16.dp)
+                }
+            }
+
+            // Separator
+            item {
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(24.dp)
+                        .background(GlassBorder)
+                        .align(Alignment.CenterVertically)
+                )
+            }
+
+            // 3D Emoji options
+            itemsIndexed(Emoji3dOptions) { index, emoji ->
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (index == selectedEmoji3dIndex) NeonMint.copy(alpha = 0.3f)
+                            else GlassBackground
+                        )
+                        .border(
+                            1.dp,
+                            if (index == selectedEmoji3dIndex) NeonMint else GlassBorder,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .clickable {
+                            selectedEmoji3dIndex = if (selectedEmoji3dIndex == index) -1 else index
+                            selectedShapeIndex = -1 // Mutually exclusive
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = emoji, fontSize = 18.sp)
                 }
             }
         }
@@ -970,6 +1356,7 @@ private fun MediaStatusComposer(
 
 // ──────────────────────────────────────────────
 // Full-Screen Status Viewer Overlay
+// (with HorizontalPager for swiping between statuses)
 // ──────────────────────────────────────────────
 
 @Composable
@@ -980,20 +1367,45 @@ private fun StatusViewerOverlay(
     onReplyTextChange: (String) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onIndexChange: (Int) -> Unit,
     onClose: () -> Unit,
     onReaction: (statusId: String, emoji: String) -> Unit
 ) {
-    val currentStatus = group.statuses.getOrNull(currentIndex) ?: return
+    if (group.statuses.isEmpty()) return
+
+    val pagerState = rememberPagerState(
+        initialPage = currentIndex,
+        pageCount = { group.statuses.size }
+    )
+
+    val currentStatus = group.statuses.getOrNull(pagerState.currentPage) ?: return
+
+    // Hold-to-pause state
+    var isPaused by remember { mutableStateOf(false) }
+
+    // Sync pager state with ViewModel index
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage != currentIndex) {
+            onIndexChange(pagerState.currentPage)
+        }
+    }
 
     // Auto-advance timer
-    LaunchedEffect(currentIndex, currentStatus.id) {
+    LaunchedEffect(pagerState.currentPage, currentStatus.id, isPaused) {
+        if (isPaused) return@LaunchedEffect
         val duration = if (currentStatus.type == StatusContentType.VIDEO) {
             30_000L // Longer for video; real duration would come from media metadata
         } else {
             STATUS_AUTO_ADVANCE_MS
         }
         delay(duration)
-        onNext()
+        if (!isPaused) {
+            if (pagerState.currentPage < group.statuses.size - 1) {
+                onIndexChange(pagerState.currentPage + 1)
+            } else {
+                onClose()
+            }
+        }
     }
 
     Box(
@@ -1023,8 +1435,8 @@ private fun StatusViewerOverlay(
                             .fillMaxHeight()
                             .then(
                                 when {
-                                    index < currentIndex -> Modifier.fillMaxWidth()
-                                    index == currentIndex -> Modifier.fillMaxWidth() // Animated fill handled by timer
+                                    index < pagerState.currentPage -> Modifier.fillMaxWidth()
+                                    index == pagerState.currentPage -> Modifier.fillMaxWidth() // Animated fill handled by timer
                                     else -> Modifier.fillMaxWidth(0f)
                                 }
                             )
@@ -1043,7 +1455,7 @@ private fun StatusViewerOverlay(
                 .zIndex(2f)
         ) {
             Icon(
-                imageVector = Icons.Filled.ArrowBack,
+                imageVector = Icons.Filled.Close,
                 contentDescription = "Close viewer",
                 tint = Color.White
             )
@@ -1078,10 +1490,12 @@ private fun StatusViewerOverlay(
             }
         }
 
-        // ── Status Content ───────────────────
-        Box(
+        // ── HorizontalPager for Status Content ──
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier
                 .fillMaxSize()
+                .padding(top = 70.dp, bottom = 80.dp)
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { offset ->
@@ -1091,12 +1505,19 @@ private fun StatusViewerOverlay(
                             } else {
                                 onNext()
                             }
+                        },
+                        onLongPress = {
+                            isPaused = true
+                        },
+                        onPress = {
+                            tryAwaitRelease()
+                            isPaused = false
                         }
                     )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            StatusContentRenderer(status = currentStatus)
+                }
+        ) { page ->
+            val pageStatus = group.statuses.getOrNull(page) ?: return@HorizontalPager
+            StatusContentRenderer(status = pageStatus)
         }
 
         // ── Reply / Reaction Bar ─────────────
@@ -1119,7 +1540,7 @@ private fun StatusViewerOverlay(
 
             // Quick emoji reactions
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("❤️", "😂", "😍", "😮").forEach { emoji ->
+                QuickReactionEmojis.forEach { emoji ->
                     Text(
                         text = emoji,
                         fontSize = 20.sp,
@@ -1224,14 +1645,24 @@ private fun StatusContentRenderer(status: StatusModel) {
                         .background(bgColor),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = status.textContent ?: "",
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 32.dp)
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        ShapeIcon(
+                            shapeType = status.shapeType,
+                            tint = Color.White,
+                            size = 120.dp
+                        )
+                        if (!status.textContent.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = status.textContent,
+                                color = Color.White,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 32.dp)
+                            )
+                        }
+                    }
                 }
             }
 

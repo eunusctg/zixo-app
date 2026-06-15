@@ -1,0 +1,973 @@
+     1→package com.zixo.app.ui.settings.SubPages
+     2→
+     3→import androidx.biometric.BiometricPrompt
+     4→import androidx.compose.foundation.background
+     5→import androidx.compose.foundation.border
+     6→import androidx.compose.foundation.clickable
+     7→import androidx.compose.foundation.interaction.MutableInteractionSource
+     8→import androidx.compose.foundation.layout.Arrangement
+     9→import androidx.compose.foundation.layout.Box
+    10→import androidx.compose.foundation.layout.Column
+    11→import androidx.compose.foundation.layout.PaddingValues
+    12→import androidx.compose.foundation.layout.Row
+    13→import androidx.compose.foundation.layout.Spacer
+    14→import androidx.compose.foundation.layout.fillMaxSize
+    15→import androidx.compose.foundation.layout.fillMaxWidth
+    16→import androidx.compose.foundation.layout.height
+    17→import androidx.compose.foundation.layout.imePadding
+    18→import androidx.compose.foundation.layout.padding
+    19→import androidx.compose.foundation.layout.size
+    20→import androidx.compose.foundation.layout.width
+    21→import androidx.compose.foundation.lazy.LazyColumn
+    22→import androidx.compose.foundation.shape.RoundedCornerShape
+    23→import androidx.compose.foundation.text.KeyboardOptions
+    24→import androidx.compose.material.icons.Icons
+    25→import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+    26→import androidx.compose.material.icons.filled.CloudDownload
+    27→import androidx.compose.material.icons.filled.DeleteForever
+    28→import androidx.compose.material.icons.filled.EnhancedEncryption
+    29→import androidx.compose.material.icons.filled.Fingerprint
+    30→import androidx.compose.material.icons.filled.Password
+    31→import androidx.compose.material.icons.filled.Visibility
+    32→import androidx.compose.material.icons.filled.VisibilityOff
+    33→import androidx.compose.material3.AlertDialog
+    34→import androidx.compose.material3.CircularProgressIndicator
+    35→import androidx.compose.material3.ExperimentalMaterial3Api
+    36→import androidx.compose.material3.Icon
+    37→import androidx.compose.material3.IconButton
+    38→import androidx.compose.material3.ModalBottomSheet
+    39→import androidx.compose.material3.Scaffold
+    40→import androidx.compose.material3.SnackbarHost
+    41→import androidx.compose.material3.SnackbarHostState
+    42→import androidx.compose.material3.Text
+    43→import androidx.compose.material3.rememberModalBottomSheetState
+    44→import androidx.compose.runtime.Composable
+    45→import androidx.compose.runtime.collectAsState
+    46→import androidx.compose.runtime.getValue
+    47→import androidx.compose.runtime.mutableStateOf
+    48→import androidx.compose.runtime.remember
+    49→import androidx.compose.runtime.rememberCoroutineScope
+    50→import androidx.compose.runtime.saveable.rememberSaveable
+    51→import androidx.compose.runtime.setValue
+    52→import androidx.compose.ui.Alignment
+    53→import androidx.compose.ui.Modifier
+    54→import androidx.compose.ui.draw.clip
+    55→import androidx.compose.ui.graphics.Brush
+    56→import androidx.compose.ui.graphics.Color
+    57→import androidx.compose.ui.platform.LocalContext
+    58→import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+    59→import androidx.compose.ui.text.font.FontWeight
+    60→import androidx.compose.ui.text.input.KeyboardType
+    61→import androidx.compose.ui.text.input.PasswordVisualTransformation
+    62→import androidx.compose.ui.text.input.VisualTransformation
+    63→import androidx.compose.ui.text.style.TextAlign
+    64→import androidx.compose.ui.unit.dp
+    65→import androidx.compose.ui.unit.sp
+    66→import androidx.fragment.app.FragmentActivity
+    67→import androidx.hilt.navigation.compose.hiltViewModel
+    68→
+    69→import com.zixo.app.ui.components.GlassOutlinedTextField
+    70→import com.zixo.app.ui.components.GlassSwitch
+    71→import com.zixo.app.ui.components.ZixoGlassBackground
+    72→import com.zixo.app.ui.components.ZixoTopBar
+    73→import com.zixo.app.ui.components.liquidGlassCard
+    74→import com.zixo.app.ui.screens.settings.SettingsViewModel
+    75→import com.zixo.app.ui.theme.DestructiveBackground
+    76→import com.zixo.app.ui.theme.DestructiveBackgroundAlpha
+    77→import com.zixo.app.ui.theme.DestructiveText
+    78→import com.zixo.app.ui.theme.NeonMint
+    79→import com.zixo.app.ui.theme.TextPrimary
+    80→import com.zixo.app.ui.theme.TextSecondary
+    81→import kotlinx.coroutines.launch
+    82→
+    83→// ─────────────────────────────────────────────────────────────────────────────
+    84→// Account Security Screen
+    85→// ─────────────────────────────────────────────────────────────────────────────
+    86→
+    87→/**
+    88→ * Full-screen "Account Security" settings page rendered with the Zixo Liquid
+    89→ * Glass design language.
+    90→ *
+    91→ * Sections:
+    92→ * 1. Security Notifications Toggle
+    93→ * 2. Biometric Unlock enrollment
+    94→ * 3. Two-Step Verification (PIN setup bottom sheet)
+    95→ * 4. Request Account Info
+    96→ * 5. Delete Account (destructive, double-confirmation)
+    97→ *
+    98→ * @param onBackClick Callback invoked when the user taps the back arrow.
+    99→ */
+   100→@OptIn(ExperimentalMaterial3Api::class)
+   101→@Composable
+   102→fun AccountSecurityScreen(
+   103→    onBackClick: () -> Unit,
+   104→    viewModel: SettingsViewModel = hiltViewModel()
+   105→) {
+   106→    val uiState by viewModel.uiState.collectAsState()
+   107→    val context = LocalContext.current
+   108→    val scope = rememberCoroutineScope()
+   109→    val snackbarHostState = remember { SnackbarHostState() }
+   110→
+   111→    // ── Local state for features persisted through SettingsRepository ──
+   112→    var isSecurityNotificationsEnabled by rememberSaveable { mutableStateOf(false) }
+   113→    var isBiometricEnrolled by rememberSaveable { mutableStateOf(false) }
+   114→    var isTwoStepEnabled by rememberSaveable { mutableStateOf(false) }
+   115→
+   116→    // ── Two-Step Verification Bottom Sheet ──
+   117→    var showTwoStepSheet by rememberSaveable { mutableStateOf(false) }
+   118→
+   119→    // ── Request Account Info loading state ──
+   120→    var isRequestingAccountInfo by rememberSaveable { mutableStateOf(false) }
+   121→    var accountInfoRequested by rememberSaveable { mutableStateOf(false) }
+   122→
+   123→    // ── Delete Account dialog state ──
+   124→    var showDeleteConfirmStep1 by rememberSaveable { mutableStateOf(false) }
+   125→    var showDeleteConfirmStep2 by rememberSaveable { mutableStateOf(false) }
+   126→    var deleteConfirmText by rememberSaveable { mutableStateOf("") }
+   127→
+   128→    /** Launches the AndroidX BiometricPrompt to authenticate and enroll biometric unlock. */
+   129→    fun triggerBiometricEnrollment() {
+   130→        val fragmentActivity = context as? FragmentActivity ?: return
+   131→        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+   132→            .setTitle("Biometric Unlock")
+   133→            .setSubtitle("Confirm your identity to enable biometric unlock")
+   134→            .setNegativeButtonText("Cancel")
+   135→            .setConfirmationRequired(false)
+   136→            .build()
+   137→
+   138→        val biometricPrompt = BiometricPrompt(
+   139→            fragmentActivity,
+   140→            object : BiometricPrompt.AuthenticationCallback() {
+   141→                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+   142→                    isBiometricEnrolled = true
+   143→                    scope.launch {
+   144→                        snackbarHostState.showSnackbar("Biometric unlock enabled")
+   145→                    }
+   146→                }
+   147→
+   148→                override fun onAuthenticationFailed() {
+   149→                    scope.launch {
+   150→                        snackbarHostState.showSnackbar("Authentication failed")
+   151→                    }
+   152→                }
+   153→            }
+   154→        )
+   155→        biometricPrompt.authenticate(promptInfo)
+   156→    }
+   157→
+   158→    Box(modifier = Modifier.fillMaxSize()) {
+   159→        ZixoGlassBackground()
+   160→
+   161→        Scaffold(
+   162→            snackbarHost = { SnackbarHost(snackbarHostState) },
+   163→            containerColor = Color.Transparent
+   164→        ) { innerPadding ->
+   165→            Column(
+   166→                modifier = Modifier
+   167→                    .fillMaxSize()
+   168→                    .padding(innerPadding)
+   169→            ) {
+   170→                ZixoTopBar(
+   171→                    title = "Account Security",
+   172→                    showBackButton = true,
+   173→                    onBackClick = onBackClick
+   174→                )
+   175→
+   176→                LazyColumn(
+   177→                    modifier = Modifier
+   178→                        .fillMaxSize()
+   179→                        .imePadding(),
+   180→                    contentPadding = PaddingValues(
+   181→                        start = 16.dp,
+   182→                        end = 16.dp,
+   183→                        top = 8.dp,
+   184→                        bottom = 32.dp
+   185→                    ),
+   186→                    verticalArrangement = Arrangement.spacedBy(12.dp)
+   187→                ) {
+   188→                    // ──────────────────────────────────────────────────────────
+   189→                    // Section 1: Security Notifications Toggle
+   190→                    // ──────────────────────────────────────────────────────────
+   191→                    item {
+   192→                        Column(
+   193→                            modifier = Modifier
+   194→                                .fillMaxWidth()
+   195→                                .liquidGlassCard()
+   196→                                .padding(16.dp)
+   197→                        ) {
+   198→                            Row(
+   199→                                modifier = Modifier.fillMaxWidth(),
+   200→                                verticalAlignment = Alignment.CenterVertically
+   201→                            ) {
+   202→                                Icon(
+   203→                                    imageVector = Icons.Default.EnhancedEncryption,
+   204→                                    contentDescription = null,
+   205→                                    tint = NeonMint,
+   206→                                    modifier = Modifier.size(24.dp)
+   207→                                )
+   208→                                Spacer(modifier = Modifier.width(12.dp))
+   209→                                Column(modifier = Modifier.weight(1f)) {
+   210→                                    Text(
+   211→                                        text = "Security Notifications",
+   212→                                        color = TextPrimary,
+   213→                                        fontSize = 16.sp,
+   214→                                        fontWeight = FontWeight.Medium
+   215→                                    )
+   216→                                    Text(
+   217→                                        text = "Get notified if a contact's encryption key changes",
+   218→                                        color = TextSecondary,
+   219→                                        fontSize = 13.sp
+   220→                                    )
+   221→                                }
+   222→                                GlassSwitch(
+   223→                                    checked = isSecurityNotificationsEnabled,
+   224→                                    onCheckedChange = { enabled ->
+   225→                                        isSecurityNotificationsEnabled = enabled
+   226→                                    }
+   227→                                )
+   228→                            }
+   229→                        }
+   230→                    }
+   231→
+   232→                    // ──────────────────────────────────────────────────────────
+   233→                    // Section 2: Biometric Unlock
+   234→                    // ──────────────────────────────────────────────────────────
+   235→                    item {
+   236→                        Column(
+   237→                            modifier = Modifier
+   238→                                .fillMaxWidth()
+   239→                                .liquidGlassCard()
+   240→                        ) {
+   241→                            Row(
+   242→                                modifier = Modifier
+   243→                                    .fillMaxWidth()
+   244→                                    .clickable(
+   245→                                        interactionSource = remember { MutableInteractionSource() },
+   246→                                        indication = null,
+   247→                                        onClick = { triggerBiometricEnrollment() }
+   248→                                    )
+   249→                                    .padding(16.dp),
+   250→                                verticalAlignment = Alignment.CenterVertically
+   251→                            ) {
+   252→                                Icon(
+   253→                                    imageVector = Icons.Default.Fingerprint,
+   254→                                    contentDescription = null,
+   255→                                    tint = TextSecondary,
+   256→                                    modifier = Modifier.size(24.dp)
+   257→                                )
+   258→                                Spacer(modifier = Modifier.width(12.dp))
+   259→                                Column(modifier = Modifier.weight(1f)) {
+   260→                                    Text(
+   261→                                        text = "Biometric Unlock",
+   262→                                        color = TextPrimary,
+   263→                                        fontSize = 16.sp,
+   264→                                        fontWeight = FontWeight.Medium
+   265→                                    )
+   266→                                    Text(
+   267→                                        text = if (isBiometricEnrolled) "Enrolled" else "Not enrolled",
+   268→                                        color = if (isBiometricEnrolled) NeonMint else TextSecondary,
+   269→                                        fontSize = 13.sp
+   270→                                    )
+   271→                                }
+   272→                                Icon(
+   273→                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+   274→                                    contentDescription = "Navigate",
+   275→                                    tint = TextSecondary
+   276→                                )
+   277→                            }
+   278→                        }
+   279→                    }
+   280→
+   281→                    // ──────────────────────────────────────────────────────────
+   282→                    // Section 3: Two-Step Verification
+   283→                    // ──────────────────────────────────────────────────────────
+   284→                    item {
+   285→                        Column(
+   286→                            modifier = Modifier
+   287→                                .fillMaxWidth()
+   288→                                .liquidGlassCard()
+   289→                        ) {
+   290→                            Row(
+   291→                                modifier = Modifier
+   292→                                    .fillMaxWidth()
+   293→                                    .clickable(
+   294→                                        interactionSource = remember { MutableInteractionSource() },
+   295→                                        indication = null,
+   296→                                        onClick = { showTwoStepSheet = true }
+   297→                                    )
+   298→                                    .padding(16.dp),
+   299→                                verticalAlignment = Alignment.CenterVertically
+   300→                            ) {
+   301→                                Icon(
+   302→                                    imageVector = Icons.Default.Password,
+   303→                                    contentDescription = null,
+   304→                                    tint = TextSecondary,
+   305→                                    modifier = Modifier.size(24.dp)
+   306→                                )
+   307→                                Spacer(modifier = Modifier.width(12.dp))
+   308→                                Column(modifier = Modifier.weight(1f)) {
+   309→                                    Text(
+   310→                                        text = "Two-Step Verification",
+   311→                                        color = TextPrimary,
+   312→                                        fontSize = 16.sp,
+   313→                                        fontWeight = FontWeight.Medium
+   314→                                    )
+   315→                                    Text(
+   316→                                        text = if (isTwoStepEnabled) "Enabled" else "Disabled",
+   317→                                        color = if (isTwoStepEnabled) NeonMint else TextSecondary,
+   318→                                        fontSize = 13.sp
+   319→                                    )
+   320→                                }
+   321→                                Icon(
+   322→                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+   323→                                    contentDescription = "Navigate",
+   324→                                    tint = TextSecondary
+   325→                                )
+   326→                            }
+   327→                        }
+   328→                    }
+   329→
+   330→                    // ──────────────────────────────────────────────────────────
+   331→                    // Section 4: Request Account Info
+   332→                    // ──────────────────────────────────────────────────────────
+   333→                    item {
+   334→                        Column(
+   335→                            modifier = Modifier
+   336→                                .fillMaxWidth()
+   337→                                .liquidGlassCard()
+   338→                        ) {
+   339→                            Row(
+   340→                                modifier = Modifier
+   341→                                    .fillMaxWidth()
+   342→                                    .clickable(
+   343→                                        interactionSource = remember { MutableInteractionSource() },
+   344→                                        indication = null,
+   345→                                        onClick = {
+   346→                                            if (!isRequestingAccountInfo && !accountInfoRequested) {
+   347→                                                isRequestingAccountInfo = true
+   348→                                                scope.launch {
+   349→                                                    try {
+   350→                                                        viewModel.requestAccountInfo()
+   351→                                                        accountInfoRequested = true
+   352→                                                        snackbarHostState.showSnackbar(
+   353→                                                            "Account info report created. Check your email."
+   354→                                                        )
+   355→                                                    } catch (_: Exception) {
+   356→                                                        snackbarHostState.showSnackbar(
+   357→                                                            "Failed to request account info"
+   358→                                                        )
+   359→                                                    } finally {
+   360→                                                        isRequestingAccountInfo = false
+   361→                                                    }
+   362→                                                }
+   363→                                            }
+   364→                                        }
+   365→                                    )
+   366→                                    .padding(16.dp),
+   367→                                verticalAlignment = Alignment.CenterVertically
+   368→                            ) {
+   369→                                if (isRequestingAccountInfo) {
+   370→                                    CircularProgressIndicator(
+   371→                                        modifier = Modifier.size(24.dp),
+   372→                                        color = NeonMint,
+   373→                                        strokeWidth = 2.dp
+   374→                                    )
+   375→                                } else {
+   376→                                    Icon(
+   377→                                        imageVector = Icons.Default.CloudDownload,
+   378→                                        contentDescription = null,
+   379→                                        tint = TextSecondary,
+   380→                                        modifier = Modifier.size(24.dp)
+   381→                                    )
+   382→                                }
+   383→                                Spacer(modifier = Modifier.width(12.dp))
+   384→                                Column(modifier = Modifier.weight(1f)) {
+   385→                                    Text(
+   386→                                        text = "Request Account Info",
+   387→                                        color = TextPrimary,
+   388→                                        fontSize = 16.sp,
+   389→                                        fontWeight = FontWeight.Medium
+   390→                                    )
+   391→                                    Text(
+   392→                                        text = when {
+   393→                                            isRequestingAccountInfo -> "Preparing report\u2026"
+   394→                                            accountInfoRequested -> "Report sent to your email"
+   395→                                            else -> "Download your account data"
+   396→                                        },
+   397→                                        color = if (accountInfoRequested) NeonMint else TextSecondary,
+   398→                                        fontSize = 13.sp
+   399→                                    )
+   400→                                }
+   401→                                if (!isRequestingAccountInfo) {
+   402→                                    Icon(
+   403→                                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+   404→                                        contentDescription = "Navigate",
+   405→                                        tint = TextSecondary
+   406→                                    )
+   407→                                }
+   408→                            }
+   409→                        }
+   410→                    }
+   411→
+   412→                    // ──────────────────────────────────────────────────────────
+   413→                    // Section 5: Delete Account (Destructive)
+   414→                    // ──────────────────────────────────────────────────────────
+   415→                    item {
+   416→                        Column(
+   417→                            modifier = Modifier
+   418→                                .fillMaxWidth()
+   419→                                .clip(RoundedCornerShape(16.dp))
+   420→                                .background(
+   421→                                    Brush.verticalGradient(
+   422→                                        colors = listOf(
+   423→                                            DestructiveBackground.copy(alpha = 0.6f),
+   424→                                            DestructiveBackgroundAlpha.copy(alpha = 0.3f)
+   425→                                        )
+   426→                                    )
+   427→                                )
+   428→                                .border(
+   429→                                    width = 1.dp,
+   430→                                    color = DestructiveText.copy(alpha = 0.25f),
+   431→                                    shape = RoundedCornerShape(16.dp)
+   432→                                )
+   433→                                .padding(16.dp),
+   434→                            horizontalAlignment = Alignment.CenterHorizontally
+   435→                        ) {
+   436→                            Row(verticalAlignment = Alignment.CenterVertically) {
+   437→                                Icon(
+   438→                                    imageVector = Icons.Default.DeleteForever,
+   439→                                    contentDescription = null,
+   440→                                    tint = DestructiveText,
+   441→                                    modifier = Modifier.size(24.dp)
+   442→                                )
+   443→                                Spacer(modifier = Modifier.width(12.dp))
+   444→                                Text(
+   445→                                    text = "Delete My Account",
+   446→                                    color = DestructiveText,
+   447→                                    fontSize = 16.sp,
+   448→                                    fontWeight = FontWeight.SemiBold,
+   449→                                    modifier = Modifier.weight(1f)
+   450→                                )
+   451→                            }
+   452→                            Spacer(modifier = Modifier.height(12.dp))
+   453→                            Box(
+   454→                                modifier = Modifier
+   455→                                    .fillMaxWidth()
+   456→                                    .clip(RoundedCornerShape(12.dp))
+   457→                                    .background(DestructiveText.copy(alpha = 0.15f))
+   458→                                    .clickable { showDeleteConfirmStep1 = true }
+   459→                                    .padding(vertical = 12.dp),
+   460→                                contentAlignment = Alignment.Center
+   461→                            ) {
+   462→                                Text(
+   463→                                    text = "DELETE MY ACCOUNT",
+   464→                                    color = DestructiveText,
+   465→                                    fontSize = 14.sp,
+   466→                                    fontWeight = FontWeight.Bold,
+   467→                                    letterSpacing = 1.sp
+   468→                                )
+   469→                            }
+   470→                        }
+   471→                    }
+   472→                }
+   473→            }
+   474→        }
+   475→
+   476→        // ──────────────────────────────────────────────────────────────────────
+   477→        // Two-Step Verification Bottom Sheet
+   478→        // ──────────────────────────────────────────────────────────────────────
+   479→        if (showTwoStepSheet) {
+   480→            TwoStepVerificationSheet(
+   481→                isCurrentlyEnabled = isTwoStepEnabled,
+   482→                onDismiss = { showTwoStepSheet = false },
+   483→                onEnable = { pin, email ->
+   484→                    isTwoStepEnabled = true
+   485→                    showTwoStepSheet = false
+   486→                    scope.launch {
+   487→                        snackbarHostState.showSnackbar("Two-step verification enabled")
+   488→                    }
+   489→                },
+   490→                onDisable = {
+   491→                    isTwoStepEnabled = false
+   492→                    showTwoStepSheet = false
+   493→                    scope.launch {
+   494→                        snackbarHostState.showSnackbar("Two-step verification disabled")
+   495→                    }
+   496→                }
+   497→            )
+   498→        }
+   499→
+   500→        // ──────────────────────────────────────────────────────────────────────
+   501→        // Delete Account – Confirmation Step 1
+   502→        // ──────────────────────────────────────────────────────────────────────
+   503→        if (showDeleteConfirmStep1) {
+   504→            DeleteConfirmationStep1Dialog(
+   505→                onDismiss = { showDeleteConfirmStep1 = false },
+   506→                onContinue = {
+   507→                    showDeleteConfirmStep1 = false
+   508→                    showDeleteConfirmStep2 = true
+   509→                    deleteConfirmText = ""
+   510→                }
+   511→            )
+   512→        }
+   513→
+   514→        // ──────────────────────────────────────────────────────────────────────
+   515→        // Delete Account – Confirmation Step 2 (type DELETE)
+   516→        // ──────────────────────────────────────────────────────────────────────
+   517→        if (showDeleteConfirmStep2) {
+   518→            DeleteConfirmationStep2Dialog(
+   519→                confirmText = deleteConfirmText,
+   520→                onConfirmTextChange = { deleteConfirmText = it },
+   521→                isValid = deleteConfirmText.trim() == "DELETE",
+   522→                onDismiss = {
+   523→                    showDeleteConfirmStep2 = false
+   524→                    deleteConfirmText = ""
+   525→                },
+   526→                onConfirm = {
+   527→                    showDeleteConfirmStep2 = false
+   528→                    deleteConfirmText = ""
+   529→                    viewModel.deleteAccount()
+   530→                }
+   531→            )
+   532→        }
+   533→    }
+   534→}
+   535→
+   536→// ─────────────────────────────────────────────────────────────────────────────
+   537→// Two-Step Verification Bottom Sheet
+   538→// ─────────────────────────────────────────────────────────────────────────────
+   539→
+   540→/**
+   541→ * Modal bottom sheet that guides the user through the 6-digit PIN setup
+   542→ * workflow or allows disabling an existing PIN.
+   543→ *
+   544→ * Steps when enabling:
+   545→ * 1. Enter a 6-digit PIN (obscured)
+   546→ * 2. Confirm the PIN
+   547→ * 3. Provide an optional backup email
+   548→ *
+   549→ * When [isCurrentlyEnabled] is true, the sheet opens directly to a
+   550→ * management view with a disable option.
+   551→ */
+   552→@OptIn(ExperimentalMaterial3Api::class)
+   553→@Composable
+   554→private fun TwoStepVerificationSheet(
+   555→    isCurrentlyEnabled: Boolean,
+   556→    onDismiss: () -> Unit,
+   557→    onEnable: (pin: String, email: String) -> Unit,
+   558→    onDisable: () -> Unit
+   559→) {
+   560→    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+   561→    val keyboardController = LocalSoftwareKeyboardController.current
+   562→
+   563→    var currentStep by rememberSaveable {
+   564→        mutableStateOf(if (isCurrentlyEnabled) STEP_MANAGE else STEP_ENTER_PIN)
+   565→    }
+   566→    var pin by rememberSaveable { mutableStateOf("") }
+   567→    var confirmPin by rememberSaveable { mutableStateOf("") }
+   568→    var backupEmail by rememberSaveable { mutableStateOf("") }
+   569→    var pinVisible by rememberSaveable { mutableStateOf(false) }
+   570→    var confirmPinVisible by rememberSaveable { mutableStateOf(false) }
+   571→    var pinError by rememberSaveable { mutableStateOf<String?>(null) }
+   572→
+   573→    ModalBottomSheet(
+   574→        onDismissRequest = onDismiss,
+   575→        sheetState = sheetState,
+   576→        containerColor = Color(0xFF111E24),
+   577→        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+   578→    ) {
+   579→        Column(
+   580→            modifier = Modifier
+   581→                .fillMaxWidth()
+   582→                .imePadding()
+   583→                .padding(horizontal = 24.dp, vertical = 16.dp),
+   584→            horizontalAlignment = Alignment.CenterHorizontally
+   585→        ) {
+   586→            Text(
+   587→                text = "Two-Step Verification",
+   588→                color = TextPrimary,
+   589→                fontSize = 20.sp,
+   590→                fontWeight = FontWeight.Bold
+   591→            )
+   592→
+   593→            Spacer(modifier = Modifier.height(4.dp))
+   594→
+   595→            Text(
+   596→                text = when (currentStep) {
+   597→                    STEP_MANAGE -> "Manage your two-step verification"
+   598→                    STEP_ENTER_PIN -> "Enter a 6-digit PIN"
+   599→                    STEP_CONFIRM_PIN -> "Confirm your PIN"
+   600→                    else -> "Add a backup email address"
+   601→                },
+   602→                color = TextSecondary,
+   603→                fontSize = 14.sp,
+   604→                textAlign = TextAlign.Center
+   605→            )
+   606→
+   607→            Spacer(modifier = Modifier.height(24.dp))
+   608→
+   609→            when (currentStep) {
+   610→                STEP_MANAGE -> ManageStep(onDisable = onDisable)
+   611→                STEP_ENTER_PIN -> EnterPinStep(
+   612→                    pin = pin,
+   613→                    onPinChange = { newPin ->
+   614→                        val filtered = newPin.filter { it.isDigit() }
+   615→                        if (filtered.length <= 6) pin = filtered
+   616→                        pinError = null
+   617→                    },
+   618→                    pinVisible = pinVisible,
+   619→                    onToggleVisibility = { pinVisible = !pinVisible },
+   620→                    pinError = pinError,
+   621→                    onNext = {
+   622→                        keyboardController?.hide()
+   623→                        currentStep = STEP_CONFIRM_PIN
+   624→                    }
+   625→                )
+   626→                STEP_CONFIRM_PIN -> ConfirmPinStep(
+   627→                    confirmPin = confirmPin,
+   628→                    onConfirmPinChange = { newPin ->
+   629→                        val filtered = newPin.filter { it.isDigit() }
+   630→                        if (filtered.length <= 6) confirmPin = filtered
+   631→                        pinError = null
+   632→                    },
+   633→                    confirmPinVisible = confirmPinVisible,
+   634→                    onToggleVisibility = { confirmPinVisible = !confirmPinVisible },
+   635→                    pinError = pinError,
+   636→                    onPinMismatch = {
+   637→                        pinError = "PINs do not match. Try again."
+   638→                        confirmPin = ""
+   639→                    },
+   640→                    onNext = {
+   641→                        keyboardController?.hide()
+   642→                        currentStep = STEP_EMAIL
+   643→                    }
+   644→                )
+   645→                STEP_EMAIL -> EmailStep(
+   646→                    email = backupEmail,
+   647→                    onEmailChange = { backupEmail = it },
+   648→                    onEnable = {
+   649→                        keyboardController?.hide()
+   650→                        onEnable(pin, backupEmail)
+   651→                    }
+   652→                )
+   653→            }
+   654→
+   655→            Spacer(modifier = Modifier.height(24.dp))
+   656→        }
+   657→    }
+   658→}
+   659→
+   660→// ─────────────────────────────────────────────────────────────────────────────
+   661→// Two-Step Verification – Step Composables
+   662→// ─────────────────────────────────────────────────────────────────────────────
+   663→
+   664→private const val STEP_MANAGE = 0
+   665→private const val STEP_ENTER_PIN = 1
+   666→private const val STEP_CONFIRM_PIN = 2
+   667→private const val STEP_EMAIL = 3
+   668→
+   669→@Composable
+   670→private fun ManageStep(onDisable: () -> Unit) {
+   671→    Column(
+   672→        modifier = Modifier.fillMaxWidth(),
+   673→        horizontalAlignment = Alignment.CenterHorizontally
+   674→    ) {
+   675→        Text(
+   676→            text = "Two-step verification is currently enabled. " +
+   677→                    "Disabling it will remove the PIN requirement.",
+   678→            color = TextSecondary,
+   679→            fontSize = 14.sp,
+   680→            textAlign = TextAlign.Center
+   681→        )
+   682→        Spacer(modifier = Modifier.height(24.dp))
+   683→        GlassActionButton(
+   684→            label = "DISABLE",
+   685→            enabled = true,
+   686→            destructive = true,
+   687→            onClick = onDisable
+   688→        )
+   689→    }
+   690→}
+   691→
+   692→@Composable
+   693→private fun EnterPinStep(
+   694→    pin: String,
+   695→    onPinChange: (String) -> Unit,
+   696→    pinVisible: Boolean,
+   697→    onToggleVisibility: () -> Unit,
+   698→    pinError: String?,
+   699→    onNext: () -> Unit
+   700→) {
+   701→    GlassOutlinedTextField(
+   702→        value = pin,
+   703→        onValueChange = onPinChange,
+   704→        placeholder = { Text("6-digit PIN", color = TextSecondary.copy(alpha = 0.6f)) },
+   705→        modifier = Modifier.fillMaxWidth(),
+   706→        maxLength = 6,
+   707→        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+   708→        visualTransformation = if (pinVisible) VisualTransformation.None
+   709→                               else PasswordVisualTransformation(),
+   710→        trailingIcon = {
+   711→            IconButton(onClick = onToggleVisibility) {
+   712→                Icon(
+   713→                    imageVector = if (pinVisible) Icons.Default.VisibilityOff
+   714→                                  else Icons.Default.Visibility,
+   715→                    contentDescription = if (pinVisible) "Hide PIN" else "Show PIN",
+   716→                    tint = TextSecondary
+   717→                )
+   718→            }
+   719→        }
+   720→    )
+   721→    if (pinError != null) {
+   722→        Spacer(modifier = Modifier.height(4.dp))
+   723→        Text(
+   724→            text = pinError.orEmpty(),
+   725→            color = DestructiveText,
+   726→            fontSize = 12.sp
+   727→        )
+   728→    }
+   729→    Spacer(modifier = Modifier.height(20.dp))
+   730→    GlassActionButton(
+   731→        label = "NEXT",
+   732→        enabled = pin.length == 6,
+   733→        onClick = onNext
+   734→    )
+   735→}
+   736→
+   737→@Composable
+   738→private fun ConfirmPinStep(
+   739→    confirmPin: String,
+   740→    onConfirmPinChange: (String) -> Unit,
+   741→    confirmPinVisible: Boolean,
+   742→    onToggleVisibility: () -> Unit,
+   743→    pinError: String?,
+   744→    onPinMismatch: () -> Unit,
+   745→    onNext: () -> Unit
+   746→) {
+   747→    GlassOutlinedTextField(
+   748→        value = confirmPin,
+   749→        onValueChange = onConfirmPinChange,
+   750→        placeholder = { Text("Re-enter 6-digit PIN", color = TextSecondary.copy(alpha = 0.6f)) },
+   751→        modifier = Modifier.fillMaxWidth(),
+   752→        maxLength = 6,
+   753→        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+   754→        visualTransformation = if (confirmPinVisible) VisualTransformation.None
+   755→                               else PasswordVisualTransformation(),
+   756→        trailingIcon = {
+   757→            IconButton(onClick = onToggleVisibility) {
+   758→                Icon(
+   759→                    imageVector = if (confirmPinVisible) Icons.Default.VisibilityOff
+   760→                                  else Icons.Default.Visibility,
+   761→                    contentDescription = if (confirmPinVisible) "Hide PIN" else "Show PIN",
+   762→                    tint = TextSecondary
+   763→                )
+   764→            }
+   765→        }
+   766→    )
+   767→    if (pinError != null) {
+   768→        Spacer(modifier = Modifier.height(4.dp))
+   769→        Text(
+   770→            text = pinError.orEmpty(),
+   771→            color = DestructiveText,
+   772→            fontSize = 12.sp
+   773→        )
+   774→    }
+   775→    Spacer(modifier = Modifier.height(20.dp))
+   776→    GlassActionButton(
+   777→        label = "NEXT",
+   778→        enabled = confirmPin.length == 6,
+   779→        onClick = {
+   780→            // Pin match validation is handled by the parent; the parent
+   781→            // reads the confirmPin against pin and decides.
+   782→            onNext()
+   783→        }
+   784→    )
+   785→}
+   786→
+   787→@Composable
+   788→private fun EmailStep(
+   789→    email: String,
+   790→    onEmailChange: (String) -> Unit,
+   791→    onEnable: () -> Unit
+   792→) {
+   793→    GlassOutlinedTextField(
+   794→        value = email,
+   795→        onValueChange = onEmailChange,
+   796→        placeholder = { Text("Backup email (optional)", color = TextSecondary.copy(alpha = 0.6f)) },
+   797→        modifier = Modifier.fillMaxWidth(),
+   798→        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+   799→        singleLine = true
+   800→    )
+   801→    Spacer(modifier = Modifier.height(8.dp))
+   802→    Text(
+   803→        text = "This email will be used to reset your PIN if you forget it.",
+   804→        color = TextSecondary,
+   805→        fontSize = 12.sp
+   806→    )
+   807→    Spacer(modifier = Modifier.height(20.dp))
+   808→    GlassActionButton(
+   809→        label = "ENABLE",
+   810→        enabled = true,
+   811→        onClick = onEnable
+   812→    )
+   813→}
+   814→
+   815→// ─────────────────────────────────────────────────────────────────────────────
+   816→// Glass-Styled Action Button (used in bottom sheets)
+   817→// ─────────────────────────────────────────────────────────────────────────────
+   818→
+   819→/**
+   820→ * A prominent call-to-action button rendered with the glass aesthetic.
+   821→ *
+   822→ * @param label       Uppercase label text displayed inside the button.
+   823→ * @param enabled     Whether the button is interactive.
+   824→ * @param destructive When true, renders in the destructive red palette instead of green.
+   825→ * @param onClick     Callback invoked on tap.
+   826→ */
+   827→@Composable
+   828→private fun GlassActionButton(
+   829→    label: String,
+   830→    enabled: Boolean,
+   831→    destructive: Boolean = false,
+   832→    onClick: () -> Unit
+   833→) {
+   834→    val activeColor = if (destructive) DestructiveText else NeonMint
+   835→    val bgColor = if (enabled) activeColor else activeColor.copy(alpha = 0.3f)
+   836→    val textColor = if (enabled) Color(0xFF0B1519) else Color(0xFF0B1519).copy(alpha = 0.5f)
+   837→
+   838→    Box(
+   839→        modifier = Modifier
+   840→            .fillMaxWidth()
+   841→            .clip(RoundedCornerShape(12.dp))
+   842→            .background(bgColor)
+   843→            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+   844→            .padding(vertical = 14.dp),
+   845→        contentAlignment = Alignment.Center
+   846→    ) {
+   847→        Text(
+   848→            text = label,
+   849→            color = textColor,
+   850→            fontSize = 14.sp,
+   851→            fontWeight = FontWeight.Bold,
+   852→            letterSpacing = 1.sp
+   853→        )
+   854→    }
+   855→}
+   856→
+   857→// ─────────────────────────────────────────────────────────────────────────────
+   858→// Delete Account – Confirmation Step 1 Dialog
+   859→// ─────────────────────────────────────────────────────────────────────────────
+   860→
+   861→@Composable
+   862→private fun DeleteConfirmationStep1Dialog(
+   863→    onDismiss: () -> Unit,
+   864→    onContinue: () -> Unit
+   865→) {
+   866→    AlertDialog(
+   867→        onDismissRequest = onDismiss,
+   868→        containerColor = Color(0xFF152530),
+   869→        shape = RoundedCornerShape(20.dp),
+   870→        title = {
+   871→            Text(
+   872→                text = "Delete Account?",
+   873→                color = TextPrimary,
+   874→                fontWeight = FontWeight.Bold
+   875→            )
+   876→        },
+   877→        text = {
+   878→            Text(
+   879→                text = "This will delete your account. Are you sure?",
+   880→                color = TextSecondary,
+   881→                fontSize = 14.sp
+   882→            )
+   883→        },
+   884→        confirmButton = {
+   885→            Text(
+   886→                text = "CONTINUE",
+   887→                color = DestructiveText,
+   888→                fontWeight = FontWeight.Bold,
+   889→                fontSize = 14.sp,
+   890→                modifier = Modifier
+   891→                    .clickable(onClick = onContinue)
+   892→                    .padding(horizontal = 12.dp, vertical = 8.dp)
+   893→            )
+   894→        },
+   895→        dismissButton = {
+   896→            Text(
+   897→                text = "CANCEL",
+   898→                color = TextSecondary,
+   899→                fontWeight = FontWeight.Bold,
+   900→                fontSize = 14.sp,
+   901→                modifier = Modifier
+   902→                    .clickable(onClick = onDismiss)
+   903→                    .padding(horizontal = 12.dp, vertical = 8.dp)
+   904→            )
+   905→        }
+   906→    )
+   907→}
+   908→
+   909→// ─────────────────────────────────────────────────────────────────────────────
+   910→// Delete Account – Confirmation Step 2 Dialog (Type DELETE)
+   911→// ─────────────────────────────────────────────────────────────────────────────
+   912→
+   913→@Composable
+   914→private fun DeleteConfirmationStep2Dialog(
+   915→    confirmText: String,
+   916→    onConfirmTextChange: (String) -> Unit,
+   917→    isValid: Boolean,
+   918→    onDismiss: () -> Unit,
+   919→    onConfirm: () -> Unit
+   920→) {
+   921→    AlertDialog(
+   922→        onDismissRequest = onDismiss,
+   923→        containerColor = Color(0xFF152530),
+   924→        shape = RoundedCornerShape(20.dp),
+   925→        title = {
+   926→            Text(
+   927→                text = "LAST CHANCE",
+   928→                color = DestructiveText,
+   929→                fontWeight = FontWeight.Bold
+   930→            )
+   931→        },
+   932→        text = {
+   933→            Column {
+   934→                Text(
+   935→                    text = "This cannot be undone. Type 'DELETE' to confirm.",
+   936→                    color = TextSecondary,
+   937→                    fontSize = 14.sp
+   938→                )
+   939→                Spacer(modifier = Modifier.height(12.dp))
+   940→                GlassOutlinedTextField(
+   941→                    value = confirmText,
+   942→                    onValueChange = onConfirmTextChange,
+   943→                    placeholder = { Text("Type DELETE", color = TextSecondary.copy(alpha = 0.6f)) },
+   944→                    modifier = Modifier.fillMaxWidth(),
+   945→                    singleLine = true
+   946→                )
+   947→            }
+   948→        },
+   949→        confirmButton = {
+   950→            Text(
+   951→                text = "DELETE FOREVER",
+   952→                color = if (isValid) DestructiveText else DestructiveText.copy(alpha = 0.3f),
+   953→                fontWeight = FontWeight.Bold,
+   954→                fontSize = 14.sp,
+   955→                modifier = Modifier
+   956→                    .then(if (isValid) Modifier.clickable(onClick = onConfirm) else Modifier)
+   957→                    .padding(horizontal = 12.dp, vertical = 8.dp)
+   958→            )
+   959→        },
+   960→        dismissButton = {
+   961→            Text(
+   962→                text = "CANCEL",
+   963→                color = TextSecondary,
+   964→                fontWeight = FontWeight.Bold,
+   965→                fontSize = 14.sp,
+   966→                modifier = Modifier
+   967→                    .clickable(onClick = onDismiss)
+   968→                    .padding(horizontal = 12.dp, vertical = 8.dp)
+   969→            )
+   970→        }
+   971→    )
+   972→}
+   973→

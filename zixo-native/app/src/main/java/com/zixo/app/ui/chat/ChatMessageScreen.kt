@@ -26,14 +26,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Forward
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Send
@@ -56,18 +57,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.zixo.app.domain.model.CallState
+import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.model.MessageContentType
 import com.zixo.app.domain.model.MessageModel
-import com.zixo.app.ui.components.TopBarAction
+import com.zixo.app.ui.components.GlassOutlinedTextField
 import com.zixo.app.ui.components.ZixoGlassBackground
 import com.zixo.app.ui.components.liquidGlassCard
+import com.zixo.app.ui.components.liquidGlassContainer
 import com.zixo.app.ui.theme.DarkPetrolCharcoal
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
@@ -98,19 +104,22 @@ private val ReactionEmojis = listOf("❤️", "😂", "😮", "😢", "👍", "�
  * - 74dp liquid glass pill-shaped input tray
  * - Outgoing messages: glowing neon mint transparency background
  * - Incoming messages: translucent dark petrol grey curves
- * - Long-press action menu with 3D reactions, reply, forward, delete
+ * - Long-press action menu with 3D reactions, reply, forward, delete, copy
  * - Reply preview bar above input tray
  * - Call state overlay when active
- * - Top bar with contact info and call icons
- * - Media messages with Coil [AsyncImage] thumbnails
+ * - Top bar with contact avatar, name, online status, and call icons
+ * - Communication gate check — blocked overlay if not mutual contact
+ * - NavController for navigation
  *
  * @param threadId The ID of the chat thread to display.
+ * @param navController Navigation controller for screen transitions.
  * @param onBack Callback for the back navigation button.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatMessageScreen(
     threadId: String,
+    navController: NavController,
     onBack: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
@@ -123,14 +132,10 @@ fun ChatMessageScreen(
     val showActionMenu by viewModel.showActionMenu.collectAsState()
     val currentUserId by viewModel.currentUserId.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val communicationGate by viewModel.communicationGate.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
-
-    // Load thread data on first composition
-    LaunchedEffect(threadId) {
-        viewModel.loadThread(threadId)
-    }
 
     // Auto-scroll to bottom on new messages
     LaunchedEffect(messages.size) {
@@ -155,6 +160,9 @@ fun ChatMessageScreen(
     val contactAvatar = otherParticipant?.avatarUrl ?: ""
     val isOnline = otherParticipant?.isOnline ?: false
 
+    // Check if communication is blocked
+    val isBlocked = communicationGate is CommunicationGate.Blocked
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Color.Transparent,
@@ -173,6 +181,7 @@ fun ChatMessageScreen(
                 // ── Top Bar ────────────────────────────────────────────────
                 ChatTopBar(
                     contactName = contactName,
+                    contactAvatar = contactAvatar,
                     isOnline = isOnline,
                     onBackClick = onBack,
                     onAudioCallClick = { viewModel.startAudioCall() },
@@ -214,7 +223,7 @@ fun ChatMessageScreen(
                         ReplyPreviewBar(
                             senderName = replied.replyToSenderName ?: replied.senderDisplayName,
                             previewText = replied.replyToPreview ?: replied.content,
-                            onDismiss = { viewModel.clearReply() }
+                            onDismiss = { viewModel.clearReplyTo() }
                         )
                     }
                 }
@@ -222,10 +231,19 @@ fun ChatMessageScreen(
                 // ── Input Tray (74dp Liquid Glass Pill) ────────────────────
                 InputTray(
                     value = inputText,
-                    onValueChange = { viewModel.inputText.value = it },
+                    onValueChange = { viewModel.onInputTextChanged(it) },
                     onSendClick = { viewModel.sendMessage() },
                     isSending = isSending,
+                    enabled = !isBlocked,
                     modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // ── Communication Gate Blocked Overlay ────────────────────────
+            if (isBlocked) {
+                CommunicationGateOverlay(
+                    reason = (communicationGate as? CommunicationGate.Blocked)?.reason
+                        ?: "You can only message mutual contacts"
                 )
             }
 
@@ -238,8 +256,7 @@ fun ChatMessageScreen(
                         viewModel.addReaction(actionMessage.id, emoji, isThreeD)
                     },
                     onReply = {
-                        viewModel.replyToMessage.value = actionMessage
-                        viewModel.dismissActionMenu()
+                        viewModel.setReplyTo(actionMessage.id)
                     },
                     onForward = {
                         viewModel.forwardMessage(actionMessage.id, emptyList())
@@ -249,6 +266,9 @@ fun ChatMessageScreen(
                     },
                     onDeleteForEveryone = {
                         viewModel.deleteForEveryone(actionMessage.id)
+                    },
+                    onCopy = {
+                        // Handled inside the overlay
                     },
                     onDismiss = { viewModel.dismissActionMenu() }
                 )
@@ -271,6 +291,7 @@ fun ChatMessageScreen(
 @Composable
 private fun ChatTopBar(
     contactName: String,
+    contactAvatar: String,
     isOnline: Boolean,
     onBackClick: () -> Unit,
     onAudioCallClick: () -> Unit,
@@ -278,21 +299,36 @@ private fun ChatTopBar(
 ) {
     TopAppBar(
         title = {
-            Column {
-                Text(
-                    text = contactName,
-                    color = TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = if (isOnline) "Online" else "Offline",
-                    color = if (isOnline) OnlineIndicatorColor else TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Normal
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Contact avatar
+                if (contactAvatar.isNotBlank()) {
+                    AsyncImage(
+                        model = contactAvatar,
+                        contentDescription = "Avatar",
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, GlassBorderColor, CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                }
+                Column {
+                    Text(
+                        text = contactName,
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (isOnline) "Online" else "Offline",
+                        color = if (isOnline) OnlineIndicatorColor else TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                }
             }
         },
         navigationIcon = {
@@ -527,7 +563,7 @@ private fun MessageBubble(
                 }
             }
 
-            // Reactions row
+            // Reactions row — emoji badges below the bubble
             if (message.reactions.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -600,7 +636,7 @@ private fun ReplyPreviewBar(
     }
 }
 
-// ── Input Tray ────────────────────────────────────────────────────────────────
+// ── Input Tray (74dp Liquid Glass Pill) ───────────────────────────────────────
 
 @Composable
 private fun InputTray(
@@ -608,6 +644,7 @@ private fun InputTray(
     onValueChange: (String) -> Unit,
     onSendClick: () -> Unit,
     isSending: Boolean,
+    enabled: Boolean,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -617,52 +654,56 @@ private fun InputTray(
             .clip(RoundedCornerShape(InputTrayCornerSize))
             .background(DarkPetrolCharcoal.copy(alpha = 0.6f))
             .border(1.dp, GlassBorderColor, RoundedCornerShape(InputTrayCornerSize))
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BasicTextField(
+        // Attach button (camera/image icon)
+        IconButton(
+            onClick = { /* TODO: Launch media picker */ },
+            enabled = enabled,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Image,
+                contentDescription = "Attach",
+                tint = if (enabled) TextSecondary else TextSecondary.copy(alpha = 0.4f)
+            )
+        }
+
+        // Text input field (GlassOutlinedTextField style)
+        GlassOutlinedTextField(
             value = value,
             onValueChange = onValueChange,
+            placeholder = {
+                Text(
+                    text = "Message…",
+                    color = TextSecondary.copy(alpha = 0.6f),
+                    fontSize = 15.sp
+                )
+            },
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight(),
-            textStyle = androidx.compose.ui.text.TextStyle(
-                color = TextPrimary,
-                fontSize = 15.sp
-            ),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(NeonMint),
-            maxLines = 4,
-            decorationBox = { innerTextField ->
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (value.isEmpty()) {
-                        Text(
-                            text = "Message…",
-                            color = TextSecondary,
-                            fontSize = 15.sp
-                        )
-                    }
-                    innerTextField()
-                }
-            }
+                .weight(1f),
+            enabled = enabled,
+            singleLine = false,
+            maxLength = 4096
         )
+
+        // Send button (NeonMint arrow icon)
         IconButton(
             onClick = onSendClick,
-            enabled = value.isNotBlank() && !isSending,
+            enabled = value.isNotBlank() && !isSending && enabled,
             modifier = Modifier.size(40.dp)
         ) {
             Icon(
                 imageVector = Icons.Filled.Send,
                 contentDescription = "Send",
-                tint = if (value.isNotBlank() && !isSending) NeonMint else TextSecondary
+                tint = if (value.isNotBlank() && !isSending && enabled) NeonMint else TextSecondary.copy(alpha = 0.4f)
             )
         }
     }
 }
 
-// ── Action Menu Overlay ───────────────────────────────────────────────────────
+// ── Action Menu Overlay (Frosted Glass) ───────────────────────────────────────
 
 @Composable
 private fun ActionMenuOverlay(
@@ -673,8 +714,11 @@ private fun ActionMenuOverlay(
     onForward: () -> Unit,
     onDeleteForMe: () -> Unit,
     onDeleteForEveryone: () -> Unit,
+    onCopy: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val clipboardManager = LocalClipboardManager.current
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -692,19 +736,17 @@ private fun ActionMenuOverlay(
                 )
         )
 
-        // Frosted glass action panel
+        // Frosted glass action panel — uses liquidGlassCard()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.Center)
                 .padding(horizontal = 24.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkPetrolCharcoal.copy(alpha = 0.85f))
-                .border(1.dp, GlassBorderColor, RoundedCornerShape(20.dp))
+                .liquidGlassCard()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 3D Reactions bar
+            // 3D Reactions bar (floating emoji picker with premium symbols)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -733,6 +775,16 @@ private fun ActionMenuOverlay(
                 icon = Icons.Filled.Forward,
                 label = "Forward",
                 onClick = onForward
+            )
+
+            // Copy option
+            ActionMenuItem(
+                icon = Icons.Filled.ContentCopy,
+                label = "Copy",
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(message.content))
+                    onDismiss()
+                }
             )
 
             // Delete for Me
@@ -791,6 +843,54 @@ private fun ActionMenuItem(
             fontSize = 15.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+// ── Communication Gate Blocked Overlay ────────────────────────────────────────
+
+/**
+ * Full-screen overlay shown when the communication gate blocks messaging.
+ * Displays a message explaining that only mutual contacts can exchange messages.
+ */
+@Composable
+private fun CommunicationGateOverlay(
+    reason: String
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.7f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp)
+                .liquidGlassContainer()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "🔒",
+                fontSize = 40.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Communication Blocked",
+                color = TextPrimary,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = reason,
+                color = TextSecondary,
+                fontSize = 14.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                lineHeight = 20.sp
+            )
+        }
     }
 }
 

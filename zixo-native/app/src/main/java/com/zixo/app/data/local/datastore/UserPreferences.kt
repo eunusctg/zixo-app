@@ -6,21 +6,24 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import com.zixo.app.domain.model.AudioProfile
 import com.zixo.app.domain.model.AutoDownloadMedia
-import com.zixo.app.domain.model.DefaultCallType
 import com.zixo.app.domain.model.FontSize
 import com.zixo.app.domain.model.LastSeenVisibility
 import com.zixo.app.domain.model.MediaCompressionProfile
 import com.zixo.app.domain.model.SelfDestructTimer
 import com.zixo.app.domain.model.ThemeMode
-import com.zixo.app.domain.model.VibrationPattern
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Legacy UserPreferences DataStore — superseded by PreferencesDataStore.
+ *
+ * This file remains for backward compatibility with any code still
+ * referencing it. New code should use PreferencesDataStore instead.
+ * All LiveKit/SIP references have been removed.
+ */
 @Singleton
 class UserPreferences @Inject constructor(
     private val dataStore: DataStore<Preferences>
@@ -130,64 +133,6 @@ class UserPreferences @Inject constructor(
         dataStore.edit { prefs -> prefs[MEDIA_COMPRESSION_PROFILE] = profile.name }
     }
 
-    // ── Calling ─────────────────────────────────────────────────────
-
-    val defaultCallType: Flow<DefaultCallType> = dataStore.data.map { prefs ->
-        prefs[DEFAULT_CALL_TYPE]?.let { DefaultCallType.valueOf(it) } ?: DefaultCallType.ASK_EVERY_TIME
-    }
-
-    suspend fun setDefaultCallType(callType: DefaultCallType) {
-        dataStore.edit { prefs -> prefs[DEFAULT_CALL_TYPE] = callType.name }
-    }
-
-    val noiseSuppressionEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[NOISE_SUPPRESSION_ENABLED] ?: true
-    }
-
-    suspend fun setNoiseSuppressionEnabled(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[NOISE_SUPPRESSION_ENABLED] = enabled }
-    }
-
-    val liveKitUrl: Flow<String> = dataStore.data.map { prefs ->
-        prefs[LIVEKIT_URL] ?: ""
-    }
-
-    suspend fun setLiveKitUrl(url: String) {
-        dataStore.edit { prefs -> prefs[LIVEKIT_URL] = url }
-    }
-
-    val sipOutboundPrefix: Flow<String> = dataStore.data.map { prefs ->
-        prefs[SIP_OUTBOUND_PREFIX] ?: ""
-    }
-
-    suspend fun setSipOutboundPrefix(prefix: String) {
-        dataStore.edit { prefs -> prefs[SIP_OUTBOUND_PREFIX] = prefix }
-    }
-
-    val simulcastEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[SIMULCAST_ENABLED] ?: false
-    }
-
-    suspend fun setSimulcastEnabled(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[SIMULCAST_ENABLED] = enabled }
-    }
-
-    val forceTurnRelay: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[FORCE_TURN_RELAY] ?: false
-    }
-
-    suspend fun setForceTurnRelay(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[FORCE_TURN_RELAY] = enabled }
-    }
-
-    val audioProfile: Flow<AudioProfile> = dataStore.data.map { prefs ->
-        prefs[AUDIO_PROFILE]?.let { AudioProfile.valueOf(it) } ?: AudioProfile.HIGH_FIDELITY
-    }
-
-    suspend fun setAudioProfile(profile: AudioProfile) {
-        dataStore.edit { prefs -> prefs[AUDIO_PROFILE] = profile.name }
-    }
-
     // ── Self-Destruct & Security ────────────────────────────────────
 
     val selfDestructDefault: Flow<SelfDestructTimer> = dataStore.data.map { prefs ->
@@ -232,58 +177,6 @@ class UserPreferences @Inject constructor(
         dataStore.edit { prefs -> prefs[FONT_SIZE_SCALE] = scale }
     }
 
-    // ── Notification Tones ───────────────────────────────────────────
-
-    val areConversationTonesEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[ARE_CONVERSATION_TONES_ENABLED] ?: true
-    }
-
-    suspend fun setConversationTonesEnabled(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[ARE_CONVERSATION_TONES_ENABLED] = enabled }
-    }
-
-    val groupNotificationToneUri: Flow<String> = dataStore.data.map { prefs ->
-        prefs[GROUP_NOTIFICATION_TONE_URI] ?: ""
-    }
-
-    suspend fun setGroupNotificationToneUri(uri: String) {
-        dataStore.edit { prefs -> prefs[GROUP_NOTIFICATION_TONE_URI] = uri }
-    }
-
-    val callRingtoneUri: Flow<String> = dataStore.data.map { prefs ->
-        prefs[CALL_RINGTONE_URI] ?: ""
-    }
-
-    suspend fun setCallRingtoneUri(uri: String) {
-        dataStore.edit { prefs -> prefs[CALL_RINGTONE_URI] = uri }
-    }
-
-    val videoCallRingtoneUri: Flow<String> = dataStore.data.map { prefs ->
-        prefs[VIDEO_CALL_RINGTONE_URI] ?: ""
-    }
-
-    suspend fun setVideoCallRingtoneUri(uri: String) {
-        dataStore.edit { prefs -> prefs[VIDEO_CALL_RINGTONE_URI] = uri }
-    }
-
-    val vibrationPattern: Flow<VibrationPattern> = dataStore.data.map { prefs ->
-        prefs[VIBRATION_PATTERN]?.let { VibrationPattern.valueOf(it) } ?: VibrationPattern.DEFAULT
-    }
-
-    suspend fun setVibrationPattern(pattern: VibrationPattern) {
-        dataStore.edit { prefs -> prefs[VIBRATION_PATTERN] = pattern.name }
-    }
-
-    // ── Debug ───────────────────────────────────────────────────────
-
-    val debugLoggingEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[DEBUG_LOGGING_ENABLED] ?: false
-    }
-
-    suspend fun setDebugLoggingEnabled(enabled: Boolean) {
-        dataStore.edit { prefs -> prefs[DEBUG_LOGGING_ENABLED] = enabled }
-    }
-
     // ── Clear all preferences ───────────────────────────────────────
 
     suspend fun clearAll() {
@@ -302,28 +195,13 @@ class UserPreferences @Inject constructor(
         private val MESSAGE_PREVIEW_ENABLED = booleanPreferencesKey("message_preview_enabled")
         private val DND_ENABLED = booleanPreferencesKey("dnd_enabled")
         private val AUTO_DOWNLOAD_MEDIA = stringPreferencesKey("auto_download_media")
-        private val DEFAULT_CALL_TYPE = stringPreferencesKey("default_call_type")
-        private val NOISE_SUPPRESSION_ENABLED = booleanPreferencesKey("noise_suppression_enabled")
-        private val LIVEKIT_URL = stringPreferencesKey("livekit_url")
-        private val SIP_OUTBOUND_PREFIX = stringPreferencesKey("sip_outbound_prefix")
-        private val SIMULCAST_ENABLED = booleanPreferencesKey("simulcast_enabled")
-        private val FORCE_TURN_RELAY = booleanPreferencesKey("force_turn_relay")
-        private val AUDIO_PROFILE = stringPreferencesKey("audio_profile")
         private val SELF_DESTRUCT_DEFAULT = stringPreferencesKey("self_destruct_default")
         private val APP_SWITCHER_PRIVACY_BLUR = booleanPreferencesKey("app_switcher_privacy_blur")
         private val MEDIA_COMPRESSION_PROFILE = stringPreferencesKey("media_compression_profile")
-        private val DEBUG_LOGGING_ENABLED = booleanPreferencesKey("debug_logging_enabled")
         private val CHAT_WALLPAPER = stringPreferencesKey("chat_wallpaper")
         private val NOTIFICATION_TONE = stringPreferencesKey("notification_tone")
         private val ENTER_IS_SEND = booleanPreferencesKey("enter_is_send")
         private val MEDIA_VISIBILITY_ENABLED = booleanPreferencesKey("media_visibility_enabled")
         private val FONT_SIZE_SCALE = floatPreferencesKey("font_size_scale")
-        private val ARE_CONVERSATION_TONES_ENABLED = booleanPreferencesKey("are_conversation_tones_enabled")
-        private val GROUP_NOTIFICATION_TONE_URI = stringPreferencesKey("group_notification_tone_uri")
-        private val CALL_RINGTONE_URI = stringPreferencesKey("call_ringtone_uri")
-        private val VIDEO_CALL_RINGTONE_URI = stringPreferencesKey("video_call_ringtone_uri")
-        private val VIBRATION_PATTERN = stringPreferencesKey("vibration_pattern")
     }
 }
-
-

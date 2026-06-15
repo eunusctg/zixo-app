@@ -2,86 +2,96 @@ package com.zixo.app.ui.screens.chats
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.zixo.app.data.repository.ChatRepository
-import com.zixo.app.data.repository.UserRepository
-import com.zixo.app.domain.model.ChatThread
-import com.zixo.app.domain.model.User
+import com.zixo.app.domain.model.ChatThreadModel
+import com.zixo.app.domain.repository.ChatRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
-data class ChatsUiState(
-    val threads: List<ChatThread> = emptyList(),
-    val searchQuery: String = "",
-    val isLoading: Boolean = false,
-    val currentUser: User? = null
-)
-
+/**
+ * ViewModel for the Chats tab screen — displays conversation thread list.
+ *
+ * Attaches continuous Firestore snapshot listeners to observe all threads
+ * the authenticated user is part of. Changes to thread metadata (new messages,
+ * unread counts, pinned state) appear instantly across devices via active
+ * Kotlin StateFlow pipes.
+ */
 @HiltViewModel
 class ChatsViewModel @Inject constructor(
-    private val chatRepository: ChatRepository,
-    private val userRepository: UserRepository
+    private val chatRepository: ChatRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatsUiState())
-    val uiState: StateFlow<ChatsUiState> = _uiState.asStateFlow()
+    private val _threads = MutableStateFlow<List<ChatThreadModel>>(emptyList())
+    val threads: StateFlow<List<ChatThreadModel>> = _threads.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val threadsFlow = chatRepository.getChatThreads()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    private val currentUserFlow = userRepository.getCurrentUserProfile()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private var allThreads: List<ChatThreadModel> = emptyList()
 
     init {
+        observeThreadsRealtime()
+    }
+
+    /**
+     * Attaches a continuous Firestore snapshot listener to the threads collection.
+     * Updates flow automatically whenever thread metadata changes.
+     */
+    private fun observeThreadsRealtime() {
         viewModelScope.launch {
-            combine(
-                threadsFlow,
-                _searchQuery,
-                currentUserFlow
-            ) { threads, query, user ->
-                val filtered = if (query.isBlank()) {
-                    threads
-                } else {
-                    chatRepository.searchThreads(query).first()
+            _isLoading.value = true
+            chatRepository.observeThreadsRealtime()
+                .catch { e ->
+                    Timber.e(e, "Failed to observe threads")
+                    _isLoading.value = false
                 }
-                ChatsUiState(
-                    threads = filtered,
-                    searchQuery = query,
-                    isLoading = false,
-                    currentUser = user
-                )
-            }.collect { state ->
-                _uiState.value = state
+                .collect { threadList ->
+                    allThreads = threadList.sortedWith(
+                        compareByDescending<ChatThreadModel> { it.isPinned }
+                            .thenByDescending { it.lastMessage?.timestamp ?: it.createdAt }
+                    )
+                    applyFilter()
+                    _isLoading.value = false
+                }
+        }
+    }
+
+    /**
+     * Filters the thread list based on the current search query.
+     * Searches thread display names and last message content.
+     */
+    fun filterThreads(query: String) {
+        _searchQuery.value = query
+        applyFilter()
+    }
+
+    private fun applyFilter() {
+        val query = _searchQuery.value.trim().lowercase()
+        _threads.value = if (query.isBlank()) {
+            allThreads
+        } else {
+            allThreads.filter { thread ->
+                val name = getThreadDisplayName(thread).lowercase()
+                val lastMsg = thread.lastMessage?.content?.lowercase() ?: ""
+                name.contains(query) || lastMsg.contains(query)
             }
         }
-
-        refresh()
     }
 
-    fun onSearchQueryChange(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun refresh() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            try {
-                chatRepository.syncThreadsFromRemote()
-            } catch (_: Exception) {
-                // Local data remains available; silently handle sync failure
-            } finally {
-                _uiState.update { it.copy(isLoading = false) }
-            }
+    private fun getThreadDisplayName(thread: ChatThreadModel): String {
+        return when {
+            !thread.groupName.isNullOrBlank() -> thread.groupName
+            else -> thread.participantProfiles.values.firstOrNull()?.displayName ?: "Unknown"
         }
     }
 }

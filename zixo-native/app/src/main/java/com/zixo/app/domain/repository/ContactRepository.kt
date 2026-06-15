@@ -26,7 +26,7 @@ interface ContactRepository {
      * username search, or phone number lookup is permitted by design.
      *
      * @param zixoNumber The exact 8-digit Zixo Number to search for.
-     * @return A [ContactSearchResult] indicating the outcome of the search.
+     * @return A [ContactSearchResult] flow indicating the outcome of the search.
      */
     fun searchByZixoNumber(zixoNumber: String): Flow<ContactSearchResult>
 
@@ -35,32 +35,37 @@ interface ContactRepository {
      *
      * This records a one-directional "add" in Firestore. The contact
      * is only considered "mutual" when the other user also adds back.
-     * The [ContactModel.isMutual] flag is updated automatically when
-     * both sides have confirmed.
      *
-     * @param contactUid The UID of the user to add as a contact.
-     * @return A [AddContactState] flow tracking the operation progress.
+     * @param targetUid The UID of the user to add as a contact.
+     * @return An [AddContactState] flow tracking the operation progress.
      */
-    fun addContact(contactUid: String): Flow<AddContactState>
+    fun addContact(targetUid: String): Flow<AddContactState>
+
+    /**
+     * Removes a contact from the current user's contact list.
+     * Breaks the mutual relationship if it existed.
+     *
+     * @param contactUid The UID of the contact to remove.
+     * @return A flow emitting Result success or failure.
+     */
+    fun removeContact(contactUid: String): Flow<Result<Unit>>
 
     /**
      * Observes the current user's complete contact list in real-time.
-     *
-     * Uses Firestore [addSnapshotListener] for continuous synchronization.
-     * Changes to contact profiles (name, avatar, online status) propagate
-     * instantly through the active Kotlin StateFlow pipeline.
+     * Uses Firestore addSnapshotListener for continuous synchronization.
      *
      * @return A flow emitting the current list of [ContactModel] entries.
      */
-    fun observeContacts(): Flow<List<ContactModel>>
+    fun getContacts(): Flow<List<ContactModel>>
 
     /**
-     * Observes a specific contact's real-time profile updates.
+     * Observes the current user's contacts in real-time with continuous
+     * Firestore snapshot listeners. Alias for [getContacts] with explicit
+     * naming to indicate real-time behavior.
      *
-     * @param contactUid The UID of the contact to observe.
-     * @return A flow emitting the contact's current [ContactModel], or null.
+     * @return A flow emitting the current list of [ContactModel] entries.
      */
-    fun observeContact(contactUid: String): Flow<ContactModel?>
+    fun observeContactsRealtime(): Flow<List<ContactModel>>
 
     /**
      * Checks whether communication is allowed with a specific user.
@@ -70,62 +75,31 @@ interface ContactRepository {
      * verify that the target user is a verified mutual contact.
      *
      * @param targetUid The UID of the user to check communication access for.
-     * @return A [CommunicationGate] indicating whether communication is allowed.
+     * @return A [CommunicationGate] flow indicating whether communication is allowed.
      */
-    suspend fun checkCommunicationGate(targetUid: String): CommunicationGate
-
-    /**
-     * Removes a contact from the current user's contact list.
-     *
-     * This breaks the mutual relationship if it existed. After removal,
-     * communication is immediately blocked by [checkCommunicationGate].
-     *
-     * @param contactUid The UID of the contact to remove.
-     */
-    suspend fun removeContact(contactUid: String)
+    fun verifyMutualContact(targetUid: String): Flow<CommunicationGate>
 
     /**
      * Blocks a contact. Blocked contacts cannot send messages, call,
      * or view the user's status updates.
      *
      * @param contactUid The UID of the contact to block.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun blockContact(contactUid: String)
+    fun blockContact(contactUid: String): Flow<Result<Unit>>
 
     /**
      * Unblocks a previously blocked contact.
      *
      * @param contactUid The UID of the contact to unblock.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun unblockContact(contactUid: String)
+    fun unblockContact(contactUid: String): Flow<Result<Unit>>
 
     /**
      * Observes the list of blocked contacts in real-time.
      *
      * @return A flow emitting the current list of blocked [ContactModel] entries.
      */
-    fun observeBlockedContacts(): Flow<List<ContactModel>>
-
-    /**
-     * Pins or unpins a contact to the top of the contact list.
-     *
-     * @param contactUid The UID of the contact to pin/unpin.
-     * @param isPinned Whether the contact should be pinned.
-     */
-    suspend fun setContactPinned(contactUid: String, isPinned: Boolean)
-
-    /**
-     * Mutes or unmutes notifications for a specific contact.
-     *
-     * @param contactUid The UID of the contact to mute/unmute.
-     * @param isMuted Whether the contact should be muted.
-     */
-    suspend fun setContactMuted(contactUid: String, isMuted: Boolean)
-
-    /**
-     * Returns the total number of mutual contacts.
-     *
-     * @return A flow emitting the current mutual contact count.
-     */
-    fun getMutualContactCount(): Flow<Int>
+    fun getBlockedContacts(): Flow<List<ContactModel>>
 }

@@ -5,8 +5,6 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.zixo.app.domain.model.CallDirection
 import com.zixo.app.domain.model.CallLogEntry
-import com.zixo.app.domain.model.CallTechnology
-import java.time.Instant
 
 @Entity(
     tableName = "call_log",
@@ -18,36 +16,46 @@ import java.time.Instant
 data class CallLogEntity(
     @PrimaryKey
     val id: String,
+    val callId: String = "",
     val callerUid: String,
     val calleeUid: String,
     val callerName: String,
     val calleeName: String,
     val callerAvatar: String?,
     val calleeAvatar: String?,
-    val type: String, // CallDirection name
-    val callType: String, // CallTechnology name
+    val type: String,            // CallDirection name
+    val isVideoCall: Boolean = false,
+    val isGroupCall: Boolean = false,
     val duration: Long = 0L,
-    val timestamp: Long, // Epoch millis
+    val timestamp: Long,         // Epoch millis
+    val endReason: String = "COMPLETED",
+    val threadId: String = "",
     val isRead: Boolean = false
 )
 
 fun CallLogEntity.toDomain(): CallLogEntry = CallLogEntry(
     id = id,
+    callId = callId,
     callerUid = callerUid,
     calleeUid = calleeUid,
     callerName = callerName,
     calleeName = calleeName,
     callerAvatar = callerAvatar,
     calleeAvatar = calleeAvatar,
-    type = CallDirection.valueOf(type),
-    callType = CallTechnology.valueOf(callType),
+    type = try { CallDirection.valueOf(type) } catch (_: Exception) { CallDirection.OUTGOING },
+    isVideoCall = isVideoCall,
+    isGroupCall = isGroupCall,
     duration = duration,
-    timestamp = Instant.ofEpochMilli(timestamp),
+    timestamp = timestamp,
+    endReason = try { com.zixo.app.domain.model.CallEndReason.valueOf(endReason) }
+        catch (_: Exception) { com.zixo.app.domain.model.CallEndReason.COMPLETED },
+    threadId = threadId,
     isRead = isRead
 )
 
 fun CallLogEntry.toEntity(): CallLogEntity = CallLogEntity(
     id = id,
+    callId = callId,
     callerUid = callerUid,
     calleeUid = calleeUid,
     callerName = callerName,
@@ -55,8 +63,11 @@ fun CallLogEntry.toEntity(): CallLogEntity = CallLogEntity(
     callerAvatar = callerAvatar,
     calleeAvatar = calleeAvatar,
     type = type.name,
-    callType = callType.name,
+    isVideoCall = isVideoCall,
+    isGroupCall = isGroupCall,
     duration = duration,
-    timestamp = timestamp.toEpochMilli(),
+    timestamp = timestamp,
+    endReason = endReason.name,
+    threadId = threadId,
     isRead = isRead
 )

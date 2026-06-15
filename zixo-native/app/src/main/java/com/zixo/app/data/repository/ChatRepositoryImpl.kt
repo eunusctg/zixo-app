@@ -7,15 +7,14 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import com.zixo.app.domain.model.ChatThreadModel
+import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.model.LastMessageInfo
 import com.zixo.app.domain.model.MessageContentType
 import com.zixo.app.domain.model.MessageModel
 import com.zixo.app.domain.model.MessageReaction
-import com.zixo.app.domain.model.MessageActionResult
 import com.zixo.app.domain.model.ParticipantRole
 import com.zixo.app.domain.model.ThreadParticipant
 import com.zixo.app.domain.model.ThreadType
-import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.repository.ChatRepository
 import com.zixo.app.domain.repository.ContactRepository
 import kotlinx.coroutines.Dispatchers
@@ -34,12 +33,14 @@ import javax.inject.Singleton
  * Concrete implementation of [ChatRepository].
  *
  * Manages chat threads and messages using Firestore with continuous
- * snapshot listeners for real-time sync. Uses Firebase Realtime Database
- * for presence and typing indicators, and Firebase Storage for media uploads.
+ * snapshot listeners for real-time sync. Uses Firebase Storage for media uploads
+ * and Firebase Realtime Database for presence and typing indicators.
  *
  * Zero-trust enforcement: All send operations verify mutual contact status
- * through [ContactRepository.checkCommunicationGate] before writing.
+ * through [ContactRepository.verifyMutualContact] before executing.
  * Non-contact messages are blocked at this boundary.
+ *
+ * All operations run on Dispatchers.IO and never block the Main Thread.
  */
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
@@ -54,19 +55,12 @@ class ChatRepositoryImpl @Inject constructor(
         get() = firebaseAuth.currentUser?.uid
 
     private val threadsCollection get() = firestore.collection("threads")
-
     private fun messagesCollection(threadId: String) =
         threadsCollection.document(threadId).collection("messages")
 
-    private fun presenceRef(uid: String) =
-        realtimeDb.getReference("presence").child(uid)
+    // ── Get Threads ───────────────────────────────────────────────────────────
 
-    private fun typingRef(threadId: String, uid: String) =
-        realtimeDb.getReference("typing").child(threadId).child(uid)
-
-    // ── Observe Threads ───────────────────────────────────────────────────────
-
-    override fun observeThreads(): Flow<List<ChatThreadModel>> = callbackFlow {
+    override fun getThreads(): Flow<List<ChatThreadModel>> = callbackFlow {
         val myUid = currentUid
         if (myUid == null) {
             trySend(emptyList())
@@ -86,9 +80,9 @@ class ChatRepositoryImpl @Inject constructor(
 
                 val threads = snapshot?.documents?.mapNotNull { doc ->
                     try {
-                        mapToChatThreadModel(doc)
+                        mapToChatThreadModel(doc, myUid)
                     } catch (e: Exception) {
-                        Timber.e(e, "Failed to map thread document: %s", doc.id)
+                        Timber.e(e, "Failed to map thread: %s", doc.id)
                         null
                     }
                 } ?: emptyList()
@@ -99,40 +93,16 @@ class ChatRepositoryImpl @Inject constructor(
         awaitClose { subscription.remove() }
     }.flowOn(Dispatchers.IO)
 
-    override fun observeThread(threadId: String): Flow<ChatThreadModel?> = callbackFlow {
-        val subscription = threadsCollection.document(threadId)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Timber.e(error, "Error observing thread: %s", threadId)
-                    trySend(null)
-                    return@addSnapshotListener
-                }
+    override fun observeThreadsRealtime(): Flow<List<ChatThreadModel>> = getThreads()
 
-                trySend(
-                    if (snapshot != null && snapshot.exists()) {
-                        try {
-                            mapToChatThreadModel(snapshot)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to map thread: %s", threadId)
-                            null
-                        }
-                    } else {
-                        null
-                    }
-                )
-            }
+    // ── Get Messages ──────────────────────────────────────────────────────────
 
-        awaitClose { subscription.remove() }
-    }.flowOn(Dispatchers.IO)
-
-    // ── Observe Messages ──────────────────────────────────────────────────────
-
-    override fun observeMessages(threadId: String): Flow<List<MessageModel>> = callbackFlow {
+    override fun getMessages(threadId: String): Flow<List<MessageModel>> = callbackFlow {
         val subscription = messagesCollection(threadId)
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Timber.e(error, "Error observing messages in thread: %s", threadId)
+                    Timber.e(error, "Error observing messages for thread: %s", threadId)
                     trySend(emptyList())
                     return@addSnapshotListener
                 }
@@ -141,7 +111,7 @@ class ChatRepositoryImpl @Inject constructor(
                     try {
                         mapToMessageModel(doc)
                     } catch (e: Exception) {
-                        Timber.e(e, "Failed to map message document: %s", doc.id)
+                        Timber.e(e, "Failed to map message: %s", doc.id)
                         null
                     }
                 } ?: emptyList()
@@ -152,20 +122,20 @@ class ChatRepositoryImpl @Inject constructor(
         awaitClose { subscription.remove() }
     }.flowOn(Dispatchers.IO)
 
-    // ── Send Text Message ─────────────────────────────────────────────────────
+    override fun observeMessagesRealtime(threadId: String): Flow<List<MessageModel>> =
+        getMessages(threadId)
 
-    override fun sendTextMessage(
+    // ── Send Message ──────────────────────────────────────────────────────────
+
+    override fun sendMessage(
         threadId: String,
-        content: String,
-        replyToMessageId: String?
+        message: MessageModel
     ): Flow<Result<MessageModel>> = flow {
         val myUid = currentUid
-        if (myUid == null) {
-            emit(Result.failure(IllegalStateException("Not authenticated")))
-            return@flow
-        }
+            ?: throw IllegalStateException("Not authenticated")
 
         try {
+            // Zero-trust: verify mutual contact before sending
             val threadDoc = threadsCollection.document(threadId).get().await()
             if (!threadDoc.exists()) {
                 emit(Result.failure(IllegalStateException("Thread not found")))
@@ -176,537 +146,227 @@ class ChatRepositoryImpl @Inject constructor(
             val participantUids = (threadDoc.get("participantUids") as? List<String>)
                 ?: emptyList()
 
-            for (uid in participantUids) {
-                if (uid == myUid) continue
-                val gate = contactRepository.checkCommunicationGate(uid)
-                if (gate is CommunicationGate.Blocked || gate is CommunicationGate.Error) {
-                    emit(Result.failure(
-                        SecurityException("Communication blocked for participant: $uid")
-                    ))
-                    return@flow
-                }
-            }
-
-            val myProfile = firestore.collection("users").document(myUid).get().await()
-            val now = System.currentTimeMillis()
-            val messageId = UUID.randomUUID().toString()
-
-            val messageData = hashMapOf(
-                "id" to messageId,
-                "threadId" to threadId,
-                "senderUid" to myUid,
-                "senderDisplayName" to (myProfile.getString("displayName") ?: ""),
-                "senderAvatarUrl" to (myProfile.getString("photoUrl") ?: ""),
-                "content" to content,
-                "timestamp" to now,
-                "type" to MessageContentType.TEXT.name,
-                "mediaUrl" to null,
-                "mediaThumbnailUrl" to null,
-                "mediaFileSize" to 0L,
-                "mediaMimeType" to "",
-                "isRead" to false,
-                "readByUids" to listOf(myUid),
-                "deliveredToUids" to listOf(myUid),
-                "replyToMessageId" to replyToMessageId,
-                "replyToPreview" to null,
-                "replyToSenderName" to null,
-                "forwardedFromUid" to null,
-                "forwardedFromName" to null,
-                "isForwarded" to false,
-                "reactions" to emptyList<Map<String, Any>>(),
-                "isDeletedForMe" to false,
-                "isDeletedForEveryone" to false,
-                "isEdited" to false,
-                "editedAt" to null,
-                "ephemeralExpiresAt" to null,
-                "caption" to null
-            )
-
-            val batch = firestore.batch()
-            batch.set(messagesCollection(threadId).document(messageId), messageData)
-
-            val lastMessage = LastMessageInfo(
-                senderUid = myUid,
-                senderDisplayName = myProfile.getString("displayName") ?: "",
-                content = content,
-                type = MessageContentType.TEXT,
-                timestamp = now,
-                isRead = false
-            )
-            batch.update(
-                threadsCollection.document(threadId),
-                mapOf(
-                    "lastMessage" to lastMessage.toFirestoreMap(),
-                    "lastMessageTimestamp" to now
-                )
-            )
-            batch.commit().await()
-
-            val message = MessageModel(
-                id = messageId,
-                threadId = threadId,
-                senderUid = myUid,
-                senderDisplayName = myProfile.getString("displayName") ?: "",
-                senderAvatarUrl = myProfile.getString("photoUrl") ?: "",
-                content = content,
-                timestamp = now,
-                type = MessageContentType.TEXT,
-                replyToMessageId = replyToMessageId
-            )
-
-            emit(Result.success(message))
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to send text message")
-            emit(Result.failure(e))
-        }
-    }.flowOn(Dispatchers.IO)
-
-    // ── Send Media Message ────────────────────────────────────────────────────
-
-    override fun sendMediaMessage(
-        threadId: String,
-        localFilePath: String,
-        mimeType: String,
-        caption: String?,
-        replyToMessageId: String?
-    ): Flow<Result<MessageModel>> = flow {
-        val myUid = currentUid
-        if (myUid == null) {
-            emit(Result.failure(IllegalStateException("Not authenticated")))
-            return@flow
-        }
-
-        try {
-            val threadDoc = threadsCollection.document(threadId).get().await()
-            if (!threadDoc.exists()) {
-                emit(Result.failure(IllegalStateException("Thread not found")))
-                return@flow
-            }
-
-            @Suppress("UNCHECKED_CAST")
-            val participantUids = (threadDoc.get("participantUids") as? List<String>)
-                ?: emptyList()
-
-            for (uid in participantUids) {
-                if (uid == myUid) continue
-                val gate = contactRepository.checkCommunicationGate(uid)
-                if (gate is CommunicationGate.Blocked || gate is CommunicationGate.Error) {
-                    emit(Result.failure(
-                        SecurityException("Communication blocked for participant: $uid")
-                    ))
-                    return@flow
-                }
-            }
-
-            val contentType = when {
-                mimeType.startsWith("image/") -> MessageContentType.IMAGE
-                mimeType.startsWith("video/") -> MessageContentType.VIDEO
-                mimeType.startsWith("audio/voice") || mimeType.startsWith("audio/ogg") ->
-                    MessageContentType.AUDIO_VOICE
-                mimeType.startsWith("audio/") -> MessageContentType.AUDIO_FILE
-                else -> MessageContentType.FILE
-            }
-
-            val messageId = UUID.randomUUID().toString()
-            val storagePath = "chat_media/$threadId/$messageId/${UUID.randomUUID()}"
-            val fileUri = Uri.parse(localFilePath)
-
-            val storageRef = storage.reference.child(storagePath)
-            storageRef.putFile(fileUri).await()
-            val downloadUrl = storageRef.downloadUrl.await().toString()
-
-            val myProfile = firestore.collection("users").document(myUid).get().await()
-            val now = System.currentTimeMillis()
-
-            val messageData = hashMapOf(
-                "id" to messageId,
-                "threadId" to threadId,
-                "senderUid" to myUid,
-                "senderDisplayName" to (myProfile.getString("displayName") ?: ""),
-                "senderAvatarUrl" to (myProfile.getString("photoUrl") ?: ""),
-                "content" to "",
-                "timestamp" to now,
-                "type" to contentType.name,
-                "mediaUrl" to downloadUrl,
-                "mediaThumbnailUrl" to null,
-                "mediaFileSize" to 0L,
-                "mediaMimeType" to mimeType,
-                "isRead" to false,
-                "readByUids" to listOf(myUid),
-                "deliveredToUids" to listOf(myUid),
-                "replyToMessageId" to replyToMessageId,
-                "replyToPreview" to null,
-                "replyToSenderName" to null,
-                "forwardedFromUid" to null,
-                "forwardedFromName" to null,
-                "isForwarded" to false,
-                "reactions" to emptyList<Map<String, Any>>(),
-                "isDeletedForMe" to false,
-                "isDeletedForEveryone" to false,
-                "isEdited" to false,
-                "editedAt" to null,
-                "ephemeralExpiresAt" to null,
-                "caption" to caption
-            )
-
-            val batch = firestore.batch()
-            batch.set(messagesCollection(threadId).document(messageId), messageData)
-
-            val contentPreview = caption ?: mimeType
-            val lastMessage = LastMessageInfo(
-                senderUid = myUid,
-                senderDisplayName = myProfile.getString("displayName") ?: "",
-                content = contentPreview,
-                type = contentType,
-                timestamp = now,
-                isRead = false
-            )
-            batch.update(
-                threadsCollection.document(threadId),
-                mapOf(
-                    "lastMessage" to lastMessage.toFirestoreMap(),
-                    "lastMessageTimestamp" to now
-                )
-            )
-            batch.commit().await()
-
-            val message = MessageModel(
-                id = messageId,
-                threadId = threadId,
-                senderUid = myUid,
-                senderDisplayName = myProfile.getString("displayName") ?: "",
-                senderAvatarUrl = myProfile.getString("photoUrl") ?: "",
-                timestamp = now,
-                type = contentType,
-                mediaUrl = downloadUrl,
-                mediaMimeType = mimeType,
-                caption = caption,
-                replyToMessageId = replyToMessageId
-            )
-
-            emit(Result.success(message))
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to send media message")
-            emit(Result.failure(e))
-        }
-    }.flowOn(Dispatchers.IO)
-
-    // ── Forward Message ───────────────────────────────────────────────────────
-
-    override fun forwardMessage(
-        messageId: String,
-        targetThreadIds: List<String>
-    ): Flow<Result<Unit>> = flow {
-        val myUid = currentUid
-        if (myUid == null) {
-            emit(Result.failure(IllegalStateException("Not authenticated")))
-            return@flow
-        }
-
-        try {
-            var sourceMessage: MessageModel? = null
-            for (threadId in threadsCollection.get().await().documents) {
-                val msgDoc = messagesCollection(threadId.id).document(messageId).get().await()
-                if (msgDoc.exists()) {
-                    sourceMessage = mapToMessageModel(msgDoc)
-                    break
-                }
-            }
-
-            if (sourceMessage == null) {
-                emit(Result.failure(IllegalStateException("Source message not found")))
-                return@flow
-            }
-
-            for (targetThreadId in targetThreadIds) {
-                val threadDoc = threadsCollection.document(targetThreadId).get().await()
-                if (!threadDoc.exists()) continue
-
-                @Suppress("UNCHECKED_CAST")
-                val participantUids = (threadDoc.get("participantUids") as? List<String>)
-                    ?: emptyList()
-
-                var blocked = false
-                for (uid in participantUids) {
-                    if (uid == myUid) continue
-                    val gate = contactRepository.checkCommunicationGate(uid)
-                    if (gate is CommunicationGate.Blocked || gate is CommunicationGate.Error) {
-                        blocked = true
-                        break
+            // Verify communication gate for all other participants
+            for (participantUid in participantUids) {
+                if (participantUid != myUid) {
+                    val gate = contactRepository.verifyMutualContact(participantUid)
+                    var gateResult: CommunicationGate? = null
+                    gate.collect { gateResult = it }
+                    if (gateResult !is CommunicationGate.Allowed) {
+                        emit(Result.failure(SecurityException(
+                            "Communication denied with $participantUid"
+                        )))
+                        return@flow
                     }
                 }
-                if (blocked) continue
-
-                val myProfile = firestore.collection("users").document(myUid).get().await()
-                val now = System.currentTimeMillis()
-                val newMessageId = UUID.randomUUID().toString()
-
-                val messageData = hashMapOf(
-                    "id" to newMessageId,
-                    "threadId" to targetThreadId,
-                    "senderUid" to myUid,
-                    "senderDisplayName" to (myProfile.getString("displayName") ?: ""),
-                    "senderAvatarUrl" to (myProfile.getString("photoUrl") ?: ""),
-                    "content" to sourceMessage.content,
-                    "timestamp" to now,
-                    "type" to sourceMessage.type.name,
-                    "mediaUrl" to sourceMessage.mediaUrl,
-                    "forwardedFromUid" to sourceMessage.senderUid,
-                    "forwardedFromName" to sourceMessage.senderDisplayName,
-                    "isForwarded" to true,
-                    "isRead" to false,
-                    "readByUids" to listOf(myUid),
-                    "deliveredToUids" to listOf(myUid),
-                    "reactions" to emptyList<Map<String, Any>>(),
-                    "isDeletedForMe" to false,
-                    "isDeletedForEveryone" to false,
-                    "isEdited" to false,
-                    "caption" to sourceMessage.caption
-                )
-
-                messagesCollection(targetThreadId).document(newMessageId)
-                    .set(messageData).await()
             }
 
-            emit(Result.success(Unit))
+            // Create the message document
+            val messageData = messageToFirestoreMap(message)
+            messagesCollection(threadId).document(message.id).set(messageData).await()
+
+            // Update the thread's last message metadata
+            val threadUpdates = mapOf(
+                "lastMessage" to (message.content.takeIf { it.isNotBlank() } ?: "📎 Media"),
+                "lastMessageTimestamp" to message.timestamp,
+                "lastMessageSenderUid" to message.senderUid,
+                "lastMessageSenderName" to message.senderDisplayName,
+                "lastMessageType" to message.type.name
+            )
+            threadsCollection.document(threadId).update(threadUpdates).await()
+
+            Timber.d("Message sent: %s in thread %s", message.id, threadId)
+            emit(Result.success(message))
         } catch (e: Exception) {
-            Timber.e(e, "Failed to forward message")
+            Timber.e(e, "Failed to send message")
             emit(Result.failure(e))
         }
     }.flowOn(Dispatchers.IO)
 
-    // ── Delete Message ────────────────────────────────────────────────────────
+    // ── Delete For Me ─────────────────────────────────────────────────────────
 
-    override suspend fun deleteMessageForMe(threadId: String, messageId: String) {
+    override fun deleteForMe(messageId: String, threadId: String): Flow<Result<Unit>> = flow {
         try {
-            val myUid = currentUid ?: return
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            // Mark the message as deleted for the current user only
+            val deletedForMeUids = messagesCollection(threadId).document(messageId)
+                .get().await()
+                .get("deletedForMeUids") as? List<String> ?: emptyList()
+
             messagesCollection(threadId).document(messageId)
-                .update("isDeletedForMe", true, "deletedForMeUid", myUid)
+                .update("deletedForMeUids", deletedForMeUids + myUid)
                 .await()
+
             Timber.d("Message deleted for me: %s", messageId)
+            emit(Result.success(Unit))
         } catch (e: Exception) {
             Timber.e(e, "Failed to delete message for me: %s", messageId)
+            emit(Result.failure(e))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
-    override suspend fun deleteMessageForEveryone(threadId: String, messageId: String) {
+    // ── Delete For Everyone ───────────────────────────────────────────────────
+
+    override fun deleteForEveryone(messageId: String, threadId: String): Flow<Result<Unit>> = flow {
         try {
-            messagesCollection(threadId).document(messageId)
-                .update(
-                    mapOf(
-                        "content" to "This message was deleted",
-                        "mediaUrl" to null,
-                        "mediaThumbnailUrl" to null,
-                        "caption" to null,
-                        "isDeletedForEveryone" to true,
-                        "type" to MessageContentType.DELETED_PLACEHOLDER.name
-                    )
-                ).await()
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            // Only the sender can delete for everyone
+            val messageDoc = messagesCollection(threadId).document(messageId).get().await()
+            val senderUid = messageDoc.getString("senderUid") ?: ""
+            if (senderUid != myUid) {
+                emit(Result.failure(SecurityException("Only the sender can delete for everyone")))
+                return@flow
+            }
+
+            val updates = mapOf(
+                "content" to "",
+                "isDeletedForEveryone" to true,
+                "type" to MessageContentType.DELETED_PLACEHOLDER.name,
+                "mediaUrl" to null,
+                "mediaThumbnailUrl" to null,
+                "caption" to null
+            )
+            messagesCollection(threadId).document(messageId).update(updates).await()
+
             Timber.d("Message deleted for everyone: %s", messageId)
+            emit(Result.success(Unit))
         } catch (e: Exception) {
             Timber.e(e, "Failed to delete message for everyone: %s", messageId)
+            emit(Result.failure(e))
         }
-    }
+    }.flowOn(Dispatchers.IO)
 
-    // ── Reactions ─────────────────────────────────────────────────────────────
+    // ── Add Reaction ──────────────────────────────────────────────────────────
 
-    override suspend fun addReaction(
-        threadId: String,
+    override fun addReaction(
         messageId: String,
+        threadId: String,
         emoji: String,
         isThreeD: Boolean
-    ) {
+    ): Flow<Result<Unit>> = flow {
         try {
-            val myUid = currentUid ?: return
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+            val myName = firebaseAuth.currentUser?.displayName ?: ""
+
             val messageDoc = messagesCollection(threadId).document(messageId).get().await()
-            if (!messageDoc.exists()) return
+            if (!messageDoc.exists()) {
+                emit(Result.failure(IllegalStateException("Message not found")))
+                return@flow
+            }
 
             @Suppress("UNCHECKED_CAST")
             val existingReactions = (messageDoc.get("reactions") as? List<Map<String, Any>>)
                 ?: emptyList()
 
-            val filtered = existingReactions.filterNot { it["uid"] == myUid }
+            // Remove any existing reaction by this user, then add the new one
+            val filteredReactions = existingReactions.filterNot { it["uid"] == myUid }
             val newReaction = mapOf(
                 "uid" to myUid,
                 "emoji" to emoji,
-                "customStickerId" to null,
                 "timestamp" to System.currentTimeMillis(),
                 "isThreeD" to isThreeD
             )
 
-            val updatedReactions = filtered + newReaction
             messagesCollection(threadId).document(messageId)
-                .update("reactions", updatedReactions)
+                .update("reactions", filteredReactions + newReaction)
                 .await()
 
-            Timber.d("Reaction added: %s to message: %s", emoji, messageId)
+            Timber.d("Reaction added: %s to message %s", emoji, messageId)
+            emit(Result.success(Unit))
         } catch (e: Exception) {
             Timber.e(e, "Failed to add reaction")
-        }
-    }
-
-    // ── Mark as Read ──────────────────────────────────────────────────────────
-
-    override suspend fun markThreadAsRead(threadId: String) {
-        try {
-            val myUid = currentUid ?: return
-            threadsCollection.document(threadId)
-                .update("unreadCount.$myUid", 0)
-                .await()
-            Timber.d("Thread marked as read: %s", threadId)
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to mark thread as read: %s", threadId)
-        }
-    }
-
-    // ── Create Thread ─────────────────────────────────────────────────────────
-
-    override fun createSingleThread(contactUid: String): Flow<Result<ChatThreadModel>> = flow {
-        val myUid = currentUid
-        if (myUid == null) {
-            emit(Result.failure(IllegalStateException("Not authenticated")))
-            return@flow
-        }
-
-        try {
-            val gate = contactRepository.checkCommunicationGate(contactUid)
-            if (gate is CommunicationGate.Blocked || gate is CommunicationGate.Error) {
-                emit(Result.failure(
-                    SecurityException("Cannot create thread: not a mutual contact")
-                ))
-                return@flow
-            }
-
-            val existingThread = threadsCollection
-                .whereArrayContains("participantUids", myUid)
-                .get().await()
-
-            for (doc in existingThread.documents) {
-                @Suppress("UNCHECKED_CAST")
-                val uids = (doc.get("participantUids") as? List<String>) ?: emptyList()
-                val typeStr = doc.getString("type") ?: ""
-                if (uids.contains(contactUid) && typeStr == ThreadType.SINGLE.name) {
-                    val thread = mapToChatThreadModel(doc)
-                    emit(Result.success(thread))
-                    return@flow
-                }
-            }
-
-            val myProfile = firestore.collection("users").document(myUid).get().await()
-            val contactProfile = firestore.collection("users")
-                .document(contactUid).get().await()
-            val now = System.currentTimeMillis()
-            val threadId = UUID.randomUUID().toString()
-
-            val myParticipant = ThreadParticipant(
-                uid = myUid,
-                displayName = myProfile.getString("displayName") ?: "",
-                avatarUrl = myProfile.getString("photoUrl") ?: "",
-                zixoNumber = myProfile.getString("zixoNumber") ?: "",
-                role = ParticipantRole.MEMBER,
-                joinedAt = now
-            )
-
-            val contactParticipant = ThreadParticipant(
-                uid = contactUid,
-                displayName = contactProfile.getString("displayName") ?: "",
-                avatarUrl = contactProfile.getString("photoUrl") ?: "",
-                zixoNumber = contactProfile.getString("zixoNumber") ?: "",
-                role = ParticipantRole.MEMBER,
-                joinedAt = now
-            )
-
-            val threadData = hashMapOf(
-                "id" to threadId,
-                "type" to ThreadType.SINGLE.name,
-                "participantUids" to listOf(myUid, contactUid),
-                "participantProfiles" to mapOf(
-                    myUid to myParticipant.toFirestoreMap(),
-                    contactUid to contactParticipant.toFirestoreMap()
-                ),
-                "groupName" to null,
-                "groupAvatarUrl" to null,
-                "groupDescription" to null,
-                "groupAdminUids" to emptyList<String>(),
-                "createdByUid" to myUid,
-                "createdAt" to now,
-                "lastMessage" to null,
-                "lastMessageTimestamp" to now,
-                "unreadCount" to mapOf(myUid to 0, contactUid to 0),
-                "isPinned" to false,
-                "isMuted" to false,
-                "isArchived" to false,
-                "ephemeralTimerSeconds" to 0,
-                "wallpaperUrl" to null
-            )
-
-            threadsCollection.document(threadId).set(threadData).await()
-
-            val thread = ChatThreadModel(
-                id = threadId,
-                type = ThreadType.SINGLE,
-                participantUids = setOf(myUid, contactUid),
-                participantProfiles = mapOf(
-                    myUid to myParticipant,
-                    contactUid to contactParticipant
-                ),
-                createdByUid = myUid,
-                createdAt = now
-            )
-
-            emit(Result.success(thread))
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to create single thread")
             emit(Result.failure(e))
         }
     }.flowOn(Dispatchers.IO)
 
-    override fun createGroupThread(
-        groupName: String,
-        participantUids: List<String>
-    ): Flow<Result<ChatThreadModel>> = flow {
-        val myUid = currentUid
-        if (myUid == null) {
-            emit(Result.failure(IllegalStateException("Not authenticated")))
-            return@flow
-        }
+    // ── Mark As Read ──────────────────────────────────────────────────────────
 
+    override fun markAsRead(threadId: String): Flow<Result<Unit>> = flow {
         try {
-            val verifiedUids = mutableListOf(myUid)
-            for (uid in participantUids) {
-                if (uid == myUid) continue
-                val gate = contactRepository.checkCommunicationGate(uid)
-                if (gate is CommunicationGate.Allowed) {
-                    verifiedUids.add(uid)
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            // Reset unread count for the current user
+            val threadUpdates = mapOf("unreadCount.$myUid" to 0)
+            threadsCollection.document(threadId).update(threadUpdates).await()
+
+            // Mark recent unread messages as read
+            val unreadMessages = messagesCollection(threadId)
+                .whereNotIn("readByUids", listOf(myUid))
+                .limit(50)
+                .get()
+                .await()
+
+            for (doc in unreadMessages.documents) {
+                @Suppress("UNCHECKED_CAST")
+                val readByUids = (doc.get("readByUids") as? List<String>) ?: emptyList()
+                if (!readByUids.contains(myUid)) {
+                    doc.reference.update("readByUids", readByUids + myUid).await()
                 }
             }
 
-            val now = System.currentTimeMillis()
+            Timber.d("Thread marked as read: %s", threadId)
+            emit(Result.success(Unit))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to mark thread as read: %s", threadId)
+            emit(Result.failure(e))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ── Create Group Thread ───────────────────────────────────────────────────
+
+    override fun createGroupThread(
+        name: String,
+        participantUids: Set<String>
+    ): Flow<Result<ChatThreadModel>> = flow {
+        try {
+            val myUid = currentUid ?: throw IllegalStateException("Not authenticated")
+
+            // Verify all participants are mutual contacts
+            val verifiedUids = mutableSetOf(myUid)
+            for (uid in participantUids) {
+                val gate = contactRepository.verifyMutualContact(uid)
+                var gateResult: CommunicationGate? = null
+                gate.collect { gateResult = it }
+                if (gateResult is CommunicationGate.Allowed) {
+                    verifiedUids.add(uid)
+                } else {
+                    Timber.w("Skipping non-mutual participant: %s", uid)
+                }
+            }
+
+            if (verifiedUids.size < 2) {
+                emit(Result.failure(IllegalStateException(
+                    "At least one mutual contact is required to create a group"
+                )))
+                return@flow
+            }
+
             val threadId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
 
+            // Fetch participant profiles for denormalization
             val participantProfiles = mutableMapOf<String, Map<String, Any?>>()
-            val domainParticipants = mutableMapOf<String, ThreadParticipant>()
-
             for (uid in verifiedUids) {
-                val profile = firestore.collection("users").document(uid).get().await()
-                val participant = ThreadParticipant(
-                    uid = uid,
-                    displayName = profile.getString("displayName") ?: "",
-                    avatarUrl = profile.getString("photoUrl") ?: "",
-                    zixoNumber = profile.getString("zixoNumber") ?: "",
-                    role = if (uid == myUid) ParticipantRole.ADMIN else ParticipantRole.MEMBER,
-                    joinedAt = now
+                val profileDoc = firestore.collection("users").document(uid).get().await()
+                participantProfiles[uid] = mapOf(
+                    "uid" to uid,
+                    "displayName" to (profileDoc.getString("displayName") ?: ""),
+                    "avatarUrl" to (profileDoc.getString("photoUrl") ?: ""),
+                    "zixoNumber" to (profileDoc.getString("zixoNumber") ?: ""),
+                    "role" to if (uid == myUid) ParticipantRole.ADMIN.name else ParticipantRole.MEMBER.name,
+                    "joinedAt" to now,
+                    "isOnline" to (profileDoc.getBoolean("isOnline") ?: false)
                 )
-                participantProfiles[uid] = participant.toFirestoreMap()
-                domainParticipants[uid] = participant
             }
 
             val threadData = hashMapOf(
                 "id" to threadId,
                 "type" to ThreadType.GROUP.name,
-                "participantUids" to verifiedUids,
+                "participantUids" to verifiedUids.toList(),
                 "participantProfiles" to participantProfiles,
-                "groupName" to groupName,
+                "groupName" to name,
                 "groupAvatarUrl" to null,
                 "groupDescription" to null,
                 "groupAdminUids" to listOf(myUid),
@@ -714,12 +374,11 @@ class ChatRepositoryImpl @Inject constructor(
                 "createdAt" to now,
                 "lastMessage" to null,
                 "lastMessageTimestamp" to now,
-                "unreadCount" to verifiedUids.associateWith { 0 },
+                "unreadCount" to emptyMap<String, Int>(),
                 "isPinned" to false,
                 "isMuted" to false,
                 "isArchived" to false,
-                "ephemeralTimerSeconds" to 0,
-                "wallpaperUrl" to null
+                "ephemeralTimerSeconds" to 0
             )
 
             threadsCollection.document(threadId).set(threadData).await()
@@ -727,14 +386,14 @@ class ChatRepositoryImpl @Inject constructor(
             val thread = ChatThreadModel(
                 id = threadId,
                 type = ThreadType.GROUP,
-                participantUids = verifiedUids.toSet(),
-                participantProfiles = domainParticipants,
-                groupName = groupName,
+                participantUids = verifiedUids,
+                groupName = name,
                 groupAdminUids = setOf(myUid),
                 createdByUid = myUid,
                 createdAt = now
             )
 
+            Timber.d("Group thread created: %s with %d participants", threadId, verifiedUids.size)
             emit(Result.success(thread))
         } catch (e: Exception) {
             Timber.e(e, "Failed to create group thread")
@@ -742,246 +401,173 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    // ── Thread Settings ───────────────────────────────────────────────────────
-
-    override suspend fun setThreadPinned(threadId: String, isPinned: Boolean) {
-        try {
-            threadsCollection.document(threadId).update("isPinned", isPinned).await()
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set thread pinned: %s", threadId)
-        }
-    }
-
-    override suspend fun setThreadMuted(threadId: String, isMuted: Boolean) {
-        try {
-            threadsCollection.document(threadId).update("isMuted", isMuted).await()
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set thread muted: %s", threadId)
-        }
-    }
-
-    override suspend fun setThreadArchived(threadId: String, isArchived: Boolean) {
-        try {
-            threadsCollection.document(threadId).update("isArchived", isArchived).await()
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set thread archived: %s", threadId)
-        }
-    }
-
-    override suspend fun setThreadEphemeralTimer(threadId: String, timerSeconds: Int) {
-        try {
-            threadsCollection.document(threadId)
-                .update("ephemeralTimerSeconds", timerSeconds).await()
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to set ephemeral timer: %s", threadId)
-        }
-    }
-
-    // ── Action Result Handler ─────────────────────────────────────────────────
-
-    override suspend fun handleActionResult(action: MessageActionResult) {
-        try {
-            when (action) {
-                is MessageActionResult.DeleteForMe -> {
-                    val threadId = findThreadForMessage(action.messageId) ?: return
-                    deleteMessageForMe(threadId, action.messageId)
-                }
-                is MessageActionResult.DeleteForEveryone -> {
-                    val threadId = findThreadForMessage(action.messageId) ?: return
-                    deleteMessageForEveryone(threadId, action.messageId)
-                }
-                is MessageActionResult.React -> {
-                    val threadId = findThreadForMessage(action.messageId) ?: return
-                    addReaction(threadId, action.messageId, action.emoji, action.isThreeD)
-                }
-                is MessageActionResult.Forward ->
-                    forwardMessage(action.messageId, action.targetThreadIds)
-                else -> Timber.d("Unhandled action result: %s", action::class.simpleName)
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to handle action result")
-        }
-    }
-
-    private suspend fun findThreadForMessage(messageId: String): String? {
-        return try {
-            val myUid = currentUid ?: return null
-            val threadSnapshot = threadsCollection
-                .whereArrayContains("participantUids", myUid)
-                .get().await()
-
-            for (threadDoc in threadSnapshot.documents) {
-                val msgDoc = messagesCollection(threadDoc.id)
-                    .document(messageId).get().await()
-                if (msgDoc.exists()) {
-                    return threadDoc.id
-                }
-            }
-            null
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to find thread for message: %s", messageId)
-            null
-        }
-    }
-
     // ── Mapping Helpers ───────────────────────────────────────────────────────
 
     private fun mapToChatThreadModel(
-        doc: com.google.firebase.firestore.DocumentSnapshot
-    ): ChatThreadModel {
-        @Suppress("UNCHECKED_CAST")
-        val participantUids = (doc.get("participantUids") as? List<String>)
-            ?.toSet() ?: emptySet()
+        doc: com.google.firebase.firestore.DocumentSnapshot,
+        myUid: String
+    ): ChatThreadModel? {
+        return try {
+            val typeStr = doc.getString("type") ?: "SINGLE"
+            val threadType = try { ThreadType.valueOf(typeStr) } catch (_: Exception) { ThreadType.SINGLE }
 
-        @Suppress("UNCHECKED_CAST")
-        val profilesRaw = doc.get("participantProfiles") as? Map<String, Map<String, Any>>
-            ?: emptyMap()
+            @Suppress("UNCHECKED_CAST")
+            val participantUids = (doc.get("participantUids") as? List<String>)?.toSet()
+                ?: emptySet()
 
-        val participantProfiles = profilesRaw.mapValues { (_, data) ->
-            ThreadParticipant(
-                uid = data["uid"] as? String ?: "",
-                displayName = data["displayName"] as? String ?: "",
-                avatarUrl = data["avatarUrl"] as? String ?: "",
-                zixoNumber = data["zixoNumber"] as? String ?: "",
-                role = try {
-                    ParticipantRole.valueOf(data["role"] as? String ?: "MEMBER")
-                } catch (_: Exception) {
-                    ParticipantRole.MEMBER
-                },
-                joinedAt = data["joinedAt"] as? Long ?: 0L,
-                isOnline = data["isOnline"] as? Boolean ?: false
+            @Suppress("UNCHECKED_CAST")
+            val profilesRaw = doc.get("participantProfiles") as? Map<String, Map<String, Any>>
+                ?: emptyMap()
+
+            val participantProfiles = profilesRaw.map { (uid, data) ->
+                val roleStr = data["role"] as? String ?: "MEMBER"
+                uid to ThreadParticipant(
+                    uid = uid,
+                    displayName = data["displayName"] as? String ?: "",
+                    avatarUrl = data["avatarUrl"] as? String ?: "",
+                    zixoNumber = data["zixoNumber"] as? String ?: "",
+                    role = try { ParticipantRole.valueOf(roleStr) } catch (_: Exception) { ParticipantRole.MEMBER },
+                    joinedAt = data["joinedAt"] as? Long ?: 0L,
+                    isOnline = data["isOnline"] as? Boolean ?: false
+                )
+            }.toMap()
+
+            @Suppress("UNCHECKED_CAST")
+            val adminUids = (doc.get("groupAdminUids") as? List<String>)?.toSet()
+                ?: emptySet()
+
+            val lastMessage = if (doc.contains("lastMessage") && doc.getString("lastMessage") != null) {
+                LastMessageInfo(
+                    senderUid = doc.getString("lastMessageSenderUid") ?: "",
+                    senderDisplayName = doc.getString("lastMessageSenderName") ?: "",
+                    content = doc.getString("lastMessage") ?: "",
+                    type = try {
+                        MessageContentType.valueOf(doc.getString("lastMessageType") ?: "TEXT")
+                    } catch (_: Exception) { MessageContentType.TEXT },
+                    timestamp = doc.getLong("lastMessageTimestamp") ?: 0L,
+                    isRead = true
+                )
+            } else null
+
+            @Suppress("UNCHECKED_CAST")
+            val unreadCounts = doc.get("unreadCount") as? Map<String, Long> ?: emptyMap()
+            val unreadCount = (unreadCounts[myUid] ?: 0L).toInt()
+
+            ChatThreadModel(
+                id = doc.id,
+                type = threadType,
+                participantUids = participantUids,
+                participantProfiles = participantProfiles,
+                groupName = doc.getString("groupName"),
+                groupAvatarUrl = doc.getString("groupAvatarUrl"),
+                groupDescription = doc.getString("groupDescription"),
+                groupAdminUids = adminUids,
+                createdByUid = doc.getString("createdByUid") ?: "",
+                createdAt = doc.getLong("createdAt") ?: 0L,
+                lastMessage = lastMessage,
+                unreadCount = unreadCount,
+                isPinned = doc.getBoolean("isPinned") ?: false,
+                isMuted = doc.getBoolean("isMuted") ?: false,
+                isArchived = doc.getBoolean("isArchived") ?: false,
+                ephemeralTimerSeconds = doc.getLong("ephemeralTimerSeconds")?.toInt() ?: 0
             )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to map ChatThreadModel from document: %s", doc.id)
+            null
         }
-
-        val lastMessageRaw = doc.get("lastMessage") as? Map<String, Any>
-        val lastMessage = lastMessageRaw?.let { data ->
-            LastMessageInfo(
-                senderUid = data["senderUid"] as? String ?: "",
-                senderDisplayName = data["senderDisplayName"] as? String ?: "",
-                content = data["content"] as? String ?: "",
-                type = try {
-                    MessageContentType.valueOf(data["type"] as? String ?: "TEXT")
-                } catch (_: Exception) {
-                    MessageContentType.TEXT
-                },
-                timestamp = data["timestamp"] as? Long ?: 0L,
-                isRead = data["isRead"] as? Boolean ?: false
-            )
-        }
-
-        val typeStr = doc.getString("type") ?: "SINGLE"
-        val threadType = try {
-            ThreadType.valueOf(typeStr)
-        } catch (_: Exception) {
-            ThreadType.SINGLE
-        }
-
-        @Suppress("UNCHECKED_CAST")
-        val adminUids = (doc.get("groupAdminUids") as? List<String>)
-            ?.toSet() ?: emptySet()
-
-        return ChatThreadModel(
-            id = doc.id,
-            type = threadType,
-            participantUids = participantUids,
-            participantProfiles = participantProfiles,
-            groupName = doc.getString("groupName"),
-            groupAvatarUrl = doc.getString("groupAvatarUrl"),
-            groupDescription = doc.getString("groupDescription"),
-            groupAdminUids = adminUids,
-            createdByUid = doc.getString("createdByUid") ?: "",
-            createdAt = doc.getLong("createdAt") ?: 0L,
-            lastMessage = lastMessage,
-            isPinned = doc.getBoolean("isPinned") ?: false,
-            isMuted = doc.getBoolean("isMuted") ?: false,
-            isArchived = doc.getBoolean("isArchived") ?: false,
-            ephemeralTimerSeconds = (doc.getLong("ephemeralTimerSeconds") ?: 0L).toInt(),
-            wallpaperUrl = doc.getString("wallpaperUrl")
-        )
     }
 
     private fun mapToMessageModel(
         doc: com.google.firebase.firestore.DocumentSnapshot
-    ): MessageModel {
-        @Suppress("UNCHECKED_CAST")
-        val reactionsRaw = doc.get("reactions") as? List<Map<String, Any>>
-            ?: emptyList()
+    ): MessageModel? {
+        return try {
+            val typeStr = doc.getString("type") ?: "TEXT"
+            val contentType = try { MessageContentType.valueOf(typeStr) }
+                catch (_: Exception) { MessageContentType.TEXT }
 
-        val reactions = reactionsRaw.map { data ->
-            MessageReaction(
-                uid = data["uid"] as? String ?: "",
-                emoji = data["emoji"] as? String ?: "",
-                customStickerId = data["customStickerId"] as? String,
-                timestamp = data["timestamp"] as? Long ?: 0L,
-                isThreeD = data["isThreeD"] as? Boolean ?: false
+            @Suppress("UNCHECKED_CAST")
+            val readByUids = (doc.get("readByUids") as? List<String>)?.toSet() ?: emptySet()
+
+            @Suppress("UNCHECKED_CAST")
+            val deliveredToUids = (doc.get("deliveredToUids") as? List<String>)?.toSet()
+                ?: emptySet()
+
+            @Suppress("UNCHECKED_CAST")
+            val reactionsRaw = doc.get("reactions") as? List<Map<String, Any>> ?: emptyList()
+
+            val reactions = reactionsRaw.map { data ->
+                MessageReaction(
+                    uid = data["uid"] as? String ?: "",
+                    emoji = data["emoji"] as? String ?: "",
+                    timestamp = data["timestamp"] as? Long ?: 0L,
+                    isThreeD = data["isThreeD"] as? Boolean ?: false
+                )
+            }
+
+            @Suppress("UNCHECKED_CAST")
+            val deletedForMeUids = (doc.get("deletedForMeUids") as? List<String>) ?: emptyList()
+
+            MessageModel(
+                id = doc.id,
+                threadId = doc.getString("threadId") ?: "",
+                senderUid = doc.getString("senderUid") ?: "",
+                senderDisplayName = doc.getString("senderDisplayName") ?: "",
+                senderAvatarUrl = doc.getString("senderAvatarUrl") ?: "",
+                content = doc.getString("content") ?: "",
+                timestamp = doc.getLong("timestamp") ?: 0L,
+                type = contentType,
+                mediaUrl = doc.getString("mediaUrl"),
+                mediaThumbnailUrl = doc.getString("mediaThumbnailUrl"),
+                mediaFileSize = doc.getLong("mediaFileSize") ?: 0L,
+                mediaMimeType = doc.getString("mediaMimeType") ?: "",
+                isRead = readByUids.isNotEmpty(),
+                readByUids = readByUids,
+                deliveredToUids = deliveredToUids,
+                replyToMessageId = doc.getString("replyToMessageId"),
+                replyToPreview = doc.getString("replyToPreview"),
+                replyToSenderName = doc.getString("replyToSenderName"),
+                forwardedFromUid = doc.getString("forwardedFromUid"),
+                forwardedFromName = doc.getString("forwardedFromName"),
+                isForwarded = doc.getBoolean("isForwarded") ?: false,
+                reactions = reactions,
+                isDeletedForMe = deletedForMeUids.contains(currentUid),
+                isDeletedForEveryone = doc.getBoolean("isDeletedForEveryone") ?: false,
+                isEdited = doc.getBoolean("isEdited") ?: false,
+                editedAt = doc.getLong("editedAt"),
+                ephemeralExpiresAt = doc.getLong("ephemeralExpiresAt"),
+                caption = doc.getString("caption")
             )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to map MessageModel from document: %s", doc.id)
+            null
         }
-
-        @Suppress("UNCHECKED_CAST")
-        val readByUids = (doc.get("readByUids") as? List<String>)
-            ?.toSet() ?: emptySet()
-
-        @Suppress("UNCHECKED_CAST")
-        val deliveredToUids = (doc.get("deliveredToUids") as? List<String>)
-            ?.toSet() ?: emptySet()
-
-        val typeStr = doc.getString("type") ?: "TEXT"
-        val contentType = try {
-            MessageContentType.valueOf(typeStr)
-        } catch (_: Exception) {
-            MessageContentType.TEXT
-        }
-
-        return MessageModel(
-            id = doc.id,
-            threadId = doc.getString("threadId") ?: "",
-            senderUid = doc.getString("senderUid") ?: "",
-            senderDisplayName = doc.getString("senderDisplayName") ?: "",
-            senderAvatarUrl = doc.getString("senderAvatarUrl") ?: "",
-            content = doc.getString("content") ?: "",
-            timestamp = doc.getLong("timestamp") ?: 0L,
-            type = contentType,
-            mediaUrl = doc.getString("mediaUrl"),
-            mediaThumbnailUrl = doc.getString("mediaThumbnailUrl"),
-            mediaFileSize = doc.getLong("mediaFileSize") ?: 0L,
-            mediaMimeType = doc.getString("mediaMimeType") ?: "",
-            isRead = doc.getBoolean("isRead") ?: false,
-            readByUids = readByUids,
-            deliveredToUids = deliveredToUids,
-            replyToMessageId = doc.getString("replyToMessageId"),
-            replyToPreview = doc.getString("replyToPreview"),
-            replyToSenderName = doc.getString("replyToSenderName"),
-            forwardedFromUid = doc.getString("forwardedFromUid"),
-            forwardedFromName = doc.getString("forwardedFromName"),
-            isForwarded = doc.getBoolean("isForwarded") ?: false,
-            reactions = reactions,
-            isDeletedForMe = doc.getBoolean("isDeletedForMe") ?: false,
-            isDeletedForEveryone = doc.getBoolean("isDeletedForEveryone") ?: false,
-            isEdited = doc.getBoolean("isEdited") ?: false,
-            editedAt = doc.getLong("editedAt"),
-            ephemeralExpiresAt = doc.getLong("ephemeralExpiresAt"),
-            caption = doc.getString("caption")
-        )
     }
 
-    // ── Firestore Mapping Extensions ──────────────────────────────────────────
-
-    private fun LastMessageInfo.toFirestoreMap(): Map<String, Any?> = mapOf(
-        "senderUid" to senderUid,
-        "senderDisplayName" to senderDisplayName,
-        "content" to content,
-        "type" to type.name,
-        "timestamp" to timestamp,
-        "isRead" to isRead
-    )
-
-    private fun ThreadParticipant.toFirestoreMap(): Map<String, Any?> = mapOf(
-        "uid" to uid,
-        "displayName" to displayName,
-        "avatarUrl" to avatarUrl,
-        "zixoNumber" to zixoNumber,
-        "role" to role.name,
-        "joinedAt" to joinedAt,
-        "isOnline" to isOnline
+    private fun messageToFirestoreMap(message: MessageModel): Map<String, Any?> = mapOf(
+        "id" to message.id,
+        "threadId" to message.threadId,
+        "senderUid" to message.senderUid,
+        "senderDisplayName" to message.senderDisplayName,
+        "senderAvatarUrl" to message.senderAvatarUrl,
+        "content" to message.content,
+        "timestamp" to message.timestamp,
+        "type" to message.type.name,
+        "mediaUrl" to message.mediaUrl,
+        "mediaThumbnailUrl" to message.mediaThumbnailUrl,
+        "mediaFileSize" to message.mediaFileSize,
+        "mediaMimeType" to message.mediaMimeType,
+        "readByUids" to message.readByUids.toList(),
+        "deliveredToUids" to message.deliveredToUids.toList(),
+        "replyToMessageId" to message.replyToMessageId,
+        "replyToPreview" to message.replyToPreview,
+        "replyToSenderName" to message.replyToSenderName,
+        "forwardedFromUid" to message.forwardedFromUid,
+        "forwardedFromName" to message.forwardedFromName,
+        "isForwarded" to message.isForwarded,
+        "reactions" to emptyList<Map<String, Any>>(),
+        "isDeletedForEveryone" to false,
+        "isEdited" to false,
+        "ephemeralExpiresAt" to message.ephemeralExpiresAt,
+        "caption" to message.caption
     )
 }

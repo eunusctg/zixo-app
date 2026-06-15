@@ -9,7 +9,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,7 +20,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.Button
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -51,6 +53,7 @@ import com.zixo.app.domain.model.ContactSearchResult
 import com.zixo.app.ui.components.AvatarComponent
 import com.zixo.app.ui.components.GlassOutlinedTextField
 import com.zixo.app.ui.components.liquidGlassContainer
+import com.zixo.app.ui.theme.DestructiveText
 import com.zixo.app.ui.theme.EmeraldGreen
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
@@ -62,23 +65,29 @@ import com.zixo.app.ui.theme.TextSecondary
 
 /**
  * A floating search overlay dialog that allows finding users by their
- * exact 8-digit Zixo Number only.
+ * exact 8-digit Zixo Number only — enforcing the zero-trust contact model.
  *
  * Uses the Liquid Glass design system with animated transitions between
- * search states: Idle → Searching → Found/NotFound.
+ * search states: Idle → Searching → Found / NotFound / Error.
  *
- * @param searchResult   The current search result state from the ViewModel.
+ * Auto-triggers search with debounce when exactly 8 digits are entered.
+ * Shows red error indicator for invalid format. Displays "Already a Contact"
+ * in green when the user has already been added.
+ *
+ * @param searchResult    The current search result state from the ViewModel.
  * @param addContactState The current add-contact operation state.
- * @param onSearch       Callback invoked when the user submits a valid 8-digit number.
- * @param onAddContact   Callback invoked when the user taps "Add Contact".
- * @param onDismiss      Callback invoked when the dialog is dismissed.
- * @param onResetSearch  Callback invoked to reset the search state.
+ * @param onSearch        Callback invoked when the user submits a valid 8-digit number.
+ * @param onSearchQueryChanged Callback invoked on every keystroke for debounced search.
+ * @param onAddContact    Callback invoked when the user taps "Add Contact".
+ * @param onDismiss       Callback invoked when the dialog is dismissed.
+ * @param onResetSearch   Callback invoked to reset the search state.
  */
 @Composable
 fun FindContactDialog(
     searchResult: ContactSearchResult,
     addContactState: AddContactState,
     onSearch: (String) -> Unit,
+    onSearchQueryChanged: (String) -> Unit,
     onAddContact: (uid: String) -> Unit,
     onDismiss: () -> Unit,
     onResetSearch: () -> Unit,
@@ -86,14 +95,15 @@ fun FindContactDialog(
 ) {
     var zixoNumberInput by remember { mutableStateOf("") }
 
-    // Trigger search when exactly 8 digits are entered
+    // Auto-trigger search when exactly 8 digits are entered (debounced in ViewModel)
     LaunchedEffect(zixoNumberInput) {
-        if (zixoNumberInput.length == 8) {
+        onSearchQueryChanged(zixoNumberInput)
+        if (zixoNumberInput.length == 8 && zixoNumberInput.all { it.isDigit() }) {
             onSearch(zixoNumberInput)
         }
     }
 
-    // Reset input when dialog reopens
+    // Reset input when dialog opens
     LaunchedEffect(Unit) {
         zixoNumberInput = ""
         onResetSearch()
@@ -145,6 +155,9 @@ fun FindContactDialog(
             Spacer(modifier = Modifier.height(16.dp))
 
             // ── Zixo Number Input Field ───────────────
+            val isInvalidFormat = zixoNumberInput.isNotEmpty() &&
+                    (zixoNumberInput.length < 8 || !zixoNumberInput.all { it.isDigit() })
+
             GlassOutlinedTextField(
                 value = zixoNumberInput,
                 onValueChange = { input ->
@@ -167,7 +180,26 @@ fun FindContactDialog(
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number
                 ),
-                singleLine = true
+                singleLine = true,
+                trailingIcon = if (searchResult is ContactSearchResult.InvalidFormat || isInvalidFormat) {
+                    {
+                        Icon(
+                            imageVector = Icons.Outlined.ErrorOutline,
+                            contentDescription = "Invalid format",
+                            tint = DestructiveText,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else if (searchResult is ContactSearchResult.Found) {
+                    {
+                        Icon(
+                            imageVector = Icons.Outlined.CheckCircle,
+                            contentDescription = "Found",
+                            tint = NeonMint,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                } else null
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -178,37 +210,93 @@ fun FindContactDialog(
                     addContactState is AddContactState.Success -> "added"
                     addContactState is AddContactState.AlreadyAdded -> "already_added"
                     zixoNumberInput.isEmpty() -> "hint"
-                    zixoNumberInput.length < 8 -> "invalid"
+                    zixoNumberInput.length < 8 -> "partial"
+                    searchResult is ContactSearchResult.InvalidFormat -> "invalid_format"
                     searchResult is ContactSearchResult.Searching -> "searching"
                     searchResult is ContactSearchResult.NotFound -> "not_found"
-                    searchResult is ContactSearchResult.InvalidFormat -> "invalid_format"
                     searchResult is ContactSearchResult.Error -> "error"
                     searchResult is ContactSearchResult.Found -> "found"
                     else -> "hint"
                 },
                 transitionSpec = {
-                    fadeIn() togetherWith fadeOut()
+                    fadeIn(animationSpec = androidx.compose.animation.core.tween(300)) togetherWith
+                            fadeOut(animationSpec = androidx.compose.animation.core.tween(200))
                 },
                 label = "search_status_transition"
             ) { state ->
-                val (text, color) = when (state) {
-                    "hint" -> "Enter 8-digit Zixo Number" to TextSecondary
-                    "invalid" -> "Invalid format" to TextSecondary.copy(alpha = 0.7f)
-                    "invalid_format" -> "Invalid format" to TextSecondary.copy(alpha = 0.7f)
-                    "searching" -> "Searching..." to NeonMint
-                    "not_found" -> "Not found" to TextSecondary.copy(alpha = 0.8f)
-                    "error" -> (searchResult as? ContactSearchResult.Error)?.message?.let { "Error: $it" } to TextSecondary
-                    "found" -> "User found" to NeonMint
-                    "added" -> "Contact added!" to NeonMint
-                    "already_added" -> "Already in contacts" to TextSecondary
-                    else -> "Enter 8-digit Zixo Number" to TextSecondary
+                val (text, color, icon) = when (state) {
+                    "hint" -> Triple(
+                        "Enter 8-digit Zixo Number",
+                        TextSecondary,
+                        null
+                    )
+                    "partial" -> Triple(
+                        "${zixoNumberInput.length}/8 digits",
+                        TextSecondary.copy(alpha = 0.7f),
+                        null
+                    )
+                    "invalid_format" -> Triple(
+                        "Enter a valid 8-digit Zixo Number",
+                        DestructiveText,
+                        Icons.Outlined.ErrorOutline
+                    )
+                    "searching" -> Triple(
+                        "Searching\u2026",
+                        NeonMint,
+                        null
+                    )
+                    "not_found" -> Triple(
+                        "Zixo Number not found",
+                        TextSecondary.copy(alpha = 0.8f),
+                        null
+                    )
+                    "error" -> Triple(
+                        (searchResult as? ContactSearchResult.Error)?.message?.let { "Error: $it" }
+                            ?: "Search failed",
+                        DestructiveText,
+                        Icons.Outlined.ErrorOutline
+                    )
+                    "found" -> Triple(
+                        "User found",
+                        NeonMint,
+                        Icons.Outlined.CheckCircle
+                    )
+                    "added" -> Triple(
+                        "Contact added successfully!",
+                        NeonMint,
+                        Icons.Outlined.CheckCircle
+                    )
+                    "already_added" -> Triple(
+                        "Already a Contact",
+                        EmeraldGreen,
+                        Icons.Outlined.CheckCircle
+                    )
+                    else -> Triple(
+                        "Enter 8-digit Zixo Number",
+                        TextSecondary,
+                        null
+                    )
                 }
-                Text(
-                    text = text ?: "Enter 8-digit Zixo Number",
-                    color = color,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    if (icon != null) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = color,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Text(
+                        text = text,
+                        color = color,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -244,35 +332,40 @@ fun FindContactDialog(
                 }
             }
 
-            // ── Success Confirmation ──────────────────
+            // ── Success / Already-Added Confirmation ──
             AnimatedVisibility(
                 visible = addContactState is AddContactState.Success ||
                         addContactState is AddContactState.AlreadyAdded,
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it / 3 }),
                 exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 3 })
             ) {
+                val isAlreadyAdded = addContactState is AddContactState.AlreadyAdded
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (isAlreadyAdded) EmeraldGreen.copy(alpha = 0.08f)
+                            else NeonMint.copy(alpha = 0.08f)
+                        )
+                        .padding(vertical = 14.dp, horizontal = 16.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.VerifiedUser,
                         contentDescription = null,
-                        tint = NeonMint,
-                        modifier = Modifier.size(24.dp)
+                        tint = if (isAlreadyAdded) EmeraldGreen else NeonMint,
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (addContactState is AddContactState.AlreadyAdded)
-                            "Already in your contacts"
-                        else
-                            "Contact added successfully!",
-                        color = NeonMint,
+                        text = if (isAlreadyAdded) "Already a Contact"
+                        else "Contact added successfully!",
+                        color = if (isAlreadyAdded) EmeraldGreen else NeonMint,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -286,9 +379,10 @@ fun FindContactDialog(
 
 /**
  * Displays a profile snippet for a found user, including:
- * - A stylish vector Zixo icon identifier (VerifiedUser in emerald green)
- * - The found user's Display Name
- * - The formatted 8-digit Zixo Number
+ * - Avatar with the found user's initial/photo
+ * - Display name with a verified Zixo icon
+ * - Formatted 8-digit Zixo Number (XXXX XXXX)
+ * - Bio preview (first line)
  * - An active "Add Contact" button styled in NeonMint green
  */
 @Composable
@@ -306,7 +400,7 @@ private fun FoundProfileSnippet(
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // ── Avatar + Verified Icon Row ───────────
+        // ── Avatar + Info Row ─────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -398,7 +492,7 @@ private fun FoundProfileSnippet(
             }
 
             Text(
-                text = if (isAdding) "Adding..." else "Add Contact",
+                text = if (isAdding) "Adding\u2026" else "Add Contact",
                 color = TextPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold

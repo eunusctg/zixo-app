@@ -1,24 +1,20 @@
 package com.zixo.app.ui.main
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Chat
@@ -26,9 +22,14 @@ import androidx.compose.material.icons.outlined.Contacts
 import androidx.compose.material.icons.outlined.Dialpad
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,15 +43,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
 import com.zixo.app.ui.components.AvatarComponent
 import com.zixo.app.ui.components.ZixoGlassBackground
-import com.zixo.app.ui.components.liquidGlassCard
+import com.zixo.app.ui.components.liquidGlassNavItem
 import com.zixo.app.ui.contacts.ContactListScreen
 import com.zixo.app.ui.screens.calls.CallsScreen
 import com.zixo.app.ui.screens.chats.ChatsScreen
+import com.zixo.app.ui.status.StatusTabScreen
 import com.zixo.app.ui.theme.DarkPetrolCharcoal
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
@@ -61,13 +63,25 @@ import com.zixo.app.ui.theme.TextSecondary
 // ──────────────────────────────────────────────
 
 /**
- * Represents a tab in the home screen navigation.
+ * Represents a tab in the home screen bottom navigation.
+ *
+ * @param index     Zero-based position in the tab bar.
+ * @param label     Display name shown under the icon.
+ * @param icon      The outlined [ImageVector] for the unselected state.
+ * @param fabIcon   The [ImageVector] to show in the FAB when this tab is active.
+ * @param fabLabel  Accessibility label for the FAB on this tab.
  */
-enum class HomeTab(val index: Int, val label: String, val icon: ImageVector) {
-    CHATS(0, "Chats", Icons.Outlined.Chat),
-    CONTACTS(1, "Contacts", Icons.Outlined.Contacts),
-    CALLS(2, "Calls", Icons.Outlined.Call),
-    STATUS(3, "Status", Icons.Outlined.Edit)
+enum class HomeTab(
+    val index: Int,
+    val label: String,
+    val icon: ImageVector,
+    val fabIcon: ImageVector,
+    val fabLabel: String
+) {
+    CHATS(0, "Chats", Icons.Outlined.Chat, Icons.Outlined.Edit, "New chat"),
+    STATUS(1, "Status", Icons.Outlined.Edit, Icons.Outlined.Edit, "New status"),
+    CALLS(2, "Calls", Icons.Outlined.Call, Icons.Outlined.Dialpad, "Dial pad"),
+    CONTACTS(3, "Contacts", Icons.Outlined.Contacts, Icons.Outlined.PersonAdd, "Find contact")
 }
 
 // ──────────────────────────────────────────────
@@ -75,30 +89,39 @@ enum class HomeTab(val index: Int, val label: String, val icon: ImageVector) {
 // ──────────────────────────────────────────────
 
 /**
- * The main home screen that hosts tab navigation and content.
+ * The main home screen that hosts the 4-tab bottom navigation and content.
  *
- * This replaces the old [ChatsScreen] as the primary view and provides:
- * - [ZixoGlassBackground] for the animated blob background
- * - Top bar with "Zixo" branding and the user's avatar
- * - Tab content area that switches between Chats, Contacts, Calls, and Status
- * - FAB button styled with Liquid Glass for starting new chats
- * - Observes the current selected tab from the bottom nav
+ * Layout (top to bottom):
+ * 1. Branded top bar with "Zixo" and user avatar
+ * 2. Tab content area (Chats / Status / Calls / Contacts)
+ * 3. 85dp liquid-glass bottom navigation bar
+ * 4. Floating action button (mint green) above the bottom nav
  *
- * @param selectedTabIndex The currently selected tab index from the bottom navigation.
- * @param onTabSelected    Callback invoked when the user selects a tab.
- * @param onChatClick      Callback invoked when a chat thread is tapped.
- * @param onContactClick   Callback invoked when a contact is tapped.
- * @param onNewChatClick   Callback invoked when the FAB is pressed.
- * @param currentUserAvatarUrl The URL of the current user's avatar for the top bar.
- * @param currentUserDisplayName The display name of the current user.
+ * @param navController  Navigation controller for routing to detail screens.
+ * @param selectedTabIndex  The currently selected tab index (default 0 = Chats).
+ * @param onTabSelected  Callback invoked when the user selects a tab.
+ * @param onChatClick    Callback invoked when a chat thread is tapped.
+ * @param onGroupChatClick Callback invoked when a group chat thread is tapped.
+ * @param onContactClick Callback invoked when a contact is tapped.
+ * @param onNewChatClick Callback invoked when the FAB is pressed on the Chats tab.
+ * @param onCallClick    Callback invoked when a call is initiated.
+ * @param unreadChatCount    Unread count for the Chats tab badge.
+ * @param unreadCallsCount   Unread count for the Calls tab badge.
+ * @param currentUserAvatarUrl  URL of the current user's avatar.
+ * @param currentUserDisplayName Display name of the current user.
  */
 @Composable
 fun HomeScreen(
+    navController: NavController,
     selectedTabIndex: Int = 0,
     onTabSelected: (Int) -> Unit = {},
     onChatClick: (threadId: String) -> Unit = {},
+    onGroupChatClick: (threadId: String) -> Unit = {},
     onContactClick: (contactUserId: String) -> Unit = {},
     onNewChatClick: () -> Unit = {},
+    onCallClick: (callId: String) -> Unit = {},
+    unreadChatCount: Int = 0,
+    unreadCallsCount: Int = 0,
     currentUserAvatarUrl: String? = null,
     currentUserDisplayName: String = ""
 ) {
@@ -110,18 +133,26 @@ fun HomeScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // ── Full-screen animated glass background ──
         ZixoGlassBackground()
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color.Transparent,
-            topBar = {
-                HomeTopBar(
-                    currentUserAvatarUrl = currentUserAvatarUrl,
-                    currentUserDisplayName = currentUserDisplayName
+            bottomBar = {
+                // ── 85dp Liquid Glass Bottom Nav ─────
+                HomeBottomNav(
+                    selectedTab = currentTab,
+                    onTabSelected = { index ->
+                        currentTab = index
+                        onTabSelected(index)
+                    },
+                    unreadChatCount = unreadChatCount,
+                    unreadCallsCount = unreadCallsCount
                 )
             },
             floatingActionButton = {
+                // ── Mint Green FAB ───────────────────
                 HomeFab(
                     currentTab = currentTab,
                     onNewChatClick = onNewChatClick
@@ -133,46 +164,40 @@ fun HomeScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                // ── Tab Strip ────────────────────────────
-                HomeTabStrip(
-                    selectedTab = currentTab,
-                    onTabSelected = { index ->
-                        currentTab = index
-                        onTabSelected(index)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
+                // ── Branded Top Bar ────────────────────
+                HomeTopBar(
+                    currentUserAvatarUrl = currentUserAvatarUrl,
+                    currentUserDisplayName = currentUserDisplayName
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // ── Tab Content Area ─────────────────────
+                // ── Tab Content Area ──────────────────
                 AnimatedContent(
                     targetState = currentTab,
                     transitionSpec = {
                         val direction = if (targetState > initialState) 1 else -1
-                        slideInHorizontally(initialOffsetX = { fullWidth -> direction * fullWidth }) togetherWith
-                                slideOutHorizontally(targetOffsetX = { fullWidth -> -direction * fullWidth })
+                        slideInHorizontally(
+                            initialOffsetX = { fullWidth -> direction * fullWidth },
+                            animationSpec = tween(300)
+                        ) togetherWith slideOutHorizontally(
+                            targetOffsetX = { fullWidth -> -direction * fullWidth },
+                            animationSpec = tween(300)
+                        )
                     },
                     label = "home_tab_transition"
                 ) { tab ->
                     when (tab) {
-                        HomeTab.CHATS.index -> {
-                            ChatsScreen(onChatClick = onChatClick)
-                        }
+                        HomeTab.CHATS.index -> ChatsTabContent(
+                            onChatClick = onChatClick,
+                            onGroupChatClick = onGroupChatClick
+                        )
 
-                        HomeTab.CONTACTS.index -> {
-                            ContactListScreen(onContactClick = onContactClick)
-                        }
+                        HomeTab.STATUS.index -> StatusTabContent()
 
-                        HomeTab.CALLS.index -> {
-                            CallsScreen()
-                        }
+                        HomeTab.CALLS.index -> CallsTabContent()
 
-                        HomeTab.STATUS.index -> {
-                            StatusPlaceholder()
-                        }
+                        HomeTab.CONTACTS.index -> ContactsTabContent(
+                            onContactClick = onContactClick
+                        )
                     }
                 }
             }
@@ -186,7 +211,6 @@ fun HomeScreen(
 
 /**
  * Custom top bar with "Zixo" branding and the user's avatar.
- * Replaces the standard ZixoTopBar to provide a branded home header.
  */
 @Composable
 private fun HomeTopBar(
@@ -221,66 +245,86 @@ private fun HomeTopBar(
 }
 
 // ──────────────────────────────────────────────
-// Home Tab Strip
+// 85dp Liquid Glass Bottom Navigation
 // ──────────────────────────────────────────────
 
 /**
- * Horizontal tab strip for switching between Chats, Contacts, Calls, and Status.
+ * iOS Liquid Glass-styled bottom navigation bar, exactly 85dp height.
  *
- * Uses the Liquid Glass design with a glass panel background and
- * highlighted selection indicator on the active tab.
+ * Features:
+ * - [liquidGlassNavItem] modifier for the frosted glass visual
+ * - 4 tabs: Chats, Status, Calls, Contacts
+ * - Unread count badges on Chats and Calls tabs
+ * - NeonMint accent for selected state
+ * - Smooth color transitions on selection change
+ * - Floats above the animated ZixoGlassBackground
  */
 @Composable
-private fun HomeTabStrip(
+private fun HomeBottomNav(
     selectedTab: Int,
     onTabSelected: (Int) -> Unit,
+    unreadChatCount: Int = 0,
+    unreadCallsCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
-    val tabs = HomeTab.entries
-
-    Row(
+    NavigationBar(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .liquidGlassCard()
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(85.dp)
+            .liquidGlassNavItem(),
+        containerColor = Color.Transparent,
+        contentColor = NeonMint
     ) {
-        tabs.forEach { tab ->
+        HomeTab.entries.forEach { tab ->
             val isSelected = tab.index == selectedTab
 
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .then(
-                        if (isSelected) Modifier.liquidGlassCard() else Modifier
-                    )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { onTabSelected(tab.index) }
-                    )
-                    .padding(vertical = 10.dp, horizontal = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = tab.icon,
-                    contentDescription = tab.label,
-                    tint = if (isSelected) NeonMint else TextSecondary,
-                    modifier = Modifier.size(20.dp)
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = tab.label,
-                    color = if (isSelected) NeonMint else TextSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                )
+            // Badge counts per tab
+            val badgeCount = when (tab) {
+                HomeTab.CHATS -> unreadChatCount
+                HomeTab.CALLS -> unreadCallsCount
+                else -> 0
             }
+
+            NavigationBarItem(
+                selected = isSelected,
+                onClick = { onTabSelected(tab.index) },
+                icon = {
+                    BadgedBox(
+                        badge = {
+                            if (badgeCount > 0) {
+                                Badge(
+                                    containerColor = NeonMint,
+                                    contentColor = DarkPetrolCharcoal
+                                ) {
+                                    Text(
+                                        text = if (badgeCount > 99) "99+" else badgeCount.toString(),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = tab.label,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                },
+                label = {
+                    Text(
+                        text = tab.label,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = NeonMint,
+                    selectedTextColor = NeonMint,
+                    unselectedIconColor = TextSecondary,
+                    unselectedTextColor = TextSecondary,
+                    indicatorColor = NeonMint.copy(alpha = 0.15f)
+                )
+            )
         }
     }
 }
@@ -290,12 +334,13 @@ private fun HomeTabStrip(
 // ──────────────────────────────────────────────
 
 /**
- * Floating action button styled with Liquid Glass.
+ * Floating action button styled with Liquid Glass in NeonMint green.
+ *
  * The icon varies based on the current tab:
  * - Chats tab: Edit (new chat)
- * - Contacts tab: Person add (find contact)
- * - Calls tab: Dial pad
  * - Status tab: Edit (new status)
+ * - Calls tab: Dial pad
+ * - Contacts tab: Person add (find contact)
  */
 @Composable
 private fun HomeFab(
@@ -303,27 +348,12 @@ private fun HomeFab(
     onNewChatClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val fabIcon = when (currentTab) {
-        HomeTab.CHATS.index -> Icons.Outlined.Edit
-        HomeTab.CONTACTS.index -> Icons.Outlined.PersonAdd
-        HomeTab.CALLS.index -> Icons.Outlined.Dialpad
-        HomeTab.STATUS.index -> Icons.Outlined.Edit
-        else -> Icons.Outlined.Edit
-    }
-
-    val fabDescription = when (currentTab) {
-        HomeTab.CHATS.index -> "New chat"
-        HomeTab.CONTACTS.index -> "Find contact"
-        HomeTab.CALLS.index -> "Dial pad"
-        HomeTab.STATUS.index -> "New status"
-        else -> "Action"
-    }
+    val tab = HomeTab.entries.find { it.index == currentTab } ?: HomeTab.CHATS
 
     FloatingActionButton(
         onClick = onNewChatClick,
         modifier = modifier
-            .clip(CircleShape)
-            .liquidGlassCard(),
+            .clip(CircleShape),
         containerColor = NeonMint,
         contentColor = DarkPetrolCharcoal,
         shape = CircleShape,
@@ -335,8 +365,8 @@ private fun HomeFab(
         )
     ) {
         Icon(
-            imageVector = fabIcon,
-            contentDescription = fabDescription,
+            imageVector = tab.fabIcon,
+            contentDescription = tab.fabLabel,
             modifier = Modifier.size(24.dp),
             tint = DarkPetrolCharcoal
         )
@@ -344,49 +374,46 @@ private fun HomeFab(
 }
 
 // ──────────────────────────────────────────────
-// Status Placeholder
+// Tab Content Stubs
 // ──────────────────────────────────────────────
 
 /**
- * Placeholder screen for the Status tab.
- * Will be replaced with a full status implementation in a future iteration.
+ * Chats tab — delegates to the full [ChatsScreen] composable.
+ * Will be connected to ChatViewModel by other agents.
  */
 @Composable
-private fun StatusPlaceholder(
-    modifier: Modifier = Modifier
+fun ChatsTabContent(
+    onChatClick: (threadId: String) -> Unit = {},
+    onGroupChatClick: (threadId: String) -> Unit = {}
 ) {
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Edit,
-                contentDescription = null,
-                tint = TextSecondary.copy(alpha = 0.5f),
-                modifier = Modifier.size(64.dp)
-            )
+    ChatsScreen(onChatClick = onChatClick)
+}
 
-            Spacer(modifier = Modifier.height(16.dp))
+/**
+ * Status tab — delegates to the full [StatusTabScreen] composable.
+ * Will be connected to StatusViewModel by other agents.
+ */
+@Composable
+fun StatusTabContent() {
+    StatusTabScreen()
+}
 
-            Text(
-                text = "Status",
-                color = TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+/**
+ * Calls tab — delegates to the full [CallsScreen] composable.
+ * Will be connected to CallsViewModel by other agents.
+ */
+@Composable
+fun CallsTabContent() {
+    CallsScreen()
+}
 
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Text(
-                text = "Status updates from your contacts\nwill appear here",
-                color = TextSecondary,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
+/**
+ * Contacts tab — delegates to the full [ContactListScreen] composable.
+ * Connected to [ContactListViewModel] via Hilt injection.
+ */
+@Composable
+fun ContactsTabContent(
+    onContactClick: (contactUserId: String) -> Unit = {}
+) {
+    ContactListScreen(onContactClick = onContactClick)
 }

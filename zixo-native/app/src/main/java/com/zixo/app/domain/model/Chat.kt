@@ -1,32 +1,23 @@
 package com.zixo.app.domain.model
 
-import java.time.Instant
+/**
+ * Type aliases for backward compatibility.
+ *
+ * The primary chat models (ChatThreadModel, MessageModel, ThreadType, etc.)
+ * are defined in MessageModel.kt. The legacy ChatThread and Message classes
+ * that were previously defined here are superseded by those richer models.
+ *
+ * Any code still referencing the old types should migrate to:
+ *   - ChatThread  → ChatThreadModel
+ *   - Message     → MessageModel
+ *   - MessageType → MessageContentType
+ */
 
-data class ChatThread(
-    val id: String,
-    val participantUids: List<String>,
-    val lastMessage: String?,
-    val lastMessageTimestamp: Instant?,
-    val unreadCount: Int = 0,
-    val isPinned: Boolean = false,
-    val isMuted: Boolean = false
-)
+/** @suppress Backward-compatibility alias. Use [ChatThreadModel] instead. */
+typealias ChatThread = ChatThreadModel
 
-data class Message(
-    val id: String,
-    val threadId: String,
-    val senderUid: String,
-    val content: String,
-    val timestamp: Instant,
-    val isRead: Boolean = false,
-    val type: MessageType = MessageType.TEXT,
-    val mediaUrl: String? = null
-)
+/** @suppress Backward-compatibility alias. Use [MessageModel] instead. */
+typealias Message = MessageModel
 
-enum class MessageType {
-    TEXT,
-    IMAGE,
-    VIDEO,
-    AUDIO,
-    FILE
-}
+/** @suppress Backward-compatibility alias. Use [MessageContentType] instead. */
+typealias MessageType = MessageContentType

@@ -1,9 +1,12 @@
 package com.zixo.app.ui.settings
 
+import android.content.Context
 import android.util.Log
+import androidx.credentials.CreatePublicKeyCredentialRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.exceptions.CreateCredentialException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.zixo.app.data.repository.AuthRepository
 import com.zixo.app.domain.model.AppSettingsState
 import com.zixo.app.domain.model.ConversationStorageEntry
 import com.zixo.app.domain.model.MediaType
@@ -11,8 +14,11 @@ import com.zixo.app.domain.model.StorageBreakdown
 import com.zixo.app.domain.model.StatusPrivacyOption
 import com.zixo.app.domain.model.ThemeMode
 import com.zixo.app.domain.model.UploadQuality
+import com.zixo.app.domain.model.UserProfile
 import com.zixo.app.domain.model.VisibilityOption
 import com.zixo.app.domain.model.VibrationOption
+import com.zixo.app.domain.repository.AuthRepository
+import com.zixo.app.domain.repository.AuthResult
 import com.zixo.app.domain.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -20,9 +26,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -78,18 +86,7 @@ class SettingsViewModel @Inject constructor(
 
     // ── Internal mutable error / loading relay ──────────────────────────────
 
-    /**
-     * Holds a transient error message that is merged into [settingsState].
-     * Cleared (set to null) whenever the next successful operation begins
-     * or when [clearError] is called from the UI.
-     */
     private val _errorMessage = MutableStateFlow<String?>(null)
-
-    /**
-     * Tracks whether ANY mutation operation is currently in-flight.
-     * Merged into [settingsState].isLoading so the UI can display a global
-     * progress indicator.
-     */
     private val _isLoading = MutableStateFlow(false)
 
     // ── Primary settings state ──────────────────────────────────────────────
@@ -97,10 +94,6 @@ class SettingsViewModel @Inject constructor(
     /**
      * The primary reactive state combining all preferences from
      * [SettingsRepository.settingsFlow] with transient loading/error signals.
-     *
-     * The underlying [AppSettingsState] emitted by the repository is
-     * authoritative for all persisted values; only `isLoading` and
-     * `errorMessage` are overridden by the ViewModel's own signals.
      */
     val settingsState: StateFlow<AppSettingsState> = combine(
         settingsRepository.settingsFlow,
@@ -125,15 +118,36 @@ class SettingsViewModel @Inject constructor(
         initialValue = AppSettingsState(isLoading = true)
     )
 
+    // ── User profile ────────────────────────────────────────────────────────
+
+    /**
+     * Reactive user profile derived from [settingsState].
+     * Username and ZixoNumber are system-generated and strictly read-only.
+     */
+    val userProfile: StateFlow<UserProfile> = settingsRepository.userProfileFlow
+        .catch { throwable ->
+            Log.e(TAG, "Error observing user profile", throwable)
+            emit(UserProfile())
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000),
+            initialValue = UserProfile()
+        )
+
+    // ── Passkey registration state ──────────────────────────────────────────
+
+    private val _isPasskeyRegistered = MutableStateFlow(false)
+    val isPasskeyRegistered: StateFlow<Boolean> = _isPasskeyRegistered.asStateFlow()
+
+    // ── QR popup state ──────────────────────────────────────────────────────
+
+    private val _showQrPopup = MutableStateFlow(false)
+    val showQrPopup: StateFlow<Boolean> = _showQrPopup.asStateFlow()
+
     // ── Logout state ────────────────────────────────────────────────────────
 
     private val _logoutState = MutableStateFlow<LogoutState>(LogoutState.Idle)
-
-    /**
-     * Tracks the lifecycle of a logout / account deletion operation.
-     * The UI should observe this to present confirmation dialogs and
-     * navigate to the authentication screen on [LogoutState.Success].
-     */
     val logoutState: StateFlow<LogoutState> = _logoutState
 
     // ── Storage observation ─────────────────────────────────────────────────
@@ -154,39 +168,20 @@ class SettingsViewModel @Inject constructor(
             )
 
     /**
-     * Reactive per-conversation storage usage entries, sorted for display.
+     * Reactive per-conversation storage usage entries.
+     * TODO: Wire to repository once getConversationStorage() is added to SettingsRepository.
      */
-    val conversationStorage: StateFlow<List<ConversationStorageEntry>> =
-        settingsRepository.getConversationStorage()
-            .catch { throwable ->
-                Log.e(TAG, "Error observing conversation storage", throwable)
-                emit(emptyList())
-            }
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000),
-                initialValue = emptyList()
-            )
+    private val _conversationStorage = MutableStateFlow<List<ConversationStorageEntry>>(emptyList())
+    val conversationStorage: StateFlow<List<ConversationStorageEntry>> = _conversationStorage.asStateFlow()
 
     // ── Concurrency guard ───────────────────────────────────────────────────
 
-    /**
-     * Tracks the currently running mutation job so that overlapping calls
-     * are safely ignored rather than creating parallel write races.
-     */
     private var mutationJob: Job? = null
 
     // ── Helper: execute a mutation safely ───────────────────────────────────
 
-    /**
-     * Runs [block] on [Dispatchers.IO] inside a structured coroutine.
-     * Sets loading/error states around the call and guarantees that
-     * `isLoading` is always reset, even on failure.
-     */
     private fun runMutation(block: suspend () -> Unit) {
-        // Prevent overlapping mutations – the previous one must finish first
         if (mutationJob?.isActive == true) return
-
         mutationJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 _isLoading.value = true
@@ -201,12 +196,23 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    // ── Init ────────────────────────────────────────────────────────────────
+
+    init {
+        // Load passkey registration state
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                authRepository.isPasskeyRegistered().collect { registered ->
+                    _isPasskeyRegistered.value = registered
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Failed to check passkey registration", t)
+            }
+        }
+    }
+
     // ── Public error consumer ───────────────────────────────────────────────
 
-    /**
-     * Clears the current error message on the state.
-     * Call this from the UI after the error has been shown to the user.
-     */
     fun clearError() {
         _errorMessage.value = null
     }
@@ -311,6 +317,15 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.updateConversationTones(enabled)
     }
 
+    fun updateNotificationTone(type: String, uri: String) = runMutation {
+        when (type) {
+            "message" -> settingsRepository.updateMessageNotificationTone(uri)
+            "group" -> settingsRepository.updateGroupNotificationTone(uri)
+            "call" -> settingsRepository.updateCallRingtone(uri)
+            "video_call" -> settingsRepository.updateVideoCallRingtone(uri)
+        }
+    }
+
     fun updateMessageNotificationTone(uri: String) = runMutation {
         settingsRepository.updateMessageNotificationTone(uri)
     }
@@ -335,6 +350,14 @@ class SettingsViewModel @Inject constructor(
     //  Data & Storage
     // ════════════════════════════════════════════════════════════════════════
 
+    fun updateAutoDownload(network: String, types: Set<MediaType>) = runMutation {
+        when (network) {
+            "mobile" -> settingsRepository.updateAutoDownloadMobile(types)
+            "wifi" -> settingsRepository.updateAutoDownloadWifi(types)
+            "roaming" -> settingsRepository.updateAutoDownloadRoaming(types)
+        }
+    }
+
     fun updateAutoDownloadMobile(types: Set<MediaType>) = runMutation {
         settingsRepository.updateAutoDownloadMobile(types)
     }
@@ -351,39 +374,10 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.updateMediaUploadQuality(quality)
     }
 
-    /**
-     * Clears the application cache directories.
-     * On success the [storageBreakdown] flow will automatically emit
-     * updated values because the repository re-computes disk usage.
-     */
     fun clearCache() = runMutation {
         settingsRepository.clearCache()
     }
 
-    /**
-     * Requests a portable account information report.
-     * The result is delivered through [settingsState.errorMessage] on failure;
-     * on success the repository returns a URL or report string which is
-     * logged here for debugging (the UI can listen to repository-specific
-     * flows if it needs the actual value).
-     */
-    fun requestAccountInfo() = runMutation {
-        val result = settingsRepository.requestAccountInfo()
-        result.fold(
-            onSuccess = { report ->
-                Log.i(TAG, "Account info report generated: $report")
-            },
-            onFailure = { throwable ->
-                throw throwable  // will be caught by runMutation's try-catch
-            }
-        )
-    }
-
-    /**
-     * Permanently deletes the user's account.
-     * This is an irreversible operation that removes all Firestore documents
-     * and the Firebase Authentication record.
-     */
     fun deleteAccount() = runMutation {
         settingsRepository.deleteAccount().fold(
             onSuccess = {
@@ -396,41 +390,87 @@ class SettingsViewModel @Inject constructor(
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  Auth — Logout
+    //  Passkey — Credential Manager
     // ════════════════════════════════════════════════════════════════════════
 
     /**
-     * Puts the logout flow into the [LogoutState.Confirming] state so the
-     * UI can present a confirmation dialog. Does NOT perform the actual
-     * logout until [confirmLogout] is called.
+     * Creates a WebAuthn passkey via Android CredentialManager.
+     * The [requestJson] is the WebAuthn registration challenge JSON from the
+     * Cloudflare backend. On success the credential is registered server-side.
      */
+    fun createPasskey(context: Context, requestJson: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _isLoading.value = true
+                _errorMessage.value = null
+                val credentialManager = CredentialManager.create(context)
+                val request = CreatePublicKeyCredentialRequest(requestJson = requestJson)
+                val response = credentialManager.createCredential(context, request)
+                authRepository.registerPasskeyWithBackend(response).collect { result ->
+                    when (result) {
+                        is AuthResult.Success -> {
+                            _isPasskeyRegistered.value = true
+                            Log.i(TAG, "Passkey registered successfully")
+                        }
+                        is AuthResult.Error -> {
+                            _errorMessage.value = result.message
+                            Log.e(TAG, "Passkey registration failed: ${result.message}")
+                        }
+                        is AuthResult.Loading -> { /* in progress */ }
+                    }
+                }
+            } catch (e: CreateCredentialException) {
+                Log.e(TAG, "Credential creation failed", e)
+                _errorMessage.value = e.localizedMessage ?: "Passkey creation failed"
+            } catch (t: Throwable) {
+                Log.e(TAG, "Passkey creation unexpected error", t)
+                _errorMessage.value = t.localizedMessage ?: "An unexpected error occurred"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  QR Popup
+    // ════════════════════════════════════════════════════════════════════════
+
+    fun toggleQrPopup() {
+        _showQrPopup.update { !it }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  Auth — Logout
+    // ════════════════════════════════════════════════════════════════════════
+
     fun requestLogout() {
         _logoutState.value = LogoutState.Confirming
     }
 
-    /**
-     * Cancels a pending logout confirmation dialog.
-     */
     fun cancelLogout() {
         if (_logoutState.value is LogoutState.Confirming) {
             _logoutState.value = LogoutState.Idle
         }
     }
 
-    /**
-     * Executes the sign-out operation after the user has confirmed.
-     * The state transitions through [LogoutState.Loading] and resolves
-     * to either [LogoutState.Success] or [LogoutState.Error].
-     */
     fun confirmLogout() {
-        // Only proceed if we're in the Confirming state
         if (_logoutState.value !is LogoutState.Confirming) return
-
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _logoutState.value = LogoutState.Loading
-                authRepository.signOut()
-                _logoutState.value = LogoutState.Success
+                authRepository.signOut().collect { result ->
+                    when (result) {
+                        is AuthResult.Success -> {
+                            _logoutState.value = LogoutState.Success
+                        }
+                        is AuthResult.Error -> {
+                            _logoutState.value = LogoutState.Error(result.message)
+                        }
+                        is AuthResult.Loading -> {
+                            _logoutState.value = LogoutState.Loading
+                        }
+                    }
+                }
             } catch (t: Throwable) {
                 Log.e(TAG, "Logout failed", t)
                 _logoutState.value = LogoutState.Error(
@@ -440,11 +480,6 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Resets the logout state back to [LogoutState.Idle].
-     * Call this after the UI has consumed the terminal state
-     * (Success / Error) to prevent re-consumption on configuration changes.
-     */
     fun resetLogoutState() {
         _logoutState.value = LogoutState.Idle
     }

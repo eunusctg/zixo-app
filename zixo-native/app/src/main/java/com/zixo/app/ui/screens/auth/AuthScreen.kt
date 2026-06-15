@@ -1,5 +1,6 @@
 package com.zixo.app.ui.screens.auth
 
+import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -18,107 +19,102 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.Capability
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.zixo.app.ui.components.SegmentedPicker
+import com.zixo.app.ui.components.GlassOutlinedTextField
+import com.zixo.app.ui.components.ZixoGlassBackground
+import com.zixo.app.ui.components.liquidGlassContainer
 import com.zixo.app.ui.theme.BackgroundGradientEnd
 import com.zixo.app.ui.theme.BackgroundGradientStart
-import com.zixo.app.ui.theme.DarkPetrolCharcoal
 import com.zixo.app.ui.theme.DestructiveBackground
 import com.zixo.app.ui.theme.DestructiveText
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
 
-// ──────────────────────────────────────────────
-// Auth UI State
-// ──────────────────────────────────────────────
-
-data class AuthUiState(
-    val isSignInMode: Boolean = true,
-    val email: String = "",
-    val password: String = "",
-    val displayName: String = "",
-    val isLoading: Boolean = false,
-    val errorMessage: String? = null
-)
-
-// ──────────────────────────────────────────────
-// Auth Screen
-// ──────────────────────────────────────────────
-
+/**
+ * Zixo Authentication Screen — Google Sign-In via CredentialManager.
+ *
+ * This screen handles two flows:
+ * 1. **Sign-In Flow**: User taps "Continue with Google" → CredentialManager
+ *    launches the native Google Sign-In sheet → Token is verified by
+ *    Cloudflare Edge Worker → Firebase Auth session is created.
+ * 2. **Profile Setup Flow** (new users only): After successful Google Sign-In,
+ *    new users are prompted to enter a display name. The system-generated
+ *    8-digit Zixo Number and @username are minted by the Cloudflare backend.
+ *
+ * No email/password fields — authentication is exclusively via Google
+ * CredentialManager with WebAuthn passkey support.
+ */
 @Composable
 fun AuthScreen(
     viewModel: AuthViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
-    AuthScreenContent(
-        uiState = uiState,
-        onEmailChange = viewModel::onEmailChange,
-        onPasswordChange = viewModel::onPasswordChange,
-        onDisplayNameChange = viewModel::onDisplayNameChange,
-        onToggleMode = viewModel::onToggleMode,
-        onSubmit = viewModel::onSubmit
-    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        ZixoGlassBackground()
+
+        AuthScreenContent(
+            uiState = uiState,
+            onGoogleSignIn = {
+                val activity = context as? Activity
+                if (activity != null) {
+                    viewModel.signInWithGoogle(activity)
+                }
+            },
+            onDisplayNameChange = viewModel::onDisplayNameChange,
+            onProfileSetupSubmit = {
+                viewModel.setDisplayNameAndContinue(uiState.displayName)
+            },
+            onClearError = viewModel::clearError
+        )
+    }
 }
 
 @Composable
 private fun AuthScreenContent(
     uiState: AuthUiState,
-    onEmailChange: (String) -> Unit,
-    onPasswordChange: (String) -> Unit,
+    onGoogleSignIn: () -> Unit,
     onDisplayNameChange: (String) -> Unit,
-    onToggleMode: () -> Unit,
-    onSubmit: () -> Unit
+    onProfileSetupSubmit: () -> Unit,
+    onClearError: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
-    var isPasswordVisible by rememberSaveable { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(BackgroundGradientStart, BackgroundGradientEnd)
-                )
-            )
             .systemBarsPadding()
             .imePadding()
     ) {
@@ -129,19 +125,19 @@ private fun AuthScreenContent(
                 .padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(72.dp))
+            Spacer(modifier = Modifier.height(80.dp))
 
             // ── ZIXO Logo ──────────────────────────────
             Text(
                 text = "ZIXO",
                 color = NeonMint,
-                fontSize = 52.sp,
+                fontSize = 56.sp,
                 fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 6.sp,
+                letterSpacing = 8.sp,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // ── Tagline ────────────────────────────────
             Text(
@@ -153,171 +149,170 @@ private fun AuthScreenContent(
                 textAlign = TextAlign.Center
             )
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ── Sub-tagline explaining zero-trust model ──
+            Text(
+                text = "Find contacts by Zixo Number only",
+                color = TextSecondary.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Normal,
+                letterSpacing = 0.3.sp,
+                textAlign = TextAlign.Center
+            )
+
             Spacer(modifier = Modifier.height(48.dp))
 
-            // ── Sign In / Sign Up Toggle ───────────────
-            SegmentedPicker(
-                options = listOf("Sign In", "Sign Up"),
-                selectedIndex = if (uiState.isSignInMode) 0 else 1,
-                onOptionSelected = { index ->
-                    if ((index == 0) != uiState.isSignInMode) {
-                        onToggleMode()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // ── Email Field ────────────────────────────
-            OutlinedTextField(
-                value = uiState.email,
-                onValueChange = onEmailChange,
-                label = {
-                    Text(
-                        text = "Email",
-                        color = TextSecondary
-                    )
-                },
-                singleLine = true,
-                textStyle = TextStyle(
-                    color = TextPrimary,
-                    fontSize = 16.sp
-                ),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Email,
-                    imeAction = ImeAction.Next
-                ),
-                keyboardActions = KeyboardActions(
-                    onNext = { focusManager.moveFocus(FocusDirection.Down) }
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonMint,
-                    unfocusedBorderColor = TextSecondary.copy(alpha = 0.4f),
-                    focusedLabelColor = NeonMint,
-                    cursorColor = NeonMint,
-                    focusedContainerColor = DarkPetrolCharcoal,
-                    unfocusedContainerColor = DarkPetrolCharcoal
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Password Field ─────────────────────────
-            OutlinedTextField(
-                value = uiState.password,
-                onValueChange = onPasswordChange,
-                label = {
-                    Text(
-                        text = "Password",
-                        color = TextSecondary
-                    )
-                },
-                singleLine = true,
-                textStyle = TextStyle(
-                    color = TextPrimary,
-                    fontSize = 16.sp
-                ),
-                visualTransformation = if (isPasswordVisible) {
-                    VisualTransformation.None
-                } else {
-                    PasswordVisualTransformation()
-                },
-                trailingIcon = {
-                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                        Icon(
-                            imageVector = if (isPasswordVisible) {
-                                Icons.Filled.VisibilityOff
-                            } else {
-                                Icons.Filled.Visibility
-                            },
-                            contentDescription = if (isPasswordVisible) {
-                                "Hide password"
-                            } else {
-                                "Show password"
-                            },
-                            tint = TextSecondary
-                        )
-                    }
-                },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = if (uiState.isSignInMode) ImeAction.Done else ImeAction.Next
-                ),
-                keyboardActions = KeyboardActions(
-                    onNext = {
-                        if (!uiState.isSignInMode) {
-                            focusManager.moveFocus(FocusDirection.Down)
-                        }
-                    },
-                    onDone = {
-                        if (uiState.isSignInMode) {
-                            focusManager.clearFocus()
-                            onSubmit()
-                        }
-                    }
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = NeonMint,
-                    unfocusedBorderColor = TextSecondary.copy(alpha = 0.4f),
-                    focusedLabelColor = NeonMint,
-                    cursorColor = NeonMint,
-                    focusedContainerColor = DarkPetrolCharcoal,
-                    unfocusedContainerColor = DarkPetrolCharcoal
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Display Name Field (Sign Up only) ──────
+            // ── Profile Setup (new users) ───────────────
             AnimatedVisibility(
-                visible = !uiState.isSignInMode,
+                visible = uiState.isProfileSetupNeeded,
                 enter = fadeIn() + expandVertically() + slideInVertically(),
                 exit = fadeOut() + shrinkVertically() + slideOutVertically()
             ) {
-                Column {
-                    OutlinedTextField(
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .liquidGlassContainer()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Set Up Your Profile",
+                        color = TextPrimary,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Your Zixo Number and username have been generated automatically.",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    GlassOutlinedTextField(
                         value = uiState.displayName,
                         onValueChange = onDisplayNameChange,
-                        label = {
-                            Text(
-                                text = "Display Name",
-                                color = TextSecondary
-                            )
-                        },
+                        label = { Text("Display Name") },
+                        placeholder = { Text("Enter your display name") },
+                        maxLength = 50,
                         singleLine = true,
-                        textStyle = TextStyle(
-                            color = TextPrimary,
-                            fontSize = 16.sp
-                        ),
                         keyboardOptions = KeyboardOptions(
                             capitalization = KeyboardCapitalization.Words,
-                            imeAction = ImeAction.Done
+                            keyboardType = KeyboardType.Text
                         ),
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 focusManager.clearFocus()
-                                onSubmit()
+                                onProfileSetupSubmit()
                             }
                         ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonMint,
-                            unfocusedBorderColor = TextSecondary.copy(alpha = 0.4f),
-                            focusedLabelColor = NeonMint,
-                            cursorColor = NeonMint,
-                            focusedContainerColor = DarkPetrolCharcoal,
-                            unfocusedContainerColor = DarkPetrolCharcoal
-                        ),
-                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
+
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = {
+                            focusManager.clearFocus()
+                            onProfileSetupSubmit()
+                        },
+                        enabled = !uiState.isLoading && uiState.displayName.isNotBlank(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NeonMint,
+                            contentColor = BackgroundGradientStart,
+                            disabledContainerColor = NeonMint.copy(alpha = 0.5f),
+                            disabledContentColor = BackgroundGradientStart.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                    ) {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                color = BackgroundGradientStart,
+                                strokeWidth = 2.5.dp
+                            )
+                        } else {
+                            Text(
+                                text = "Continue",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
+
+            // ── Google Sign-In Button (main auth flow) ──
+            AnimatedVisibility(
+                visible = !uiState.isProfileSetupNeeded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // ── Continue with Google Button ─────────
+                    Button(
+                        onClick = onGoogleSignIn,
+                        enabled = !uiState.isLoading,
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NeonMint,
+                            contentColor = BackgroundGradientStart,
+                            disabledContainerColor = NeonMint.copy(alpha = 0.5f),
+                            disabledContentColor = BackgroundGradientStart.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                    ) {
+                        if (uiState.isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = BackgroundGradientStart,
+                                strokeWidth = 2.5.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Filled.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = BackgroundGradientStart
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Continue with Google",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.3.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // ── Security Note ───────────────────────
+                    Text(
+                        text = "Your Zixo Number and @username are generated automatically.\nNo one can search you by name — only by your 8-digit number.",
+                        color = TextSecondary.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f, fill = false))
 
             // ── Error Message ──────────────────────────
             AnimatedVisibility(
@@ -346,59 +341,7 @@ private fun AuthScreenContent(
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f, fill = false))
-
-            // ── Primary Action Button ──────────────────
-            Button(
-                onClick = {
-                    focusManager.clearFocus()
-                    onSubmit()
-                },
-                enabled = !uiState.isLoading,
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = NeonMint,
-                    contentColor = BackgroundGradientStart,
-                    disabledContainerColor = NeonMint.copy(alpha = 0.5f),
-                    disabledContentColor = BackgroundGradientStart.copy(alpha = 0.5f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp)
-            ) {
-                if (uiState.isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = BackgroundGradientStart,
-                        strokeWidth = 2.5.dp
-                    )
-                } else {
-                    Text(
-                        text = if (uiState.isSignInMode) "Sign In" else "Create Account",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-            }
-
             Spacer(modifier = Modifier.height(32.dp))
-        }
-
-        // ── Full-screen Loading Overlay ──────────────
-        if (uiState.isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(color = BackgroundGradientStart.copy(alpha = 0.6f)),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(48.dp),
-                    color = NeonMint,
-                    strokeWidth = 4.dp
-                )
-            }
         }
     }
 }

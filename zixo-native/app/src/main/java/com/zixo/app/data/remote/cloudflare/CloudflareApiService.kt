@@ -1,6 +1,5 @@
 package com.zixo.app.data.remote.cloudflare
 
-import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.zixo.app.BuildConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -10,10 +9,12 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
-import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import timber.log.Timber
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,38 +23,72 @@ import javax.inject.Singleton
 // ============================================================================
 
 @Serializable
-data class GenerateTokenRequest(
-    val identity: String,
-    val roomName: String
+data class VerifyGoogleTokenRequest(
+    val idToken: String
 )
 
 @Serializable
-data class GenerateTokenResponse(
-    val token: String,
-    val wsUrl: String = "",
-    val identity: String = ""
+data class VerifyGoogleTokenResponse(
+    val valid: Boolean = false,
+    val uid: String = "",
+    val displayName: String = "",
+    val username: String = "",          // System-minted username
+    val zixoNumber: String = "",        // System-minted 8-digit Zixo Number
+    val email: String = "",
+    val photoUrl: String = ""
 )
 
 @Serializable
-data class ValidateSessionRequest(
-    val token: String
+data class RegisterUserRequest(
+    val uid: String,
+    val displayName: String,
+    val email: String,
+    val photoUrl: String = ""
 )
 
 @Serializable
-data class ValidateSessionResponse(
-    val valid: Boolean,
-    val identity: String = "",
-    val expiresAt: Long = 0L
+data class RegisterUserResponse(
+    val success: Boolean = false,
+    val username: String = "",          // System-minted username
+    val zixoNumber: String = "",        // System-minted 8-digit Zixo Number
+    val message: String = ""
 )
 
 @Serializable
-data class SystemConfig(
-    val liveKitUrl: String = "",
-    val liveKitWsUrl: String = "",
-    val turnUrl: String = "",
-    val stunUrl: String = "",
-    val maxCallDuration: Long = 3600L,
-    val features: Map<String, Boolean> = emptyMap()
+data class PasskeyChallengeRequest(
+    val uid: String
+)
+
+@Serializable
+data class PasskeyChallengeResponse(
+    val challenge: String = "",
+    val rpId: String = "",
+    val userId: String = "",
+    val timeout: Long = 60000L,
+    val excludeCredentials: List<PasskeyCredentialDescriptor> = emptyList()
+)
+
+@Serializable
+data class PasskeyCredentialDescriptor(
+    val id: String = "",
+    val type: String = "public-key",
+    val transports: List<String> = emptyList()
+)
+
+@Serializable
+data class VerifyPasskeyRequest(
+    val uid: String,
+    val credentialId: String,
+    val authenticatorData: String,
+    val clientDataJSON: String,
+    val signature: String
+)
+
+@Serializable
+data class VerifyPasskeyResponse(
+    val verified: Boolean = false,
+    val credentialId: String = "",
+    val message: String = ""
 )
 
 // ============================================================================
@@ -62,81 +97,130 @@ data class SystemConfig(
 
 interface CloudflareApi {
 
-    @POST("api/token/generate")
-    suspend fun generateLiveKitToken(
+    @POST("auth/verify")
+    suspend fun verifyGoogleToken(
         @Header("Authorization") authHeader: String,
-        @Body request: GenerateTokenRequest
-    ): GenerateTokenResponse
+        @Body request: VerifyGoogleTokenRequest
+    ): VerifyGoogleTokenResponse
 
-    @POST("api/session/validate")
-    suspend fun validateSession(
+    @POST("auth/register")
+    suspend fun registerUser(
         @Header("Authorization") authHeader: String,
-        @Body request: ValidateSessionRequest
-    ): ValidateSessionResponse
+        @Body request: RegisterUserRequest
+    ): RegisterUserResponse
 
-    @GET("api/config")
-    suspend fun getSystemConfig(
-        @Header("Authorization") authHeader: String
-    ): SystemConfig
+    @POST("passkey/challenge")
+    suspend fun getPasskeyChallenge(
+        @Header("Authorization") authHeader: String,
+        @Body request: PasskeyChallengeRequest
+    ): PasskeyChallengeResponse
+
+    @POST("passkey/verify")
+    suspend fun verifyPasskeyRegistration(
+        @Header("Authorization") authHeader: String,
+        @Body request: VerifyPasskeyRequest
+    ): VerifyPasskeyResponse
 }
 
 // ============================================================================
 // Service implementation
 // ============================================================================
 
+/**
+ * Cloudflare API Service — Retrofit service for:
+ * - POST /auth/verify — Verify Google Sign-In token
+ * - POST /auth/register — Register new user (Cloudflare mints Zixo Number + username)
+ * - POST /passkey/challenge — Get WebAuthn registration challenge
+ * - POST /passkey/verify — Verify passkey registration with Cloudflare
+ *
+ * NO LiveKit references. All endpoints are for authentication and WebAuthn.
+ */
 @Singleton
 class CloudflareApiService @Inject constructor(
     private val api: CloudflareApi
 ) {
 
     /**
-     * Request a LiveKit access token for the given [identity] joining [roomName].
+     * Verify a Google Sign-In ID token with the Cloudflare backend.
+     * The backend validates the token with Google and returns user info
+     * including the system-minted username and Zixo Number.
      */
-    fun generateLiveKitToken(identity: String, roomName: String): Flow<GenerateTokenResponse> =
-        flow {
-            val request = GenerateTokenRequest(identity = identity, roomName = roomName)
-            val response = api.generateLiveKitToken(authHeader(), request)
-            emit(response)
+    fun verifyGoogleToken(idToken: String): VerifyGoogleTokenResponse {
+        return try {
+            api.verifyGoogleToken(authHeader(), VerifyGoogleTokenRequest(idToken = idToken))
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to verify Google token with Cloudflare")
+            VerifyGoogleTokenResponse()
         }
+    }
 
     /**
-     * Validate a session token against the server.
+     * Register a new user with the Cloudflare backend.
+     * Cloudflare mints a unique username and 8-digit Zixo Number.
      */
-    fun validateSession(token: String): Flow<ValidateSessionResponse> = flow {
-        val request = ValidateSessionRequest(token = token)
-        val response = api.validateSession(authHeader(), request)
+    fun registerUser(
+        uid: String,
+        displayName: String,
+        email: String,
+        photoUrl: String = ""
+    ): Flow<RegisterUserResponse> = flow {
+        val request = RegisterUserRequest(
+            uid = uid,
+            displayName = displayName,
+            email = email,
+            photoUrl = photoUrl
+        )
+        val response = api.registerUser(authHeader(), request)
         emit(response)
     }
 
     /**
-     * Fetch the current system configuration.
+     * Request a WebAuthn passkey registration challenge.
+     * Returns the challenge data needed by CredentialManager to create a passkey.
      */
-    fun getSystemConfig(): Flow<SystemConfig> = flow {
-        val config = api.getSystemConfig(authHeader())
-        emit(config)
+    fun getPasskeyChallenge(uid: String): Flow<PasskeyChallengeResponse> = flow {
+        val request = PasskeyChallengeRequest(uid = uid)
+        val response = api.getPasskeyChallenge(authHeader(), request)
+        emit(response)
     }
 
-    // ---------------------------------------------------------------------------
-    // Internal helpers
-    // ---------------------------------------------------------------------------
+    /**
+     * Verify a passkey registration with the Cloudflare backend.
+     * Called after CredentialManager successfully creates a passkey credential.
+     */
+    fun verifyPasskeyRegistration(
+        credentialId: String,
+        authenticatorData: String,
+        clientDataJSON: String,
+        signature: String
+    ): VerifyPasskeyResponse {
+        val uid = "" // Will be populated from auth state in the repository
+        return try {
+            val request = VerifyPasskeyRequest(
+                uid = uid,
+                credentialId = credentialId,
+                authenticatorData = authenticatorData,
+                clientDataJSON = clientDataJSON,
+                signature = signature
+            )
+            api.verifyPasskeyRegistration(authHeader(), request)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to verify passkey registration")
+            VerifyPasskeyResponse()
+        }
+    }
+
+    // ── Internal Helpers ──────────────────────────────────────────────────────
 
     private fun authHeader(): String {
-        // In a production app the JWT / session token would come from a secure
-        // source such as EncryptedSharedPreferences or an in-memory auth store.
+        // In production the JWT / session token comes from a secure source
+        // such as EncryptedSharedPreferences or an in-memory auth store.
         return "Bearer "
     }
 
     companion object {
-        /**
-         * Default base URL for the Cloudflare Pages API.
-         * Override via [baseUrl] parameter if needed.
-         */
-        const val DEFAULT_BASE_URL = "https://zixo-call.pages.dev/"
+        const val DEFAULT_BASE_URL = "https://api.zixo.app/"
 
-        /**
-         * Factory method to create a [CloudflareApiService] with a custom
-         * configuration. Useful when Hilt is not yet set up or for testing.
-         */
         fun create(
             baseUrl: String = DEFAULT_BASE_URL,
             client: OkHttpClient? = null,
@@ -156,6 +240,8 @@ class CloudflareApiService @Inject constructor(
                         }
                     }
                 )
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
                 .build()
 
             val contentType = "application/json".toMediaType()

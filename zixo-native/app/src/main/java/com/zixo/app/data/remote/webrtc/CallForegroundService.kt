@@ -1,4 +1,4 @@
-package com.zixo.app.data.remote.livekit
+package com.zixo.app.data.remote.webrtc
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -15,11 +15,16 @@ import com.zixo.app.R
 import timber.log.Timber
 
 /**
- * A foreground service that keeps the app alive during an active call.
+ * Foreground service for active WebRTC calls.
  *
  * Android requires a foreground service with a persistent notification for
  * any ongoing audio/video communication so the system does not kill the
  * process while the user is on a call.
+ *
+ * Replaces the old LiveKit-based CallForegroundService. This version
+ * is pure WebRTC with Firebase Realtime DB signaling.
+ *
+ * All call lifecycle operations run on Dispatchers.IO, never blocking Main Thread.
  */
 class CallForegroundService : Service() {
 
@@ -30,34 +35,30 @@ class CallForegroundService : Service() {
         // Intent extras
         const val EXTRA_CALL_TYPE = "extra_call_type"
         const val EXTRA_CALLER_NAME = "extra_caller_name"
-        const val EXTRA_ROOM_NAME = "extra_room_name"
+        const val EXTRA_CALL_ID = "extra_call_id"
 
         // Call types
         const val CALL_TYPE_AUDIO = "audio"
         const val CALL_TYPE_VIDEO = "video"
 
-        // ---------------------------------------------------------------------------
-        // Start / stop helpers
-        // ---------------------------------------------------------------------------
-
         /**
-         * Start the foreground service for an ongoing call.
+         * Start the foreground service for an ongoing WebRTC call.
          *
          * @param context  Application or activity context.
          * @param callType One of [CALL_TYPE_AUDIO] or [CALL_TYPE_VIDEO].
          * @param callerName Display name of the remote participant.
-         * @param roomName  The LiveKit room name for the call.
+         * @param callId   The WebRTC call ID.
          */
         fun start(
             context: Context,
             callType: String = CALL_TYPE_AUDIO,
             callerName: String = "",
-            roomName: String = ""
+            callId: String = ""
         ) {
             val intent = Intent(context, CallForegroundService::class.java).apply {
                 putExtra(EXTRA_CALL_TYPE, callType)
                 putExtra(EXTRA_CALLER_NAME, callerName)
-                putExtra(EXTRA_ROOM_NAME, roomName)
+                putExtra(EXTRA_CALL_ID, callId)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -75,8 +76,8 @@ class CallForegroundService : Service() {
         }
 
         /**
-         * Create the notification channel for ongoing calls. Safe to call
-         * multiple times; the system ignores duplicate channel creation.
+         * Create the notification channel for ongoing calls.
+         * Safe to call multiple times; the system ignores duplicates.
          */
         fun createNotificationChannel(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -85,7 +86,7 @@ class CallForegroundService : Service() {
                     "Ongoing Call",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
-                    description = "Shown during an active voice or video call"
+                    description = "Shown during an active WebRTC voice or video call"
                     setShowBadge(false)
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 }
@@ -97,14 +98,12 @@ class CallForegroundService : Service() {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Service lifecycle
-    // ---------------------------------------------------------------------------
+    // ── Service Lifecycle ─────────────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel(this)
-        Timber.d("CallForegroundService created")
+        Timber.d("CallForegroundService created (WebRTC)")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -115,11 +114,11 @@ class CallForegroundService : Service() {
 
         val callType = intent.getStringExtra(EXTRA_CALL_TYPE) ?: CALL_TYPE_AUDIO
         val callerName = intent.getStringExtra(EXTRA_CALLER_NAME) ?: ""
-        val roomName = intent.getStringExtra(EXTRA_ROOM_NAME) ?: ""
+        val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: ""
 
-        val notification = buildNotification(callType, callerName, roomName)
+        val notification = buildNotification(callType, callerName, callId)
         startForeground(NOTIFICATION_ID, notification)
-        Timber.d("Call foreground service started (type=%s, caller=%s)", callType, callerName)
+        Timber.d("WebRTC call foreground service started (type=%s, caller=%s)", callType, callerName)
 
         return START_STICKY
     }
@@ -131,14 +130,19 @@ class CallForegroundService : Service() {
         super.onDestroy()
     }
 
-    // ---------------------------------------------------------------------------
-    // Notification builder
-    // ---------------------------------------------------------------------------
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Timber.d("Task removed during call; stopping foreground service")
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
+    // ── Notification Builder ──────────────────────────────────────────────────
 
     private fun buildNotification(
         callType: String,
         callerName: String,
-        roomName: String
+        callId: String
     ): Notification {
         val isVideo = callType == CALL_TYPE_VIDEO
         val title = if (callerName.isNotBlank()) {
@@ -147,30 +151,24 @@ class CallForegroundService : Service() {
             if (isVideo) "Video call in progress" else "Voice call in progress"
         }
 
-        // Tap intent – return to the call screen in the main activity
         val contentIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("navigateTo", "call")
-            putExtra("roomName", roomName)
+            putExtra("callId", callId)
             putExtra("callType", callType)
         }
 
         val contentPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            contentIntent,
+            this, 0, contentIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // End-call action
         val endCallIntent = Intent(this, CallForegroundService::class.java).apply {
             action = ACTION_END_CALL
-            putExtra(EXTRA_ROOM_NAME, roomName)
+            putExtra(EXTRA_CALL_ID, callId)
         }
         val endCallPendingIntent = PendingIntent.getService(
-            this,
-            1,
-            endCallIntent,
+            this, 1, endCallIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -191,20 +189,5 @@ class CallForegroundService : Service() {
             .build()
     }
 
-    // ---------------------------------------------------------------------------
-    // Action handling
-    // ---------------------------------------------------------------------------
-
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        // If the user swipes the app from recents during a call, clean up
-        Timber.d("Task removed during call; stopping foreground service")
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-        super.onTaskRemoved(rootIntent)
-    }
-
     private val ACTION_END_CALL = "com.zixo.app.ACTION_END_CALL"
-
-    // We handle the end-call action inside onStartCommand so the intent
-    // is processed even when the service is already running.
 }

@@ -28,15 +28,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Forward
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PersonAdd
@@ -64,19 +65,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.zixo.app.domain.model.CallState
+import com.zixo.app.domain.model.CommunicationGate
 import com.zixo.app.domain.model.MessageContentType
 import com.zixo.app.domain.model.MessageModel
 import com.zixo.app.domain.model.ParticipantRole
 import com.zixo.app.domain.model.ThreadParticipant
+import com.zixo.app.ui.components.GlassOutlinedTextField
 import com.zixo.app.ui.components.ZixoGlassBackground
+import com.zixo.app.ui.components.liquidGlassCard
+import com.zixo.app.ui.components.liquidGlassContainer
 import com.zixo.app.ui.theme.DarkPetrolCharcoal
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
@@ -108,16 +116,23 @@ private val AdminBadgeColor = NeonMint
  * - "Leave group" option
  * - Participant avatars in the top bar
  * - Group calling: audio/video call buttons start LiveKit Room sessions
+ * - WebRTC group call button in top bar
+ * - Group info button in top bar (navigates to group details)
  * - Ephemeral timer indicator
+ * - Communication gate check — blocked overlay if group contains non-mutual contacts
+ * - Copy option in long-press action menu
  * - Same keyboard avoidance (74dp input tray, reverseLayout, imePadding)
+ * - NavController for navigation
  *
  * @param threadId The ID of the group chat thread to display.
+ * @param navController Navigation controller for screen transitions.
  * @param onBack Callback for the back navigation button.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GroupChatScreen(
     threadId: String,
+    navController: NavController,
     onBack: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
@@ -130,15 +145,11 @@ fun GroupChatScreen(
     val showActionMenu by viewModel.showActionMenu.collectAsState()
     val currentUserId by viewModel.currentUserId.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val communicationGate by viewModel.communicationGate.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     var showGroupInfoPanel by remember { mutableStateOf(false) }
-
-    // Load thread data on first composition
-    LaunchedEffect(threadId) {
-        viewModel.loadThread(threadId)
-    }
 
     // Auto-scroll to bottom on new messages
     LaunchedEffect(messages.size) {
@@ -163,6 +174,9 @@ fun GroupChatScreen(
     val isAdmin = thread?.groupAdminUids?.contains(currentUserId) == true
     val ephemeralSeconds = thread?.ephemeralTimerSeconds ?: 0
 
+    // Check if communication is blocked (group must only contain mutual contacts)
+    val isBlocked = communicationGate is CommunicationGate.Blocked
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = Color.Transparent,
@@ -185,6 +199,7 @@ fun GroupChatScreen(
                     participants = participants,
                     onBackClick = onBack,
                     onHeaderClick = { showGroupInfoPanel = true },
+                    onGroupInfoClick = { showGroupInfoPanel = true },
                     onAudioCallClick = { viewModel.startGroupAudioCall() },
                     onVideoCallClick = { viewModel.startGroupVideoCall() }
                 )
@@ -241,10 +256,10 @@ fun GroupChatScreen(
                     exit = slideOutVertically() + fadeOut()
                 ) {
                     replyToMessage?.let { replied ->
-                        ReplyPreviewBar(
+                        GroupReplyPreviewBar(
                             senderName = replied.replyToSenderName ?: replied.senderDisplayName,
                             previewText = replied.replyToPreview ?: replied.content,
-                            onDismiss = { viewModel.clearReply() }
+                            onDismiss = { viewModel.clearReplyTo() }
                         )
                     }
                 }
@@ -252,10 +267,19 @@ fun GroupChatScreen(
                 // ── Input Tray (74dp Liquid Glass Pill) ────────────────────
                 GroupInputTray(
                     value = inputText,
-                    onValueChange = { viewModel.inputText.value = it },
+                    onValueChange = { viewModel.onInputTextChanged(it) },
                     onSendClick = { viewModel.sendMessage() },
                     isSending = isSending,
+                    enabled = !isBlocked,
                     modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // ── Communication Gate Blocked Overlay ────────────────────────
+            if (isBlocked) {
+                GroupCommunicationGateOverlay(
+                    reason = (communicationGate as? CommunicationGate.Blocked)?.reason
+                        ?: "Group contains non-mutual contacts"
                 )
             }
 
@@ -281,8 +305,7 @@ fun GroupChatScreen(
                         viewModel.addReaction(actionMessage.id, emoji, isThreeD)
                     },
                     onReply = {
-                        viewModel.replyToMessage.value = actionMessage
-                        viewModel.dismissActionMenu()
+                        viewModel.setReplyTo(actionMessage.id)
                     },
                     onForward = {
                         viewModel.forwardMessage(actionMessage.id, emptyList())
@@ -319,6 +342,7 @@ private fun GroupChatTopBar(
     participants: List<ThreadParticipant>,
     onBackClick: () -> Unit,
     onHeaderClick: () -> Unit,
+    onGroupInfoClick: () -> Unit,
     onAudioCallClick: () -> Unit,
     onVideoCallClick: () -> Unit
 ) {
@@ -385,7 +409,18 @@ private fun GroupChatTopBar(
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Group info button (navigates to group details)
+            IconButton(onClick = onGroupInfoClick) {
+                Icon(
+                    imageVector = Icons.Filled.Info,
+                    contentDescription = "Group Info",
+                    tint = TextSecondary
+                )
+            }
+
+            // WebRTC group audio call button
             IconButton(onClick = onAudioCallClick) {
                 Icon(
                     imageVector = Icons.Filled.Call,
@@ -393,6 +428,8 @@ private fun GroupChatTopBar(
                     tint = TextSecondary
                 )
             }
+
+            // WebRTC group video call button
             IconButton(onClick = onVideoCallClick) {
                 Icon(
                     imageVector = Icons.Filled.Videocam,
@@ -606,7 +643,7 @@ private fun GroupMessageBubble(
                 }
             }
 
-            // Reactions row
+            // Reactions row — emoji badges below the bubble
             if (message.reactions.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -629,7 +666,7 @@ private fun GroupMessageBubble(
     }
 }
 
-// ── Group Info Panel ──────────────────────────────────────────────────────────
+// ── Group Info Panel (Liquid Glass Sheet) ─────────────────────────────────────
 
 @Composable
 private fun GroupInfoPanel(
@@ -658,14 +695,13 @@ private fun GroupInfoPanel(
                 )
         )
 
-        // Slide-up glass sheet
+        // Slide-up liquid glass sheet
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
-                .background(DarkPetrolCharcoal.copy(alpha = 0.92f))
-                .border(1.dp, GlassBorderColor, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+                .liquidGlassContainer()
                 .padding(24.dp)
         ) {
             // Close handle
@@ -873,10 +909,10 @@ private fun ParticipantRow(
     }
 }
 
-// ── Reply Preview Bar ─────────────────────────────────────────────────────────
+// ── Group Reply Preview Bar ───────────────────────────────────────────────────
 
 @Composable
-private fun ReplyPreviewBar(
+private fun GroupReplyPreviewBar(
     senderName: String,
     previewText: String,
     onDismiss: () -> Unit
@@ -923,7 +959,7 @@ private fun ReplyPreviewBar(
     }
 }
 
-// ── Group Input Tray ──────────────────────────────────────────────────────────
+// ── Group Input Tray (74dp Liquid Glass Pill) ─────────────────────────────────
 
 @Composable
 private fun GroupInputTray(
@@ -931,6 +967,7 @@ private fun GroupInputTray(
     onValueChange: (String) -> Unit,
     onSendClick: () -> Unit,
     isSending: Boolean,
+    enabled: Boolean,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -940,52 +977,55 @@ private fun GroupInputTray(
             .clip(RoundedCornerShape(InputTrayCornerSize))
             .background(DarkPetrolCharcoal.copy(alpha = 0.6f))
             .border(1.dp, GlassBorderColor, RoundedCornerShape(InputTrayCornerSize))
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BasicTextField(
+        // Attach button (camera/image icon)
+        IconButton(
+            onClick = { /* TODO: Launch media picker */ },
+            enabled = enabled,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Image,
+                contentDescription = "Attach",
+                tint = if (enabled) TextSecondary else TextSecondary.copy(alpha = 0.4f)
+            )
+        }
+
+        // Text input field (GlassOutlinedTextField style)
+        GlassOutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight(),
-            textStyle = androidx.compose.ui.text.TextStyle(
-                color = TextPrimary,
-                fontSize = 15.sp
-            ),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(NeonMint),
-            maxLines = 4,
-            decorationBox = { innerTextField ->
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (value.isEmpty()) {
-                        Text(
-                            text = "Message…",
-                            color = TextSecondary,
-                            fontSize = 15.sp
-                        )
-                    }
-                    innerTextField()
-                }
-            }
+            placeholder = {
+                Text(
+                    text = "Message…",
+                    color = TextSecondary.copy(alpha = 0.6f),
+                    fontSize = 15.sp
+                )
+            },
+            modifier = Modifier.weight(1f),
+            enabled = enabled,
+            singleLine = false,
+            maxLength = 4096
         )
+
+        // Send button (NeonMint arrow icon)
         IconButton(
             onClick = onSendClick,
-            enabled = value.isNotBlank() && !isSending,
+            enabled = value.isNotBlank() && !isSending && enabled,
             modifier = Modifier.size(40.dp)
         ) {
             Icon(
                 imageVector = Icons.Filled.Send,
                 contentDescription = "Send",
-                tint = if (value.isNotBlank() && !isSending) NeonMint else TextSecondary
+                tint = if (value.isNotBlank() && !isSending && enabled) NeonMint else TextSecondary.copy(alpha = 0.4f)
             )
         }
     }
 }
 
-// ── Group Action Menu Overlay ─────────────────────────────────────────────────
+// ── Group Action Menu Overlay (Frosted Glass) ─────────────────────────────────
 
 @Composable
 private fun GroupActionMenuOverlay(
@@ -998,6 +1038,8 @@ private fun GroupActionMenuOverlay(
     onDeleteForEveryone: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val clipboardManager = LocalClipboardManager.current
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1014,17 +1056,17 @@ private fun GroupActionMenuOverlay(
                 )
         )
 
+        // Frosted glass action panel — uses liquidGlassCard()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.Center)
                 .padding(horizontal = 24.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkPetrolCharcoal.copy(alpha = 0.85f))
-                .border(1.dp, GlassBorderColor, RoundedCornerShape(20.dp))
+                .liquidGlassCard()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // 3D Reactions bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -1041,16 +1083,27 @@ private fun GroupActionMenuOverlay(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            ActionMenuItem(icon = Icons.Filled.Reply, label = "Reply", onClick = onReply)
-            ActionMenuItem(icon = Icons.Filled.Forward, label = "Forward", onClick = onForward)
-            ActionMenuItem(
+            GroupActionMenuItem(icon = Icons.Filled.Reply, label = "Reply", onClick = onReply)
+            GroupActionMenuItem(icon = Icons.Filled.Forward, label = "Forward", onClick = onForward)
+
+            // Copy option
+            GroupActionMenuItem(
+                icon = Icons.Filled.ContentCopy,
+                label = "Copy",
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(message.content))
+                    onDismiss()
+                }
+            )
+
+            GroupActionMenuItem(
                 icon = Icons.Filled.Delete,
                 label = "Delete for Me",
                 onClick = onDeleteForMe,
                 tint = Color(0xFFFF5252)
             )
             if (isOwnMessage) {
-                ActionMenuItem(
+                GroupActionMenuItem(
                     icon = Icons.Filled.DeleteForever,
                     label = "Delete for Everyone",
                     onClick = onDeleteForEveryone,
@@ -1061,10 +1114,10 @@ private fun GroupActionMenuOverlay(
     }
 }
 
-// ── Action Menu Item ──────────────────────────────────────────────────────────
+// ── Group Action Menu Item ────────────────────────────────────────────────────
 
 @Composable
-private fun ActionMenuItem(
+private fun GroupActionMenuItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
@@ -1096,6 +1149,54 @@ private fun ActionMenuItem(
             fontSize = 15.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+// ── Group Communication Gate Blocked Overlay ──────────────────────────────────
+
+/**
+ * Full-screen overlay shown when the communication gate blocks messaging
+ * in a group context (group contains non-mutual contacts).
+ */
+@Composable
+private fun GroupCommunicationGateOverlay(
+    reason: String
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.7f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp)
+                .liquidGlassContainer()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "🔒",
+                fontSize = 40.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Group Communication Blocked",
+                color = TextPrimary,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = reason,
+                color = TextSecondary,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+        }
     }
 }
 

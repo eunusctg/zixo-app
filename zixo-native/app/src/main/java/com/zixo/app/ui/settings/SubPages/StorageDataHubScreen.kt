@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,9 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Chat
@@ -47,7 +49,7 @@ import com.zixo.app.ui.components.GlassSegmentedPicker
 import com.zixo.app.ui.components.ZixoGlassBackground
 import com.zixo.app.ui.components.ZixoTopBar
 import com.zixo.app.ui.components.liquidGlassCard
-import com.zixo.app.ui.screens.settings.SettingsViewModel
+import com.zixo.app.ui.settings.SettingsViewModel
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
@@ -58,85 +60,83 @@ import com.zixo.app.ui.theme.TextSecondary
 
 /**
  * Full-screen hub for storage analytics, auto-download rules, and
- * upload quality configuration. Renders inside the Zixo Liquid Glass
- * design language with animated background blobs and frosted-glass
- * card panels.
+ * upload quality configuration. All bound to [SettingsViewModel].
  *
  * @param onBackClick  Callback invoked when the user taps the back arrow.
- * @param viewModel    Hilt-injected [SettingsViewModel] that exposes
- *                     storage-breakdown, conversation-storage, auto-download,
- *                     and upload-quality state flows.
+ * @param viewModel    Hilt-injected [SettingsViewModel].
  */
 @Composable
 fun StorageDataHubScreen(
     onBackClick: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
+    val settingsState by viewModel.settingsState.collectAsStateWithLifecycle()
     val storageBreakdown by viewModel.storageBreakdown.collectAsStateWithLifecycle()
     val conversationStorage by viewModel.conversationStorage.collectAsStateWithLifecycle()
-    val autoDownloadMobile by viewModel.autoDownloadMobile.collectAsStateWithLifecycle()
-    val autoDownloadWifi by viewModel.autoDownloadWifi.collectAsStateWithLifecycle()
-    val mediaUploadQuality by viewModel.mediaUploadQuality.collectAsStateWithLifecycle()
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // ── Animated glass background ───────────────────────────
         ZixoGlassBackground()
 
-        // ── Scrollable content layer ────────────────────────────
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 4.dp,
+                bottom = 32.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ZixoTopBar(
-                title = "Storage & Data",
-                showBackButton = true,
-                onBackClick = onBackClick,
-            )
+            // ── Top bar ──
+            item {
+                ZixoTopBar(
+                    title = "Storage & Data",
+                    showBackButton = true,
+                    onBackClick = onBackClick
+                )
+            }
 
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // ── Section 1: Network Metrics Dashboard ────────
+            // ── Section 1: Storage Breakdown ─────────────────────────────
+            item {
                 NetworkMetricsCard(breakdown = storageBreakdown)
+            }
 
-                // ── Section 2: Storage Explorer ─────────────────
+            // ── Section 2: Storage Explorer ──────────────────────────────
+            item {
                 StorageExplorerCard(
                     breakdown = storageBreakdown,
                     conversations = conversationStorage,
                     onClearCache = { viewModel.clearCache() }
                 )
+            }
 
-                // ── Section 3: Auto-Download Matrix ─────────────
+            // ── Section 3: Auto-Download Matrix ─────────────────────────
+            item {
                 AutoDownloadCard(
-                    mobileTypes = autoDownloadMobile,
-                    wifiTypes = autoDownloadWifi,
+                    mobileTypes = settingsState.autoDownloadMobile,
+                    wifiTypes = settingsState.autoDownloadWifi,
+                    roamingTypes = settingsState.autoDownloadRoaming,
                     onMobileToggle = { viewModel.updateAutoDownloadMobile(it) },
-                    onWifiToggle = { viewModel.updateAutoDownloadWifi(it) }
+                    onWifiToggle = { viewModel.updateAutoDownloadWifi(it) },
+                    onRoamingToggle = { viewModel.updateAutoDownloadRoaming(it) }
                 )
+            }
 
-                // ── Section 4: Upload Quality ───────────────────
+            // ── Section 4: Upload Quality ───────────────────────────────
+            item {
                 UploadQualityCard(
-                    quality = mediaUploadQuality,
+                    quality = settingsState.mediaUploadQuality,
                     onQualityChange = { viewModel.updateMediaUploadQuality(it) }
                 )
-
-                Spacer(modifier = Modifier.height(32.dp))
             }
         }
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Section 1 — Network Metrics Dashboard
+// Section 1 — Storage Breakdown Card
 // ══════════════════════════════════════════════════════════════════════════
 
-/**
- * Glass card displaying data consumed per network category
- * (Calls, Messages, Status Uploads, Cloud Sync) with a bold
- * total summary at the bottom.
- */
 @Composable
 private fun NetworkMetricsCard(breakdown: StorageBreakdown) {
     Column(
@@ -145,7 +145,7 @@ private fun NetworkMetricsCard(breakdown: StorageBreakdown) {
             .liquidGlassCard()
             .padding(16.dp)
     ) {
-        SectionLabel("NETWORK USAGE")
+        SectionLabel("STORAGE BREAKDOWN")
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -196,10 +196,6 @@ private fun NetworkMetricsCard(breakdown: StorageBreakdown) {
     }
 }
 
-/**
- * Single row inside the network metrics card: leading icon,
- * category label, and right-aligned megabyte value.
- */
 @Composable
 private fun NetworkMetricRow(
     icon: ImageVector,
@@ -239,14 +235,8 @@ private fun NetworkMetricRow(
 // Section 2 — Storage Explorer
 // ══════════════════════════════════════════════════════════════════════════
 
-/** Reference maximum for the storage progress bar (500 MB). */
 private const val MAX_STORAGE_MB = 500f
 
-/**
- * Glass card showing a NeonMint-gradient progress bar for total
- * storage used, a ranked list of top conversations by size, and a
- * "Clear Files Over 5MB" outlined action button.
- */
 @Composable
 private fun StorageExplorerCard(
     breakdown: StorageBreakdown,
@@ -263,7 +253,7 @@ private fun StorageExplorerCard(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // ── Progress bar ────────────────────────────────────────
+        // Progress bar
         val progress = (breakdown.totalMB / MAX_STORAGE_MB).coerceIn(0f, 1f)
 
         Box(
@@ -294,7 +284,7 @@ private fun StorageExplorerCard(
             fontSize = 12.sp
         )
 
-        // ── Conversation list ───────────────────────────────────
+        // Conversation list
         if (conversations.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -307,7 +297,7 @@ private fun StorageExplorerCard(
             }
         }
 
-        // ── Clear cache button ──────────────────────────────────
+        // Clear cache button
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedButton(
@@ -320,7 +310,7 @@ private fun StorageExplorerCard(
             border = BorderStroke(1.dp, NeonMint)
         ) {
             Text(
-                text = "Clear Files Over 5MB",
+                text = "Cache Vacuum Purge",
                 color = NeonMint,
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp
@@ -329,10 +319,6 @@ private fun StorageExplorerCard(
     }
 }
 
-/**
- * A single row in the conversation storage list showing the
- * contact avatar, display name, and right-aligned storage size.
- */
 @Composable
 private fun ConversationStorageRow(entry: ConversationStorageEntry) {
     Row(
@@ -369,18 +355,14 @@ private fun ConversationStorageRow(entry: ConversationStorageEntry) {
 // Section 3 — Media Auto-Download Matrix
 // ══════════════════════════════════════════════════════════════════════════
 
-/**
- * Glass card with two sub-sections — Mobile Data and Wi-Fi — each
- * containing four [GlassCheckBox] rows for Photos, Audio, Videos,
- * and Documents. Toggling a checkbox updates the corresponding
- * [Set]<[MediaType]> via the supplied callbacks.
- */
 @Composable
 private fun AutoDownloadCard(
     mobileTypes: Set<MediaType>,
     wifiTypes: Set<MediaType>,
+    roamingTypes: Set<MediaType>,
     onMobileToggle: (Set<MediaType>) -> Unit,
-    onWifiToggle: (Set<MediaType>) -> Unit
+    onWifiToggle: (Set<MediaType>) -> Unit,
+    onRoamingToggle: (Set<MediaType>) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -392,11 +374,9 @@ private fun AutoDownloadCard(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // ── Mobile Data sub-section ─────────────────────────────
+        // Mobile Data
         SubHeaderLabel("When using Mobile Data")
-
         Spacer(modifier = Modifier.height(8.dp))
-
         MediaType.entries.forEach { mediaType ->
             MediaCheckBoxRow(
                 label = mediaType.displayLabel,
@@ -410,11 +390,9 @@ private fun AutoDownloadCard(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ── Wi-Fi sub-section ───────────────────────────────────
+        // Wi-Fi
         SubHeaderLabel("When connected to Wi-Fi")
-
         Spacer(modifier = Modifier.height(8.dp))
-
         MediaType.entries.forEach { mediaType ->
             MediaCheckBoxRow(
                 label = mediaType.displayLabel,
@@ -425,10 +403,25 @@ private fun AutoDownloadCard(
                 }
             )
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Roaming
+        SubHeaderLabel("When Roaming")
+        Spacer(modifier = Modifier.height(8.dp))
+        MediaType.entries.forEach { mediaType ->
+            MediaCheckBoxRow(
+                label = mediaType.displayLabel,
+                checked = mediaType in roamingTypes,
+                onCheckedChange = { checked ->
+                    val newSet = if (checked) roamingTypes + mediaType else roamingTypes - mediaType
+                    onRoamingToggle(newSet)
+                }
+            )
+        }
     }
 }
 
-/** Human-readable label for each [MediaType] enum value. */
 private val MediaType.displayLabel: String
     get() = when (this) {
         MediaType.PHOTO -> "Photos"
@@ -437,10 +430,6 @@ private val MediaType.displayLabel: String
         MediaType.DOCUMENT -> "Documents"
     }
 
-/**
- * A row containing a text label on the left and a [GlassCheckBox]
- * on the right. Used inside the auto-download matrix.
- */
 @Composable
 private fun MediaCheckBoxRow(
     label: String,
@@ -470,22 +459,14 @@ private fun MediaCheckBoxRow(
 // Section 4 — Upload Quality
 // ══════════════════════════════════════════════════════════════════════════
 
-/** Display labels matching [UploadQuality] enum indices. */
-private val UploadQualityOptions = listOf("Auto", "Best Quality", "Data Saver")
+private val UploadQualityOptions = listOf("Auto", "Best Quality", "Balanced")
 
-/**
- * Maps an [UploadQuality] enum value to its display index
- * inside [UploadQualityOptions].
- */
 private fun UploadQuality.toIndex(): Int = when (this) {
     UploadQuality.AUTO -> 0
     UploadQuality.BEST_QUALITY -> 1
     UploadQuality.BALANCED -> 2
 }
 
-/**
- * Maps a display index back to the corresponding [UploadQuality].
- */
 private fun Int.toUploadQuality(): UploadQuality = when (this) {
     0 -> UploadQuality.AUTO
     1 -> UploadQuality.BEST_QUALITY
@@ -493,11 +474,6 @@ private fun Int.toUploadQuality(): UploadQuality = when (this) {
     else -> UploadQuality.AUTO
 }
 
-/**
- * Glass card with a [GlassSegmentedPicker] for selecting upload
- * quality (Auto / Best Quality / Data Saver) and a helper-text
- * block explaining each option.
- */
 @Composable
 private fun UploadQualityCard(
     quality: UploadQuality,
@@ -524,7 +500,7 @@ private fun UploadQualityCard(
         Text(
             text = "Auto: Adjusts quality based on network\n" +
                     "Best Quality: Highest resolution\n" +
-                    "Data Saver: Reduced resolution for saving data",
+                    "Balanced: Standard optimized compression",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 18.sp
@@ -536,10 +512,6 @@ private fun UploadQualityCard(
 // Shared UI Helpers
 // ══════════════════════════════════════════════════════════════════════════
 
-/**
- * NeonMint uppercase section header used at the top of every
- * glass card panel.
- */
 @Composable
 private fun SectionLabel(text: String) {
     Text(
@@ -551,10 +523,6 @@ private fun SectionLabel(text: String) {
     )
 }
 
-/**
- * Secondary sub-header label used for group headings within
- * a card (e.g. "When using Mobile Data").
- */
 @Composable
 private fun SubHeaderLabel(text: String) {
     Text(
@@ -565,11 +533,6 @@ private fun SubHeaderLabel(text: String) {
     )
 }
 
-/**
- * Formats a megabyte float as a human-readable string with one
- * decimal place (e.g. `12.3 MB`). Returns `0.0 MB` for values
- * below 0.1 MB.
- */
 private fun formatMB(mb: Float): String {
     return if (mb < 0.1f) "0.0 MB" else "%.1f MB".format(mb)
 }

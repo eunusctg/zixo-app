@@ -1,7 +1,6 @@
 package com.zixo.app.domain.repository
 
 import com.zixo.app.domain.model.AppSettingsState
-import com.zixo.app.domain.model.ConversationStorageEntry
 import com.zixo.app.domain.model.MediaType
 import com.zixo.app.domain.model.StorageBreakdown
 import com.zixo.app.domain.model.ThemeMode
@@ -97,7 +96,6 @@ interface SettingsRepository {
     // ── Storage Analytics ─────────────────────────────────────────────────────
 
     fun getStorageBreakdown(): Flow<StorageBreakdown>
-    fun getConversationStorage(): Flow<List<ConversationStorageEntry>>
 
     // ── Maintenance ───────────────────────────────────────────────────────────
 
@@ -105,15 +103,6 @@ interface SettingsRepository {
 
     // ── Account Lifecycle ─────────────────────────────────────────────────────
 
-    /**
-     * Compiles and returns a portable account information report.
-     * On success, returns the report string (or download URL).
-     */
     suspend fun requestAccountInfo(): Result<String>
-
-    /**
-     * Permanently deletes the authenticated user's account, including
-     * Firestore documents and Firebase Auth record.
-     */
     suspend fun deleteAccount(): Result<Unit>
 }

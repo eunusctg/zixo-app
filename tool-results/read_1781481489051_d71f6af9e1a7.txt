@@ -1,0 +1,1293 @@
+     1→package com.zixo.app.ui.status
+     2→
+     3→import android.net.Uri
+     4→import androidx.activity.compose.rememberLauncherForActivityResult
+     5→import androidx.activity.result.PickVisualMediaRequest
+     6→import androidx.activity.result.contract.ActivityResultContracts
+     7→import androidx.compose.animation.AnimatedVisibility
+     8→import androidx.compose.animation.core.tween
+     9→import androidx.compose.animation.fadeIn
+    10→import androidx.compose.animation.fadeOut
+    11→import androidx.compose.animation.slideInVertically
+    12→import androidx.compose.animation.slideOutVertically
+    13→import androidx.compose.foundation.Canvas
+    14→import androidx.compose.foundation.background
+    15→import androidx.compose.foundation.border
+    16→import androidx.compose.foundation.clickable
+    17→import androidx.compose.foundation.gestures.detectTapGestures
+    18→import androidx.compose.foundation.interaction.MutableInteractionSource
+    19→import androidx.compose.foundation.layout.Arrangement
+    20→import androidx.compose.foundation.layout.Box
+    21→import androidx.compose.foundation.layout.Column
+    22→import androidx.compose.foundation.layout.PaddingValues
+    23→import androidx.compose.foundation.layout.Row
+    24→import androidx.compose.foundation.layout.Spacer
+    25→import androidx.compose.foundation.layout.fillMaxSize
+    26→import androidx.compose.foundation.layout.fillMaxWidth
+    27→import androidx.compose.foundation.layout.height
+    28→import androidx.compose.foundation.layout.offset
+    29→import androidx.compose.foundation.layout.padding
+    30→import androidx.compose.foundation.layout.size
+    31→import androidx.compose.foundation.layout.width
+    32→import androidx.compose.foundation.lazy.LazyColumn
+    33→import androidx.compose.foundation.lazy.LazyRow
+    34→import androidx.compose.foundation.lazy.items
+    35→import androidx.compose.foundation.lazy.itemsIndexed
+    36→import androidx.compose.foundation.shape.CircleShape
+    37→import androidx.compose.foundation.shape.RoundedCornerShape
+    38→import androidx.compose.material.icons.Icons
+    39→import androidx.compose.material.icons.filled.Add
+    40→import androidx.compose.material.icons.filled.ArrowBack
+    41→import androidx.compose.material.icons.filled.Close
+    42→import androidx.compose.material.icons.filled.Image
+    43→import androidx.compose.material.icons.filled.Send
+    44→import androidx.compose.material.icons.filled.TextFields
+    45→import androidx.compose.material.icons.filled.Videocam
+    46→import androidx.compose.material3.CircularProgressIndicator
+    47→import androidx.compose.material3.ExperimentalMaterial3Api
+    48→import androidx.compose.material3.Icon
+    49→import androidx.compose.material3.IconButton
+    50→import androidx.compose.material3.ModalBottomSheet
+    51→import androidx.compose.material3.SheetState
+    52→import androidx.compose.material3.Text
+    53→import androidx.compose.material3.rememberModalBottomSheetState
+    54→import androidx.compose.runtime.Composable
+    55→import androidx.compose.runtime.LaunchedEffect
+    56→import androidx.compose.runtime.getValue
+    57→import androidx.compose.runtime.mutableIntStateOf
+    58→import androidx.compose.runtime.mutableStateOf
+    59→import androidx.compose.runtime.remember
+    60→import androidx.compose.runtime.setValue
+    61→import androidx.compose.ui.Alignment
+    62→import androidx.compose.ui.Modifier
+    63→import androidx.compose.ui.draw.clip
+    64→import androidx.compose.ui.geometry.Size
+    65→import androidx.compose.ui.graphics.Color
+    66→import androidx.compose.ui.graphics.StrokeCap
+    67→import androidx.compose.ui.graphics.drawscope.Stroke
+    68→import androidx.compose.ui.graphics.graphicsLayer
+    69→import androidx.compose.ui.input.pointer.pointerInput
+    70→import androidx.compose.ui.layout.ContentScale
+    71→import androidx.compose.ui.platform.LocalContext
+    72→import androidx.compose.ui.text.font.FontFamily
+    73→import androidx.compose.ui.text.font.FontWeight
+    74→import androidx.compose.ui.text.style.TextAlign
+    75→import androidx.compose.ui.text.style.TextOverflow
+    76→import androidx.compose.ui.unit.Dp
+    77→import androidx.compose.ui.unit.dp
+    78→import androidx.compose.ui.unit.sp
+    79→import androidx.hilt.navigation.compose.hiltViewModel
+    80→import androidx.lifecycle.compose.collectAsStateWithLifecycle
+    81→import coil.compose.AsyncImage
+    82→import coil.request.ImageRequest
+    83→import com.zixo.app.domain.model.StatusContentType
+    84→import com.zixo.app.domain.model.StatusGroupModel
+    85→import com.zixo.app.domain.model.StatusModel
+    86→import com.zixo.app.ui.components.AvatarComponent
+    87→import com.zixo.app.ui.components.GlassOutlinedTextField
+    88→import com.zixo.app.ui.components.ZixoGlassBackground
+    89→import com.zixo.app.ui.components.liquidGlassCard
+    90→import com.zixo.app.ui.components.liquidGlassContainer
+    91→import com.zixo.app.ui.theme.DarkPetrolCharcoal
+    92→import com.zixo.app.ui.theme.EmeraldGreen
+    93→import com.zixo.app.ui.theme.NeonMint
+    94→import com.zixo.app.ui.theme.TextPrimary
+    95→import com.zixo.app.ui.theme.TextSecondary
+    96→import kotlinx.coroutines.delay
+    97→import kotlinx.coroutines.launch
+    98→
+    99→// ──────────────────────────────────────────────
+   100→// Design Tokens
+   101→// ──────────────────────────────────────────────
+   102→
+   103→private val GlassBackground = Color(0x1A1A2A32)
+   104→private val GlassBorder = Color(0x33FFFFFF)
+   105→private val ViewedRingColor = Color(0xFF546E7A)
+   106→private val StatusProgressBackground = Color(0x33FFFFFF)
+   107→
+   108→/** Preset background colors for text statuses. */
+   109→private val TextStatusBackgroundColors = listOf(
+   110→    Color(0xFF00E676), Color(0xFF05C46B), Color(0xFF00838F),
+   111→    Color(0xFF5C6BC0), Color(0xFFE91E63), Color(0xFFFF5722),
+   112→    Color(0xFFFFB300), Color(0xFF7B1FA2), Color(0xFF1A2A32),
+   113→    Color(0xFF0B1519)
+   114→)
+   115→
+   116→/** Available font families for text statuses. */
+   117→private val TextStatusFonts = listOf("Default", "Serif", "Monospace", "Cursive")
+   118→
+   119→/** Auto-advance duration for text/image statuses in milliseconds. */
+   120→private const val STATUS_AUTO_ADVANCE_MS = 5_000L
+   121→
+   122→// ──────────────────────────────────────────────
+   123→// Main Status Tab Screen
+   124→// ──────────────────────────────────────────────
+   125→
+   126→@OptIn(ExperimentalMaterial3Api::class)
+   127→@Composable
+   128→fun StatusTabScreen(
+   129→    viewModel: StatusViewModel = hiltViewModel()
+   130→) {
+   131→    val statusFeed by viewModel.statusFeed.collectAsStateWithLifecycle()
+   132→    val myStatuses by viewModel.myStatuses.collectAsStateWithLifecycle()
+   133→    val isUploading by viewModel.isUploading.collectAsStateWithLifecycle()
+   134→    val uploadProgress by viewModel.uploadProgress.collectAsStateWithLifecycle()
+   135→    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+   136→    val viewingGroup by viewModel.viewingStatusGroup.collectAsStateWithLifecycle()
+   137→    val viewingIndex by viewModel.currentViewingIndex.collectAsStateWithLifecycle()
+   138→
+   139→    var showAddSheet by remember { mutableStateOf(false) }
+   140→    var showTextComposer by remember { mutableStateOf(false) }
+   141→    var showMediaComposer by remember { mutableStateOf(false) }
+   142→    var isVideoMode by remember { mutableStateOf(false) }
+   143→    var replyText by remember { mutableStateOf("") }
+   144→
+   145→    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+   146→
+   147→    // Clear error on consumption
+   148→    LaunchedEffect(errorMessage) {
+   149→        if (errorMessage != null) {
+   150→            delay(3_000L)
+   151→            viewModel.clearError()
+   152→        }
+   153→    }
+   154→
+   155→    Box(modifier = Modifier.fillMaxSize()) {
+   156→        ZixoGlassBackground()
+   157→
+   158→        Column(modifier = Modifier.fillMaxSize()) {
+   159→            // ── Header ─────────────────────────────
+   160→            Text(
+   161→                text = "Status",
+   162→                color = TextPrimary,
+   163→                fontSize = 24.sp,
+   164→                fontWeight = FontWeight.Bold,
+   165→                modifier = Modifier.padding(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 8.dp)
+   166→            )
+   167→
+   168→            // ── My Status Card ─────────────────────
+   169→            MyStatusCard(
+   170→                myStatuses = myStatuses.myStatuses,
+   171→                isUploading = isUploading,
+   172→                uploadProgress = uploadProgress,
+   173→                onAddClick = { showAddSheet = true }
+   174→            )
+   175→
+   176→            Spacer(modifier = Modifier.height(12.dp))
+   177→
+   178→            // ── Recent Updates Header ──────────────
+   179→            Text(
+   180→                text = "Recent Updates",
+   181→                color = TextSecondary,
+   182→                fontSize = 14.sp,
+   183→                fontWeight = FontWeight.SemiBold,
+   184→                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+   185→            )
+   186→
+   187→            // ── Status Feed ────────────────────────
+   188→            if (statusFeed.isEmpty()) {
+   189→                EmptyStatusFeed()
+   190→            } else {
+   191→                LazyColumn(
+   192→                    modifier = Modifier.fillMaxSize(),
+   193→                    verticalArrangement = Arrangement.spacedBy(4.dp),
+   194→                    contentPadding = PaddingValues(bottom = 80.dp)
+   195→                ) {
+   196→                    items(
+   197→                        items = statusFeed,
+   198→                        key = { it.senderUid }
+   199→                    ) { group ->
+   200→                        StatusGroupItem(
+   201→                            group = group,
+   202→                            onClick = { viewModel.startViewing(group) }
+   203→                        )
+   204→                    }
+   205→                }
+   206→            }
+   207→        }
+   208→
+   209→        // ── Error Snack ──────────────────────────
+   210→        AnimatedVisibility(
+   211→            visible = errorMessage != null,
+   212→            enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+   213→            exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+   214→            modifier = Modifier
+   215→                .align(Alignment.TopCenter)
+   216→                .padding(16.dp)
+   217→        ) {
+   218→            errorMessage?.let { msg ->
+   219→                Box(
+   220→                    modifier = Modifier
+   221→                        .fillMaxWidth()
+   222→                        .liquidGlassCard()
+   223→                        .padding(12.dp)
+   224→                ) {
+   225→                    Text(text = msg, color = DestructiveText, fontSize = 14.sp)
+   226→                }
+   227→            }
+   228→        }
+   229→    }
+   230→
+   231→    // ── Add Status Bottom Sheet ─────────────────
+   232→    if (showAddSheet) {
+   233→        AddStatusBottomSheet(
+   234→            sheetState = sheetState,
+   235→            onDismiss = { showAddSheet = false },
+   236→            onTextClick = {
+   237→                showAddSheet = false
+   238→                showTextComposer = true
+   239→            },
+   240→            onPhotoClick = {
+   241→                showAddSheet = false
+   242→                isVideoMode = false
+   243→                showMediaComposer = true
+   244→            },
+   245→            onVideoClick = {
+   246→                showAddSheet = false
+   247→                isVideoMode = true
+   248→                showMediaComposer = true
+   249→            }
+   250→        )
+   251→    }
+   252→
+   253→    // ── Text Status Composer ────────────────────
+   254→    if (showTextComposer) {
+   255→        TextStatusComposer(
+   256→            isUploading = isUploading,
+   257→            onDismiss = { showTextComposer = false },
+   258→            onPost = { text, bgColor ->
+   259→                viewModel.postTextStatus(text, bgColor)
+   260→                showTextComposer = false
+   261→            }
+   262→        )
+   263→    }
+   264→
+   265→    // ── Media Status Composer ───────────────────
+   266→    if (showMediaComposer) {
+   267→        MediaStatusComposer(
+   268→            isVideoMode = isVideoMode,
+   269→            isUploading = isUploading,
+   270→            uploadProgress = uploadProgress,
+   271→            onDismiss = { showMediaComposer = false },
+   272→            onPost = { filePath, caption ->
+   273→                if (isVideoMode) {
+   274→                    viewModel.postVideoStatus(filePath, caption)
+   275→                } else {
+   276→                    viewModel.postImageStatus(filePath, caption)
+   277→                }
+   278→                showMediaComposer = false
+   279→            }
+   280→        )
+   281→    }
+   282→
+   283→    // ── Full-Screen Status Viewer ───────────────
+   284→    if (viewingGroup != null) {
+   285→        StatusViewerOverlay(
+   286→            group = viewingGroup!!,
+   287→            currentIndex = viewingIndex,
+   288→            replyText = replyText,
+   289→            onReplyTextChange = { replyText = it },
+   290→            onPrevious = viewModel::previousStatus,
+   291→            onNext = viewModel::nextStatus,
+   292→            onClose = viewModel::stopViewing,
+   293→            onReaction = { statusId, emoji -> viewModel.addReaction(statusId, emoji) }
+   294→        )
+   295→    }
+   296→}
+   297→
+   298→// ──────────────────────────────────────────────
+   299→// My Status Card
+   300→// ──────────────────────────────────────────────
+   301→
+   302→@Composable
+   303→private fun MyStatusCard(
+   304→    myStatuses: List<StatusModel>,
+   305→    isUploading: Boolean,
+   306→    uploadProgress: Float,
+   307→    onAddClick: () -> Unit
+   308→) {
+   309→    Row(
+   310→        modifier = Modifier
+   311→            .fillMaxWidth()
+   312→            .clickable(
+   313→                interactionSource = remember { MutableInteractionSource() },
+   314→                indication = null,
+   315→                onClick = onAddClick
+   316→            )
+   317→            .padding(horizontal = 16.dp, vertical = 8.dp),
+   318→        verticalAlignment = Alignment.CenterVertically
+   319→    ) {
+   320→        Box {
+   321→            if (myStatuses.isNotEmpty()) {
+   322→                StatusRingAvatar(
+   323→                    avatarUrl = "",
+   324→                    name = "You",
+   325→                    size = 64.dp,
+   326→                    segmentCount = myStatuses.size,
+   327→                    ringColor = NeonMint
+   328→                )
+   329→            } else {
+   330→                AvatarComponent(
+   331→                    imageUrl = "",
+   332→                    name = "You",
+   333→                    size = 64.dp
+   334→                )
+   335→            }
+   336→
+   337→            // Upload progress overlay
+   338→            if (isUploading) {
+   339→                Box(
+   340→                    modifier = Modifier
+   341→                        .size(64.dp)
+   342→                        .clip(CircleShape)
+   343→                        .background(Color.Black.copy(alpha = 0.6f)),
+   344→                    contentAlignment = Alignment.Center
+   345→                ) {
+   346→                    CircularProgressIndicator(
+   347→                        progress = { uploadProgress },
+   348→                        color = NeonMint,
+   349→                        strokeWidth = 3.dp,
+   350→                        modifier = Modifier.size(40.dp)
+   351→                    )
+   352→                }
+   353→            }
+   354→
+   355→            // Add button overlay
+   356→            Box(
+   357→                modifier = Modifier
+   358→                    .align(Alignment.BottomEnd)
+   359→                    .offset(x = 4.dp, y = 4.dp)
+   360→                    .size(24.dp)
+   361→                    .clip(CircleShape)
+   362→                    .background(NeonMint)
+   363→                    .border(2.dp, DarkPetrolCharcoal, CircleShape),
+   364→                contentAlignment = Alignment.Center
+   365→            ) {
+   366→                Icon(
+   367→                    imageVector = Icons.Filled.Add,
+   368→                    contentDescription = "Add status",
+   369→                    tint = DarkPetrolCharcoal,
+   370→                    modifier = Modifier.size(16.dp)
+   371→                )
+   372→            }
+   373→        }
+   374→
+   375→        Spacer(modifier = Modifier.width(14.dp))
+   376→
+   377→        Column {
+   378→            Text(
+   379→                text = "My Status",
+   380→                color = TextPrimary,
+   381→                fontSize = 16.sp,
+   382→                fontWeight = FontWeight.SemiBold
+   383→            )
+   384→            if (myStatuses.isNotEmpty()) {
+   385→                Text(
+   386→                    text = "${myStatuses.size} update${if (myStatuses.size != 1) "s" else ""}",
+   387→                    color = TextSecondary,
+   388→                    fontSize = 13.sp
+   389→                )
+   390→            } else {
+   391→                Text(
+   392→                    text = "Tap to add status update",
+   393→                    color = TextSecondary,
+   394→                    fontSize = 13.sp
+   395→                )
+   396→            }
+   397→        }
+   398→    }
+   399→}
+   400→
+   401→// ──────────────────────────────────────────────
+   402→// Status Group Item in Feed
+   403→// ──────────────────────────────────────────────
+   404→
+   405→@Composable
+   406→private fun StatusGroupItem(
+   407→    group: StatusGroupModel,
+   408→    onClick: () -> Unit
+   409→) {
+   410→    Row(
+   411→        modifier = Modifier
+   412→            .fillMaxWidth()
+   413→            .clickable(onClick = onClick)
+   414→            .padding(horizontal = 16.dp, vertical = 8.dp),
+   415→        verticalAlignment = Alignment.CenterVertically
+   416→    ) {
+   417→        StatusRingAvatar(
+   418→            avatarUrl = group.senderAvatarUrl,
+   419→            name = group.senderDisplayName,
+   420→            size = 56.dp,
+   421→            segmentCount = group.statusCount,
+   422→            ringColor = if (group.hasUnviewedStatuses) NeonMint else ViewedRingColor
+   423→        )
+   424→
+   425→        Spacer(modifier = Modifier.width(14.dp))
+   426→
+   427→        Column(modifier = Modifier.weight(1f)) {
+   428→            Text(
+   429→                text = group.senderDisplayName,
+   430→                color = TextPrimary,
+   431→                fontSize = 16.sp,
+   432→                fontWeight = FontWeight.SemiBold,
+   433→                maxLines = 1,
+   434→                overflow = TextOverflow.Ellipsis
+   435→            )
+   436→            Text(
+   437→                text = formatRelativeTime(group.latestTimestamp),
+   438→                color = TextSecondary,
+   439→                fontSize = 13.sp,
+   440→                maxLines = 1
+   441→            )
+   442→        }
+   443→    }
+   444→}
+   445→
+   446→// ──────────────────────────────────────────────
+   447→// Status Ring Avatar
+   448→// ──────────────────────────────────────────────
+   449→
+   450→@Composable
+   451→private fun StatusRingAvatar(
+   452→    avatarUrl: String,
+   453→    name: String,
+   454→    size: Dp,
+   455→    segmentCount: Int,
+   456→    ringColor: Color
+   457→) {
+   458→    val strokeWidth = 3.dp
+   459→    val gapAngle = 6f
+   460→    val totalGap = gapAngle * segmentCount
+   461→    val segmentSweep = if (segmentCount > 0) (360f - totalGap) / segmentCount else 0f
+   462→
+   463→    Box(contentAlignment = Alignment.Center) {
+   464→        // Colored ring segments
+   465→        if (segmentCount > 0) {
+   466→            Canvas(modifier = Modifier.size(size + strokeWidth * 2)) {
+   467→                var startAngle = -90f
+   468→                for (i in 0 until segmentCount) {
+   469→                    drawArc(
+   470→                        color = ringColor,
+   471→                        startAngle = startAngle,
+   472→                        sweepAngle = segmentSweep,
+   473→                        useCenter = false,
+   474→                        style = Stroke(
+   475→                            width = strokeWidth.toPx(),
+   476→                            cap = StrokeCap.Round
+   477→                        )
+   478→                    )
+   479→                    startAngle += segmentSweep + gapAngle
+   480→                }
+   481→            }
+   482→        }
+   483→
+   484→        AvatarComponent(
+   485→            imageUrl = avatarUrl,
+   486→            name = name,
+   487→            size = size
+   488→        )
+   489→    }
+   490→}
+   491→
+   492→// ──────────────────────────────────────────────
+   493→// Empty Status Feed
+   494→// ──────────────────────────────────────────────
+   495→
+   496→@Composable
+   497→private fun EmptyStatusFeed() {
+   498→    Box(
+   499→        modifier = Modifier
+   500→            .fillMaxSize()
+   501→            .padding(bottom = 80.dp),
+   502→        contentAlignment = Alignment.Center
+   503→    ) {
+   504→        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+   505→            Text(
+   506→                text = "No recent updates",
+   507→                color = TextSecondary,
+   508→                fontSize = 16.sp,
+   509→                fontWeight = FontWeight.Medium
+   510→            )
+   511→            Spacer(modifier = Modifier.height(4.dp))
+   512→            Text(
+   513→                text = "Statuses from your contacts will appear here",
+   514→                color = TextSecondary.copy(alpha = 0.7f),
+   515→                fontSize = 13.sp
+   516→            )
+   517→        }
+   518→    }
+   519→}
+   520→
+   521→// ──────────────────────────────────────────────
+   522→// Add Status Bottom Sheet
+   523→// ──────────────────────────────────────────────
+   524→
+   525→@OptIn(ExperimentalMaterial3Api::class)
+   526→@Composable
+   527→private fun AddStatusBottomSheet(
+   528→    sheetState: SheetState,
+   529→    onDismiss: () -> Unit,
+   530→    onTextClick: () -> Unit,
+   531→    onPhotoClick: () -> Unit,
+   532→    onVideoClick: () -> Unit
+   533→) {
+   534→    ModalBottomSheet(
+   535→        onDismissRequest = onDismiss,
+   536→        sheetState = sheetState,
+   537→        containerColor = DarkPetrolCharcoal,
+   538→        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+   539→    ) {
+   540→        Column(
+   541→            modifier = Modifier
+   542→                .fillMaxWidth()
+   543→                .padding(horizontal = 20.dp, vertical = 8.dp)
+   544→                .padding(bottom = 32.dp)
+   545→        ) {
+   546→            Text(
+   547→                text = "Create Status",
+   548→                color = TextPrimary,
+   549→                fontSize = 20.sp,
+   550→                fontWeight = FontWeight.Bold,
+   551→                modifier = Modifier.padding(bottom = 16.dp)
+   552→            )
+   553→
+   554→            AddOptionRow(
+   555→                icon = Icons.Filled.TextFields,
+   556→                label = "Text",
+   557→                description = "Share what's on your mind",
+   558→                onClick = onTextClick
+   559→            )
+   560→
+   561→            Spacer(modifier = Modifier.height(8.dp))
+   562→
+   563→            AddOptionRow(
+   564→                icon = Icons.Filled.Image,
+   565→                label = "Photo",
+   566→                description = "Share a moment with a photo",
+   567→                onClick = onPhotoClick
+   568→            )
+   569→
+   570→            Spacer(modifier = Modifier.height(8.dp))
+   571→
+   572→            AddOptionRow(
+   573→                icon = Icons.Filled.Videocam,
+   574→                label = "Video",
+   575→                description = "Share a video clip",
+   576→                onClick = onVideoClick
+   577→            )
+   578→        }
+   579→    }
+   580→}
+   581→
+   582→@Composable
+   583→private fun AddOptionRow(
+   584→    icon: androidx.compose.ui.graphics.vector.ImageVector,
+   585→    label: String,
+   586→    description: String,
+   587→    onClick: () -> Unit
+   588→) {
+   589→    Row(
+   590→        modifier = Modifier
+   591→            .fillMaxWidth()
+   592→            .clip(RoundedCornerShape(12.dp))
+   593→            .background(GlassBackground)
+   594→            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+   595→            .clickable(onClick = onClick)
+   596→            .padding(14.dp),
+   597→        verticalAlignment = Alignment.CenterVertically
+   598→    ) {
+   599→        Box(
+   600→            modifier = Modifier
+   601→                .size(44.dp)
+   602→                .clip(RoundedCornerShape(10.dp))
+   603→                .background(NeonMint.copy(alpha = 0.15f)),
+   604→            contentAlignment = Alignment.Center
+   605→        ) {
+   606→            Icon(
+   607→                imageVector = icon,
+   608→                contentDescription = label,
+   609→                tint = NeonMint,
+   610→                modifier = Modifier.size(22.dp)
+   611→            )
+   612→        }
+   613→        Spacer(modifier = Modifier.width(14.dp))
+   614→        Column {
+   615→            Text(text = label, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+   616→            Text(text = description, color = TextSecondary, fontSize = 13.sp)
+   617→        }
+   618→    }
+   619→}
+   620→
+   621→// ──────────────────────────────────────────────
+   622→// Text Status Composer
+   623→// ──────────────────────────────────────────────
+   624→
+   625→@Composable
+   626→private fun TextStatusComposer(
+   627→    isUploading: Boolean,
+   628→    onDismiss: () -> Unit,
+   629→    onPost: (text: String, backgroundColor: String?) -> Unit
+   630→) {
+   631→    var text by remember { mutableStateOf("") }
+   632→    var selectedColorIndex by remember { mutableIntStateOf(0) }
+   633→    var selectedFontIndex by remember { mutableIntStateOf(0) }
+   634→
+   635→    Box(
+   636→        modifier = Modifier
+   637→            .fillMaxSize()
+   638→            .background(TextStatusBackgroundColors[selectedColorIndex])
+   639→    ) {
+   640→        // Close button
+   641→        IconButton(
+   642→            onClick = onDismiss,
+   643→            modifier = Modifier
+   644→                .align(Alignment.TopStart)
+   645→                .padding(12.dp)
+   646→        ) {
+   647→            Icon(
+   648→                imageVector = Icons.Filled.Close,
+   649→                contentDescription = "Close",
+   650→                tint = Color.White
+   651→            )
+   652→        }
+   653→
+   654→        // Text input area
+   655→        GlassOutlinedTextField(
+   656→            value = text,
+   657→            onValueChange = { text = it },
+   658→            placeholder = {
+   659→                Text(
+   660→                    text = "Type a status...",
+   661→                    color = Color.White.copy(alpha = 0.5f)
+   662→                )
+   663→            },
+   664→            modifier = Modifier
+   665→                .align(Alignment.Center)
+   666→                .fillMaxWidth()
+   667→                .padding(horizontal = 32.dp),
+   668→            singleLine = false,
+   669→            enabled = !isUploading
+   670→        )
+   671→
+   672→        // Color picker
+   673→        LazyRow(
+   674→            modifier = Modifier
+   675→                .align(Alignment.BottomCenter)
+   676→                .padding(bottom = 100.dp)
+   677→                .padding(horizontal = 16.dp),
+   678→            horizontalArrangement = Arrangement.spacedBy(8.dp)
+   679→        ) {
+   680→            itemsIndexed(TextStatusBackgroundColors) { index, color ->
+   681→                Box(
+   682→                    modifier = Modifier
+   683→                        .size(36.dp)
+   684→                        .clip(CircleShape)
+   685→                        .background(color)
+   686→                        .then(
+   687→                            if (index == selectedColorIndex) {
+   688→                                Modifier.border(3.dp, Color.White, CircleShape)
+   689→                            } else {
+   690→                                Modifier.border(1.dp, GlassBorder, CircleShape)
+   691→                            }
+   692→                        )
+   693→                        .clickable(
+   694→                            interactionSource = remember { MutableInteractionSource() },
+   695→                            indication = null,
+   696→                            onClick = { selectedColorIndex = index }
+   697→                        )
+   698→                )
+   699→            }
+   700→        }
+   701→
+   702→        // Font selector
+   703→        LazyRow(
+   704→            modifier = Modifier
+   705→                .align(Alignment.BottomCenter)
+   706→                .padding(bottom = 64.dp)
+   707→                .padding(horizontal = 16.dp),
+   708→            horizontalArrangement = Arrangement.spacedBy(12.dp)
+   709→        ) {
+   710→            itemsIndexed(TextStatusFonts) { index, fontName ->
+   711→                val fontFamily = when (fontName) {
+   712→                    "Serif" -> FontFamily.Serif
+   713→                    "Monospace" -> FontFamily.Monospace
+   714→                    "Cursive" -> FontFamily.Cursive
+   715→                    else -> FontFamily.Default
+   716→                }
+   717→                Box(
+   718→                    modifier = Modifier
+   719→                        .clip(RoundedCornerShape(8.dp))
+   720→                        .background(
+   721→                            if (index == selectedFontIndex) NeonMint.copy(alpha = 0.3f)
+   722→                            else GlassBackground
+   723→                        )
+   724→                        .border(
+   725→                            1.dp,
+   726→                            if (index == selectedFontIndex) NeonMint else GlassBorder,
+   727→                            RoundedCornerShape(8.dp)
+   728→                        )
+   729→                        .clickable { selectedFontIndex = index }
+   730→                        .padding(horizontal = 14.dp, vertical = 8.dp)
+   731→                ) {
+   732→                    Text(
+   733→                        text = fontName,
+   734→                        color = if (index == selectedFontIndex) NeonMint else TextSecondary,
+   735→                        fontFamily = fontFamily,
+   736→                        fontSize = 14.sp
+   737→                    )
+   738→                }
+   739→            }
+   740→        }
+   741→
+   742→        // Post button
+   743→        Box(
+   744→            modifier = Modifier
+   745→                .align(Alignment.BottomCenter)
+   746→                .padding(bottom = 16.dp)
+   747→        ) {
+   748→            Row(
+   749→                modifier = Modifier
+   750→                    .clip(RoundedCornerShape(24.dp))
+   751→                    .background(NeonMint)
+   752→                    .clickable(enabled = text.isNotBlank() && !isUploading) {
+   753→                        val bgColor = colorToHex(TextStatusBackgroundColors[selectedColorIndex])
+   754→                        onPost(text.trim(), bgColor)
+   755→                    }
+   756→                    .padding(horizontal = 32.dp, vertical = 12.dp),
+   757→                verticalAlignment = Alignment.CenterVertically,
+   758→                horizontalArrangement = Arrangement.Center
+   759→            ) {
+   760→                if (isUploading) {
+   761→                    CircularProgressIndicator(
+   762→                        color = DarkPetrolCharcoal,
+   763→                        strokeWidth = 2.dp,
+   764→                        modifier = Modifier.size(18.dp)
+   765→                    )
+   766→                } else {
+   767→                    Text(
+   768→                        text = "Post",
+   769→                        color = DarkPetrolCharcoal,
+   770→                        fontSize = 16.sp,
+   771→                        fontWeight = FontWeight.Bold
+   772→                    )
+   773→                }
+   774→            }
+   775→        }
+   776→    }
+   777→}
+   778→
+   779→// ──────────────────────────────────────────────
+   780→// Media Status Composer
+   781→// ──────────────────────────────────────────────
+   782→
+   783→@Composable
+   784→private fun MediaStatusComposer(
+   785→    isVideoMode: Boolean,
+   786→    isUploading: Boolean,
+   787→    uploadProgress: Float,
+   788→    onDismiss: () -> Unit,
+   789→    onPost: (filePath: String, caption: String?) -> Unit
+   790→) {
+   791→    var selectedUri by remember { mutableStateOf<Uri?>(null) }
+   792→    var caption by remember { mutableStateOf("") }
+   793→
+   794→    val mediaType = if (isVideoMode) {
+   795→        ActivityResultContracts.PickVisualMedia.VideoOnly
+   796→    } else {
+   797→        ActivityResultContracts.PickVisualMedia.ImageOnly
+   798→    }
+   799→
+   800→    val pickerLauncher = rememberLauncherForActivityResult(
+   801→        contract = ActivityResultContracts.PickVisualMedia()
+   802→    ) { uri: Uri? ->
+   803→        selectedUri = uri
+   804→    }
+   805→
+   806→    LaunchedEffect(Unit) {
+   807→        pickerLauncher.launch(
+   808→            PickVisualMediaRequest(mediaType)
+   809→        )
+   810→    }
+   811→
+   812→    Box(modifier = Modifier.fillMaxSize()) {
+   813→        ZixoGlassBackground()
+   814→
+   815→        // Close button
+   816→        IconButton(
+   817→            onClick = onDismiss,
+   818→            modifier = Modifier
+   819→                .align(Alignment.TopStart)
+   820→                .padding(12.dp)
+   821→        ) {
+   822→            Icon(
+   823→                imageVector = Icons.Filled.Close,
+   824→                contentDescription = "Close",
+   825→                tint = TextPrimary
+   826→            )
+   827→        }
+   828→
+   829→        if (selectedUri != null) {
+   830→            Column(
+   831→                modifier = Modifier
+   832→                    .fillMaxSize()
+   833→                    .padding(16.dp)
+   834→                    .padding(top = 60.dp),
+   835→                horizontalAlignment = Alignment.CenterHorizontally
+   836→            ) {
+   837→                // Preview
+   838→                Box(
+   839→                    modifier = Modifier
+   840→                        .weight(1f)
+   841→                        .fillMaxWidth()
+   842→                        .clip(RoundedCornerShape(16.dp))
+   843→                        .background(DarkPetrolCharcoal)
+   844→                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp)),
+   845→                    contentAlignment = Alignment.Center
+   846→                ) {
+   847→                    AsyncImage(
+   848→                        model = ImageRequest.Builder(LocalContext.current)
+   849→                            .data(selectedUri)
+   850→                            .crossfade(true)
+   851→                            .build(),
+   852→                        contentDescription = "Selected media",
+   853→                        modifier = Modifier.fillMaxSize(),
+   854→                        contentScale = ContentScale.Fit
+   855→                    )
+   856→
+   857→                    if (isUploading) {
+   858→                        Box(
+   859→                            modifier = Modifier
+   860→                                .fillMaxSize()
+   861→                                .background(Color.Black.copy(alpha = 0.5f)),
+   862→                            contentAlignment = Alignment.Center
+   863→                        ) {
+   864→                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+   865→                                CircularProgressIndicator(
+   866→                                    progress = { uploadProgress },
+   867→                                    color = NeonMint,
+   868→                                    strokeWidth = 4.dp,
+   869→                                    modifier = Modifier.size(56.dp)
+   870→                                )
+   871→                                Spacer(modifier = Modifier.height(8.dp))
+   872→                                Text(
+   873→                                    text = "${(uploadProgress * 100).toInt()}%",
+   874→                                    color = TextPrimary,
+   875→                                    fontSize = 16.sp,
+   876→                                    fontWeight = FontWeight.SemiBold
+   877→                                )
+   878→                            }
+   879→                        }
+   880→                    }
+   881→                }
+   882→
+   883→                Spacer(modifier = Modifier.height(12.dp))
+   884→
+   885→                // Caption input
+   886→                GlassOutlinedTextField(
+   887→                    value = caption,
+   888→                    onValueChange = { caption = it },
+   889→                    placeholder = { Text("Add a caption...", color = TextSecondary) },
+   890→                    modifier = Modifier.fillMaxWidth(),
+   891→                    singleLine = true,
+   892→                    enabled = !isUploading
+   893→                )
+   894→
+   895→                Spacer(modifier = Modifier.height(12.dp))
+   896→
+   897→                // Post button
+   898→                Row(
+   899→                    modifier = Modifier
+   900→                        .fillMaxWidth()
+   901→                        .clip(RoundedCornerShape(24.dp))
+   902→                        .background(NeonMint)
+   903→                        .clickable(enabled = !isUploading) {
+   904→                            selectedUri?.let { uri ->
+   905→                                onPost(uri.toString(), caption.ifBlank { null })
+   906→                            }
+   907→                        }
+   908→                        .padding(vertical = 14.dp),
+   909→                    horizontalArrangement = Arrangement.Center,
+   910→                    verticalAlignment = Alignment.CenterVertically
+   911→                ) {
+   912→                    if (isUploading) {
+   913→                        CircularProgressIndicator(
+   914→                            color = DarkPetrolCharcoal,
+   915→                            strokeWidth = 2.dp,
+   916→                            modifier = Modifier.size(18.dp)
+   917→                        )
+   918→                        Spacer(modifier = Modifier.width(8.dp))
+   919→                        Text(
+   920→                            text = "Uploading...",
+   921→                            color = DarkPetrolCharcoal,
+   922→                            fontSize = 16.sp,
+   923→                            fontWeight = FontWeight.Bold
+   924→                        )
+   925→                    } else {
+   926→                        Icon(
+   927→                            imageVector = Icons.Filled.Send,
+   928→                            contentDescription = null,
+   929→                            tint = DarkPetrolCharcoal,
+   930→                            modifier = Modifier.size(18.dp)
+   931→                        )
+   932→                        Spacer(modifier = Modifier.width(8.dp))
+   933→                        Text(
+   934→                            text = "Post",
+   935→                            color = DarkPetrolCharcoal,
+   936→                            fontSize = 16.sp,
+   937→                            fontWeight = FontWeight.Bold
+   938→                        )
+   939→                    }
+   940→                }
+   941→            }
+   942→        } else {
+   943→            // No media selected
+   944→            Box(
+   945→                modifier = Modifier.fillMaxSize(),
+   946→                contentAlignment = Alignment.Center
+   947→            ) {
+   948→                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+   949→                    Text(
+   950→                        text = "No media selected",
+   951→                        color = TextSecondary,
+   952→                        fontSize = 16.sp
+   953→                    )
+   954→                    Spacer(modifier = Modifier.height(8.dp))
+   955→                    Text(
+   956→                        text = "Tap to select again",
+   957→                        color = NeonMint,
+   958→                        fontSize = 14.sp,
+   959→                        modifier = Modifier.clickable {
+   960→                            pickerLauncher.launch(
+   961→                                PickVisualMediaRequest(mediaType)
+   962→                            )
+   963→                        }
+   964→                    )
+   965→                }
+   966→            }
+   967→        }
+   968→    }
+   969→}
+   970→
+   971→// ──────────────────────────────────────────────
+   972→// Full-Screen Status Viewer Overlay
+   973→// ──────────────────────────────────────────────
+   974→
+   975→@Composable
+   976→private fun StatusViewerOverlay(
+   977→    group: StatusGroupModel,
+   978→    currentIndex: Int,
+   979→    replyText: String,
+   980→    onReplyTextChange: (String) -> Unit,
+   981→    onPrevious: () -> Unit,
+   982→    onNext: () -> Unit,
+   983→    onClose: () -> Unit,
+   984→    onReaction: (statusId: String, emoji: String) -> Unit
+   985→) {
+   986→    val currentStatus = group.statuses.getOrNull(currentIndex) ?: return
+   987→
+   988→    // Auto-advance timer
+   989→    LaunchedEffect(currentIndex, currentStatus.id) {
+   990→        val duration = if (currentStatus.type == StatusContentType.VIDEO) {
+   991→            30_000L // Longer for video; real duration would come from media metadata
+   992→        } else {
+   993→            STATUS_AUTO_ADVANCE_MS
+   994→        }
+   995→        delay(duration)
+   996→        onNext()
+   997→    }
+   998→
+   999→    Box(
+  1000→        modifier = Modifier
+  1001→            .fillMaxSize()
+  1002→            .background(Color.Black)
+  1003→    ) {
+  1004→        // ── Progress Bars at Top ─────────────
+  1005→        Row(
+  1006→            modifier = Modifier
+  1007→                .fillMaxWidth()
+  1008→                .padding(horizontal = 8.dp, vertical = 8.dp)
+  1009→                .align(Alignment.TopCenter)
+  1010→                .zIndex(2f),
+  1011→            horizontalArrangement = Arrangement.spacedBy(3.dp)
+  1012→        ) {
+  1013→            group.statuses.forEachIndexed { index, _ ->
+  1014→                Box(
+  1015→                    modifier = Modifier
+  1016→                        .weight(1f)
+  1017→                        .height(3.dp)
+  1018→                        .clip(RoundedCornerShape(1.5.dp))
+  1019→                        .background(StatusProgressBackground)
+  1020→                ) {
+  1021→                    Box(
+  1022→                        modifier = Modifier
+  1023→                            .fillMaxHeight()
+  1024→                            .then(
+  1025→                                when {
+  1026→                                    index < currentIndex -> Modifier.fillMaxWidth()
+  1027→                                    index == currentIndex -> Modifier.fillMaxWidth() // Animated fill handled by timer
+  1028→                                    else -> Modifier.fillMaxWidth(0f)
+  1029→                                }
+  1030→                            )
+  1031→                            .background(NeonMint)
+  1032→                    )
+  1033→                }
+  1034→            }
+  1035→        }
+  1036→
+  1037→        // ── Close Button ─────────────────────
+  1038→        IconButton(
+  1039→            onClick = onClose,
+  1040→            modifier = Modifier
+  1041→                .align(Alignment.TopStart)
+  1042→                .padding(top = 32.dp, start = 4.dp)
+  1043→                .zIndex(2f)
+  1044→        ) {
+  1045→            Icon(
+  1046→                imageVector = Icons.Filled.ArrowBack,
+  1047→                contentDescription = "Close viewer",
+  1048→                tint = Color.White
+  1049→            )
+  1050→        }
+  1051→
+  1052→        // ── Sender Info ──────────────────────
+  1053→        Row(
+  1054→            modifier = Modifier
+  1055→                .align(Alignment.TopCenter)
+  1056→                .padding(top = 36.dp, start = 52.dp, end = 16.dp)
+  1057→                .zIndex(2f),
+  1058→            verticalAlignment = Alignment.CenterVertically
+  1059→        ) {
+  1060→            AvatarComponent(
+  1061→                imageUrl = group.senderAvatarUrl,
+  1062→                name = group.senderDisplayName,
+  1063→                size = 32.dp
+  1064→            )
+  1065→            Spacer(modifier = Modifier.width(10.dp))
+  1066→            Column {
+  1067→                Text(
+  1068→                    text = group.senderDisplayName,
+  1069→                    color = Color.White,
+  1070→                    fontSize = 15.sp,
+  1071→                    fontWeight = FontWeight.SemiBold
+  1072→                )
+  1073→                Text(
+  1074→                    text = formatRelativeTime(currentStatus.createdAt),
+  1075→                    color = Color.White.copy(alpha = 0.6f),
+  1076→                    fontSize = 12.sp
+  1077→                )
+  1078→            }
+  1079→        }
+  1080→
+  1081→        // ── Status Content ───────────────────
+  1082→        Box(
+  1083→            modifier = Modifier
+  1084→                .fillMaxSize()
+  1085→                .pointerInput(Unit) {
+  1086→                    detectTapGestures(
+  1087→                        onTap = { offset ->
+  1088→                            val screenWidth = size.width
+  1089→                            if (offset.x < screenWidth / 3) {
+  1090→                                onPrevious()
+  1091→                            } else {
+  1092→                                onNext()
+  1093→                            }
+  1094→                        }
+  1095→                    )
+  1096→                },
+  1097→            contentAlignment = Alignment.Center
+  1098→        ) {
+  1099→            StatusContentRenderer(status = currentStatus)
+  1100→        }
+  1101→
+  1102→        // ── Reply / Reaction Bar ─────────────
+  1103→        Row(
+  1104→            modifier = Modifier
+  1105→                .align(Alignment.BottomCenter)
+  1106→                .fillMaxWidth()
+  1107→                .padding(horizontal = 16.dp, vertical = 24.dp)
+  1108→                .zIndex(2f),
+  1109→            verticalAlignment = Alignment.CenterVertically,
+  1110→            horizontalArrangement = Arrangement.spacedBy(8.dp)
+  1111→        ) {
+  1112→            GlassOutlinedTextField(
+  1113→                value = replyText,
+  1114→                onValueChange = onReplyTextChange,
+  1115→                placeholder = { Text("Reply...", color = Color.White.copy(alpha = 0.5f)) },
+  1116→                modifier = Modifier.weight(1f),
+  1117→                singleLine = true
+  1118→            )
+  1119→
+  1120→            // Quick emoji reactions
+  1121→            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+  1122→                listOf("❤️", "😂", "😍", "😮").forEach { emoji ->
+  1123→                    Text(
+  1124→                        text = emoji,
+  1125→                        fontSize = 20.sp,
+  1126→                        modifier = Modifier
+  1127→                            .clip(CircleShape)
+  1128→                            .clickable { onReaction(currentStatus.id, emoji) }
+  1129→                            .padding(4.dp)
+  1130→                    )
+  1131→                }
+  1132→            }
+  1133→        }
+  1134→    }
+  1135→}
+  1136→
+  1137→// ──────────────────────────────────────────────
+  1138→// Status Content Renderer
+  1139→// ──────────────────────────────────────────────
+  1140→
+  1141→@Composable
+  1142→private fun StatusContentRenderer(status: StatusModel) {
+  1143→    Box(modifier = Modifier.fillMaxSize()) {
+  1144→        when (status.type) {
+  1145→            StatusContentType.TEXT -> {
+  1146→                val bgColor = status.backgroundColor?.let { parseHexColor(it) } ?: EmeraldGreen
+  1147→                Box(
+  1148→                    modifier = Modifier
+  1149→                        .fillMaxSize()
+  1150→                        .background(bgColor),
+  1151→                    contentAlignment = Alignment.Center
+  1152→                ) {
+  1153→                    Text(
+  1154→                        text = status.textContent ?: "",
+  1155→                        color = Color.White,
+  1156→                        fontSize = 28.sp,
+  1157→                        fontWeight = FontWeight.SemiBold,
+  1158→                        textAlign = TextAlign.Center,
+  1159→                        modifier = Modifier.padding(horizontal = 32.dp)
+  1160→                    )
+  1161→                }
+  1162→            }
+  1163→
+  1164→            StatusContentType.IMAGE -> {
+  1165→                AsyncImage(
+  1166→                    model = ImageRequest.Builder(LocalContext.current)
+  1167→                        .data(status.mediaUrl)
+  1168→                        .crossfade(true)
+  1169→                        .build(),
+  1170→                    contentDescription = "Image status",
+  1171→                    modifier = Modifier.fillMaxSize(),
+  1172→                    contentScale = ContentScale.Fit
+  1173→                )
+  1174→                if (!status.caption.isNullOrBlank()) {
+  1175→                    Box(
+  1176→                        modifier = Modifier
+  1177→                            .align(Alignment.BottomCenter)
+  1178→                            .fillMaxWidth()
+  1179→                            .background(Color.Black.copy(alpha = 0.5f))
+  1180→                            .padding(16.dp)
+  1181→                    ) {
+  1182→                        Text(
+  1183→                            text = status.caption,
+  1184→                            color = Color.White,
+  1185→                            fontSize = 16.sp
+  1186→                        )
+  1187→                    }
+  1188→                }
+  1189→            }
+  1190→
+  1191→            StatusContentType.VIDEO -> {
+  1192→                Box(
+  1193→                    modifier = Modifier.fillMaxSize(),
+  1194→                    contentAlignment = Alignment.Center
+  1195→                ) {
+  1196→                    Text(
+  1197→                        text = "▶ Video",
+  1198→                        color = Color.White.copy(alpha = 0.7f),
+  1199→                        fontSize = 18.sp
+  1200→                    )
+  1201→                }
+  1202→                if (!status.caption.isNullOrBlank()) {
+  1203→                    Box(
+  1204→                        modifier = Modifier
+  1205→                            .align(Alignment.BottomCenter)
+  1206→                            .fillMaxWidth()
+  1207→                            .background(Color.Black.copy(alpha = 0.5f))
+  1208→                            .padding(16.dp)
+  1209→                    ) {
+  1210→                        Text(
+  1211→                            text = status.caption,
+  1212→                            color = Color.White,
+  1213→                            fontSize = 16.sp
+  1214→                        )
+  1215→                    }
+  1216→                }
+  1217→            }
+  1218→
+  1219→            StatusContentType.SHAPE -> {
+  1220→                val bgColor = status.backgroundColor?.let { parseHexColor(it) } ?: EmeraldGreen
+  1221→                Box(
+  1222→                    modifier = Modifier
+  1223→                        .fillMaxSize()
+  1224→                        .background(bgColor),
+  1225→                    contentAlignment = Alignment.Center
+  1226→                ) {
+  1227→                    Text(
+  1228→                        text = status.textContent ?: "",
+  1229→                        color = Color.White,
+  1230→                        fontSize = 28.sp,
+  1231→                        fontWeight = FontWeight.SemiBold,
+  1232→                        textAlign = TextAlign.Center,
+  1233→                        modifier = Modifier.padding(horizontal = 32.dp)
+  1234→                    )
+  1235→                }
+  1236→            }
+  1237→
+  1238→            StatusContentType.EMOJI_3D -> {
+  1239→                Box(
+  1240→                    modifier = Modifier
+  1241→                        .fillMaxSize()
+  1242→                        .background(DarkPetrolCharcoal),
+  1243→                    contentAlignment = Alignment.Center
+  1244→                ) {
+  1245→                    Text(
+  1246→                        text = status.emoji3dCode ?: "✨",
+  1247→                        fontSize = 80.sp
+  1248→                    )
+  1249→                }
+  1250→            }
+  1251→        }
+  1252→    }
+  1253→}
+  1254→
+  1255→// ──────────────────────────────────────────────
+  1256→// Utility Functions
+  1257→// ──────────────────────────────────────────────
+  1258→
+  1259→private fun formatRelativeTime(timestampMs: Long): String {
+  1260→    val now = System.currentTimeMillis()
+  1261→    val diff = now - timestampMs
+  1262→    val seconds = diff / 1000
+  1263→    val minutes = seconds / 60
+  1264→    val hours = minutes / 60
+  1265→    return when {
+  1266→        seconds < 60 -> "just now"
+  1267→        minutes < 60 -> "${minutes}m ago"
+  1268→        hours < 24 -> "${hours}h ago"
+  1269→        else -> "${hours / 24}d ago"
+  1270→    }
+  1271→}
+  1272→
+  1273→private fun colorToHex(color: Color): String {
+  1274→    val alpha = (color.alpha * 255).toInt()
+  1275→    val red = (color.red * 255).toInt()
+  1276→    val green = (color.green * 255).toInt()
+  1277→    val blue = (color.blue * 255).toInt()
+  1278→    return "#${String.format("%02X", alpha)}${String.format("%02X", red)}${String.format("%02X", green)}${String.format("%02X", blue)}"
+  1279→}
+  1280→
+  1281→private fun parseHexColor(hex: String): Color {
+  1282→    return try {
+  1283→        val cleanHex = hex.removePrefix("#")
+  1284→        val argb = cleanHex.toLong(16)
+  1285→        Color(argb)
+  1286→    } catch (_: Exception) {
+  1287→        EmeraldGreen
+  1288→    }
+  1289→}
+  1290→
+  1291→private val DestructiveText = Color(0xFFFF5252)
+  1292→private fun Modifier.zIndex(z: Float): Modifier = this.graphicsLayer { translationZ = z }
+  1293→

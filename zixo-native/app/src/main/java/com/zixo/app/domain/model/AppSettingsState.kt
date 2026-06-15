@@ -119,8 +119,8 @@ enum class UploadQuality { AUTO, BEST_QUALITY, BALANCED }
 /**
  * Sealed class representing the full lifecycle of a WebRTC call.
  *
- * All LiveKit session parameters, peer allocations, ICE setups, token
- * collections, and audio track rendering components are isolated in
+ * All WebRTC PeerConnection, PeerConnectionFactory, ICE setups, SDP
+ * negotiation, and audio/video track rendering components are isolated in
  * asynchronous background workers running under Dispatchers.IO.
  * The Android Main Thread is NEVER blocked by call operations.
  *

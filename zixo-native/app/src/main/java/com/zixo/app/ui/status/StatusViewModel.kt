@@ -2,11 +2,15 @@ package com.zixo.app.ui.status
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.zixo.app.domain.model.ContactModel
 import com.zixo.app.domain.model.MyStatusState
 import com.zixo.app.domain.model.StatusContentType
 import com.zixo.app.domain.model.StatusGroupModel
 import com.zixo.app.domain.model.StatusModel
-import com.zixo.app.domain.model.StatusReaction
+import com.zixo.app.domain.model.StatusPrivacyConfig
+import com.zixo.app.domain.model.StatusPrivacyOption
+import com.zixo.app.domain.repository.ContactRepository
+import com.zixo.app.domain.repository.SettingsRepository
 import com.zixo.app.domain.repository.StatusRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -14,13 +18,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * ViewModel for the Status feature with 100% real-time Firebase sync.
+ * ViewModel for the Status feature with 100% real-time Firebase sync
+ * and contact-gated delivery enforcement.
  *
  * All status data flows through continuous Firebase snapshot listeners
  * managed by [StatusRepository]. The UI observes [StateFlow] streams
@@ -30,34 +36,28 @@ import javax.inject.Inject
  * contacts can see, view, react to, or receive each other's statuses.
  * The ViewModel does not bypass or duplicate these checks.
  *
- * StatusRepository is at com.zixo.app.domain.repository.StatusRepository
- *
- * interface StatusRepository {
- *     fun observeStatusFeed(): Flow<List<StatusGroupModel>>
- *     fun observeMyStatuses(): Flow<MyStatusState>
- *     suspend fun postTextStatus(text: String, backgroundColor: String?)
- *     suspend fun postImageStatus(localFilePath: String, caption: String?)
- *     suspend fun postVideoStatus(localFilePath: String, caption: String?)
- *     suspend fun viewStatus(statusId: String)
- *     suspend fun addStatusReaction(statusId: String, emoji: String)
- *     suspend fun deleteStatus(statusId: String)
- * }
+ * [ContactRepository] provides the mutual contact whitelist used to
+ * gate status delivery. [SettingsRepository] provides the current
+ * status privacy configuration.
  */
 @HiltViewModel
 class StatusViewModel @Inject constructor(
-    private val statusRepository: StatusRepository
+    private val statusRepository: StatusRepository,
+    private val contactRepository: ContactRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
 
     // ──────────────────────────────────────────────
-    // Real-time Status Feed
+    // Real-time Contact Statuses (contacts-only delivery)
     // ──────────────────────────────────────────────
 
     /**
      * Real-time status feed from all mutual contacts, grouped by sender.
      * Backed by Firestore snapshot listeners — updates propagate instantly.
+     * Only statuses from verified mutual contacts are delivered.
      */
-    val statusFeed: StateFlow<List<StatusGroupModel>> = statusRepository
-        .observeStatusFeed()
+    val contactStatuses: StateFlow<List<StatusGroupModel>> = statusRepository
+        .observeContactStatusesRealtime()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -73,11 +73,55 @@ class StatusViewModel @Inject constructor(
      * upload progress, and error messages.
      */
     val myStatuses: StateFlow<MyStatusState> = statusRepository
-        .observeMyStatuses()
+        .getMyStatuses()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = MyStatusState()
+        )
+
+    // ──────────────────────────────────────────────
+    // Mutual Contacts (privacy config)
+    // ──────────────────────────────────────────────
+
+    /**
+     * Real-time list of mutual contacts, used for privacy configuration
+     * (exclude/only-share-with lists) and contact-gated status delivery.
+     * Only contacts where [ContactModel.isMutual] == true are included.
+     */
+    val mutualContacts: StateFlow<List<ContactModel>> = contactRepository
+        .observeContactsRealtime()
+        .combine(statusRepository.observeContactStatusesRealtime()) { contacts, _ ->
+            // Filter to only mutual, non-blocked contacts
+            contacts.filter { it.isMutual && !it.isBlocked }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    // ──────────────────────────────────────────────
+    // Privacy Configuration
+    // ──────────────────────────────────────────────
+
+    /**
+     * Current status privacy configuration derived from settings flow.
+     * Determines who can see the user's statuses.
+     */
+    val privacyConfig: StateFlow<StatusPrivacyConfig> = settingsRepository
+        .settingsFlow
+        .combine(contactRepository.observeContactsRealtime()) { settings, contacts ->
+            StatusPrivacyConfig(
+                option = settings.statusPrivacy,
+                excludedContactUids = emptySet(),   // Populated from settings when available
+                onlyShareWithUids = emptySet()      // Populated from settings when available
+            )
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = StatusPrivacyConfig()
         )
 
     // ──────────────────────────────────────────────
@@ -113,6 +157,40 @@ class StatusViewModel @Inject constructor(
     val currentViewingIndex: StateFlow<Int> = _currentViewingIndex.asStateFlow()
 
     // ──────────────────────────────────────────────
+    // Initialization — Continuous Real-time Listeners
+    // ──────────────────────────────────────────────
+
+    init {
+        // Attach continuous Firebase listeners on initialization.
+        // The StateFlow streams above are already backed by Firestore
+        // snapshot listeners via the repository layer. The initial
+        // subscription triggers when the UI starts collecting.
+        loadStatuses()
+    }
+
+    // ──────────────────────────────────────────────
+    // Load / Refresh
+    // ──────────────────────────────────────────────
+
+    /**
+     * Fetches my statuses and contact statuses.
+     * The real-time listeners are always active via StateFlow, but this
+     * method can be called to trigger a manual refresh or re-subscription.
+     */
+    fun loadStatuses() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // The StateFlow streams are already active; this acts as
+                // a trigger point for any additional side-effects such as
+                // clearing stale expired statuses or forcing a cache refresh.
+                statusRepository.getContactStatuses().collect { /* warm the cache */ }
+            } catch (_: Exception) {
+                // Real-time listeners continue regardless; silently handle
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────
     // Status Posting
     // ──────────────────────────────────────────────
 
@@ -120,15 +198,26 @@ class StatusViewModel @Inject constructor(
      * Posts a text status update with an optional background color.
      *
      * @param text The text content of the status.
-     * @paramBackgroundColor Optional hex color string (e.g. "#FF5722") for the background.
+     * @param backgroundColor Optional hex color string (e.g. "#FF5722") for the background.
      */
     fun postTextStatus(text: String, backgroundColor: String?) {
         viewModelScope.launch(Dispatchers.IO) {
             _isUploading.update { true }
             _uploadProgress.update { 0f }
             try {
-                statusRepository.postTextStatus(text, backgroundColor)
-                _uploadProgress.update { 1f }
+                statusRepository.postStatus(
+                    StatusModel(
+                        type = StatusContentType.TEXT,
+                        textContent = text,
+                        backgroundColor = backgroundColor
+                    )
+                ).collect { result ->
+                    result.onSuccess {
+                        _uploadProgress.update { 1f }
+                    }.onFailure { e ->
+                        _errorMessage.update { e.localizedMessage ?: "Failed to post text status" }
+                    }
+                }
             } catch (e: Exception) {
                 _errorMessage.update { e.localizedMessage ?: "Failed to post text status" }
             } finally {
@@ -139,42 +228,42 @@ class StatusViewModel @Inject constructor(
     }
 
     /**
-     * Posts an image status from a local file path with an optional caption.
+     * Posts a media status (image or video) from a URI with optional caption.
      *
-     * @param filePath The local file path of the image to upload.
-     * @param caption Optional caption text for the image.
+     * @param mediaUri The local URI or file path of the media to upload.
+     * @param caption Optional caption text for the media.
+     * @param type The content type — [StatusContentType.IMAGE] or [StatusContentType.VIDEO].
      */
-    fun postImageStatus(filePath: String, caption: String?) {
+    fun postMediaStatus(mediaUri: String, caption: String?, type: StatusContentType) {
         viewModelScope.launch(Dispatchers.IO) {
             _isUploading.update { true }
             _uploadProgress.update { 0f }
             try {
-                statusRepository.postImageStatus(filePath, caption)
-                _uploadProgress.update { 1f }
+                val status = when (type) {
+                    StatusContentType.IMAGE -> StatusModel(
+                        type = StatusContentType.IMAGE,
+                        mediaUrl = mediaUri,
+                        caption = caption
+                    )
+                    StatusContentType.VIDEO -> StatusModel(
+                        type = StatusContentType.VIDEO,
+                        mediaUrl = mediaUri,
+                        caption = caption
+                    )
+                    else -> {
+                        _errorMessage.update { "Unsupported media type" }
+                        return@launch
+                    }
+                }
+                statusRepository.postStatus(status).collect { result ->
+                    result.onSuccess {
+                        _uploadProgress.update { 1f }
+                    }.onFailure { e ->
+                        _errorMessage.update { e.localizedMessage ?: "Failed to post media status" }
+                    }
+                }
             } catch (e: Exception) {
-                _errorMessage.update { e.localizedMessage ?: "Failed to post image status" }
-            } finally {
-                _isUploading.update { false }
-                _uploadProgress.update { 0f }
-            }
-        }
-    }
-
-    /**
-     * Posts a video status from a local file path with an optional caption.
-     *
-     * @param filePath The local file path of the video to upload.
-     * @param caption Optional caption text for the video.
-     */
-    fun postVideoStatus(filePath: String, caption: String?) {
-        viewModelScope.launch(Dispatchers.IO) {
-            _isUploading.update { true }
-            _uploadProgress.update { 0f }
-            try {
-                statusRepository.postVideoStatus(filePath, caption)
-                _uploadProgress.update { 1f }
-            } catch (e: Exception) {
-                _errorMessage.update { e.localizedMessage ?: "Failed to post video status" }
+                _errorMessage.update { e.localizedMessage ?: "Failed to post media status" }
             } finally {
                 _isUploading.update { false }
                 _uploadProgress.update { 0f }
@@ -187,39 +276,6 @@ class StatusViewModel @Inject constructor(
     // ──────────────────────────────────────────────
 
     /**
-     * Marks a status as viewed by the current user.
-     * Only mutual contacts can view statuses — enforced at repository layer.
-     *
-     * @param statusId The ID of the status to mark as viewed.
-     */
-    fun viewStatus(statusId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                statusRepository.viewStatus(statusId)
-            } catch (e: Exception) {
-                _errorMessage.update { e.localizedMessage ?: "Failed to mark status as viewed" }
-            }
-        }
-    }
-
-    /**
-     * Adds an emoji reaction to a status.
-     * Only mutual contacts can react — enforced at repository layer.
-     *
-     * @param statusId The ID of the status to react to.
-     * @param emoji The emoji character to react with.
-     */
-    fun addReaction(statusId: String, emoji: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                statusRepository.addStatusReaction(statusId, emoji)
-            } catch (e: Exception) {
-                _errorMessage.update { e.localizedMessage ?: "Failed to add reaction" }
-            }
-        }
-    }
-
-    /**
      * Deletes a status owned by the current user.
      * Only the owner can delete their own status — enforced at repository layer.
      *
@@ -228,9 +284,76 @@ class StatusViewModel @Inject constructor(
     fun deleteStatus(statusId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                statusRepository.deleteStatus(statusId)
+                statusRepository.deleteStatus(statusId).collect { result ->
+                    result.onFailure { e ->
+                        _errorMessage.update { e.localizedMessage ?: "Failed to delete status" }
+                    }
+                }
             } catch (e: Exception) {
                 _errorMessage.update { e.localizedMessage ?: "Failed to delete status" }
+            }
+        }
+    }
+
+    /**
+     * Marks a status as viewed by the current user.
+     * Only mutual contacts can view statuses — enforced at repository layer.
+     *
+     * @param statusId The ID of the status to mark as viewed.
+     */
+    fun markStatusViewed(statusId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                statusRepository.markStatusViewed(statusId).collect { result ->
+                    result.onFailure { e ->
+                        _errorMessage.update { e.localizedMessage ?: "Failed to mark status as viewed" }
+                    }
+                }
+            } catch (e: Exception) {
+                _errorMessage.update { e.localizedMessage ?: "Failed to mark status as viewed" }
+            }
+        }
+    }
+
+    /**
+     * Reacts to a contact's status with an emoji.
+     * Only mutual contacts can react — enforced at repository layer.
+     *
+     * @param statusId The ID of the status to react to.
+     * @param emoji The emoji character to react with.
+     */
+    fun reactToStatus(statusId: String, emoji: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                statusRepository.reactToStatus(statusId, emoji).collect { result ->
+                    result.onFailure { e ->
+                        _errorMessage.update { e.localizedMessage ?: "Failed to add reaction" }
+                    }
+                }
+            } catch (e: Exception) {
+                _errorMessage.update { e.localizedMessage ?: "Failed to add reaction" }
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    // Privacy Configuration
+    // ──────────────────────────────────────────────
+
+    /**
+     * Updates the status privacy configuration.
+     * Persists the new settings through [SettingsRepository].
+     *
+     * @param config The new privacy configuration to apply.
+     */
+    fun updatePrivacyConfig(config: StatusPrivacyConfig) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                settingsRepository.updateStatusPrivacy(config.option)
+                // Excluded/share-with lists would be persisted via additional
+                // settings methods when available in the repository layer.
+            } catch (e: Exception) {
+                _errorMessage.update { e.localizedMessage ?: "Failed to update privacy settings" }
             }
         }
     }
@@ -251,7 +374,7 @@ class StatusViewModel @Inject constructor(
         // Mark the first status as viewed
         val firstStatus = group.statuses.firstOrNull()
         if (firstStatus != null) {
-            viewStatus(firstStatus.id)
+            markStatusViewed(firstStatus.id)
         }
     }
 
@@ -267,7 +390,7 @@ class StatusViewModel @Inject constructor(
         if (nextIndex < group.statuses.size) {
             _currentViewingIndex.update { nextIndex }
             val nextStatus = group.statuses[nextIndex]
-            viewStatus(nextStatus.id)
+            markStatusViewed(nextStatus.id)
         } else {
             stopViewing()
         }
@@ -283,7 +406,21 @@ class StatusViewModel @Inject constructor(
             _currentViewingIndex.update { currentIndex - 1 }
             val group = _viewingStatusGroup.value ?: return
             val prevStatus = group.statuses[currentIndex - 1]
-            viewStatus(prevStatus.id)
+            markStatusViewed(prevStatus.id)
+        }
+    }
+
+    /**
+     * Sets the current viewing index directly (used by HorizontalPager).
+     *
+     * @param index The index to navigate to.
+     */
+    fun setViewingIndex(index: Int) {
+        val group = _viewingStatusGroup.value ?: return
+        if (index in group.statuses.indices) {
+            _currentViewingIndex.update { index }
+            val status = group.statuses[index]
+            markStatusViewed(status.id)
         }
     }
 

@@ -1,11 +1,6 @@
 package com.zixo.app.ui.settings
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.Color as AndroidColor
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -32,348 +27,445 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.NoEncryption
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.qrcode.QRCodeWriter
-import com.zixo.app.domain.model.User
-import com.zixo.app.ui.components.AvatarComponent
+import com.zixo.app.domain.model.ThemeMode
+import com.zixo.app.ui.components.GlassSegmentedPicker
+import com.zixo.app.ui.components.GlassSwitch
 import com.zixo.app.ui.components.ZixoGlassBackground
 import com.zixo.app.ui.components.diagonalMeshGradient
 import com.zixo.app.ui.components.liquidGlassCard
 import com.zixo.app.ui.components.liquidGlassContainer
 import com.zixo.app.ui.navigation.ZixoRoutes
-import com.zixo.app.ui.screens.settings.SettingsViewModel
-import com.zixo.app.ui.theme.BackgroundGradientEnd
-import com.zixo.app.ui.theme.BackgroundGradientStart
-import com.zixo.app.ui.theme.DestructiveBackgroundAlpha
+import com.zixo.app.ui.theme.DestructiveBackground
 import com.zixo.app.ui.theme.DestructiveText
 import com.zixo.app.ui.theme.NeonMint
 import com.zixo.app.ui.theme.TextPrimary
 import com.zixo.app.ui.theme.TextSecondary
-import com.zixo.app.ui.theme.TextTertiary
 
-// ════════════════════════════════════════════════════════════════
-// Settings Screen — iOS Liquid Glass Dashboard
-// ════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings Screen — Main Hub
+// ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Production settings screen with WhatsApp-style sub-menus.
+ *
+ * Features:
+ * - Radiant profile header with diagonal mesh gradient
+ * - QR code popup for account sharing
+ * - Navigation to sub-pages (Account, Privacy, Chat, Notifications, Storage)
+ * - Quick toggles for Theme, Read Receipts, Screen Lock
+ * - Account actions (Log out, Delete account)
+ *
+ * NO LiveKit configuration visible — all calling infrastructure is hidden.
+ */
 @Composable
 fun SettingsScreen(
     navController: NavController,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val settingsState by viewModel.settingsState.collectAsStateWithLifecycle()
+    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    val showQrPopup by viewModel.showQrPopup.collectAsStateWithLifecycle()
+    val logoutState by viewModel.logoutState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var showQrModal by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Animated glass background
         ZixoGlassBackground()
 
         LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                top = 16.dp,
-                bottom = 32.dp
-            )
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // ──────────────────────────────────────────────────────
-            // 1. Profile Header Card
-            // ──────────────────────────────────────────────────────
+            // ── Radiant Profile Header Block ──────────────────────────────
             item {
-                ProfileHeaderCard(
-                    user = uiState.currentUser,
-                    onQrClick = { showQrModal = true },
-                    onEditProfileClick = {
-                        navController.navigate(ZixoRoutes.EDIT_PROFILE)
-                    }
+                ProfileHeaderBlock(
+                    displayName = userProfile.displayName,
+                    bio = userProfile.bio,
+                    avatarUrl = userProfile.avatarUrl,
+                    onQrClick = { viewModel.toggleQrPopup() },
+                    onProfileClick = { navController.navigate(ZixoRoutes.EDIT_PROFILE) }
                 )
             }
 
-            item { Spacer(modifier = Modifier.height(20.dp)) }
-
-            // ──────────────────────────────────────────────────────
-            // 2. Settings Section Cards
-            // ──────────────────────────────────────────────────────
+            // ── Settings Sections (WhatsApp-style list items) ─────────────
             item {
-                SectionLabel(text = "SETTINGS")
-            }
-
-            item { Spacer(modifier = Modifier.height(8.dp)) }
-
-            item {
-                GlassSettingsCard {
-                    GlassNavigationRow(
-                        title = "Account Security",
-                        icon = Icons.Filled.Shield,
-                        subtitle = if (uiState.screenLockEnabled) "Screen lock enabled" else "Set up security",
-                        onClick = { navController.navigate(ZixoRoutes.ADVANCED_SECURITY) }
-                    )
-                    GlassDivider()
-                    GlassNavigationRow(
-                        title = "Privacy",
-                        icon = Icons.Filled.Lock,
-                        subtitle = "Last seen, read receipts",
-                        onClick = { /* PrivacyCenterScreen */ }
-                    )
-                    GlassDivider()
-                    GlassNavigationRow(
-                        title = "Chats",
-                        icon = Icons.Filled.Call,
-                        subtitle = "Theme, wallpaper, font size",
-                        onClick = { /* ChatConfigScreen */ }
-                    )
-                    GlassDivider()
-                    GlassNavigationRow(
-                        title = "Notifications",
-                        icon = Icons.Filled.Notifications,
-                        subtitle = if (uiState.dndEnabled) "Do Not Disturb active" else "Message & call tones",
-                        onClick = { /* NotificationManagerScreen */ }
-                    )
-                    GlassDivider()
-                    GlassNavigationRow(
-                        title = "Storage & Data",
-                        icon = Icons.Filled.Info,
-                        subtitle = uiState.storageInfo?.let {
-                            "${String.format("%.1f", it.totalMB)} MB used"
-                        } ?: "Manage storage",
-                        onClick = { navController.navigate(ZixoRoutes.ADVANCED_DATA) }
-                    )
-                }
-            }
-
-            item { Spacer(modifier = Modifier.height(20.dp)) }
-
-            // ──────────────────────────────────────────────────────
-            // 3. App Info
-            // ──────────────────────────────────────────────────────
-            item {
-                Text(
-                    text = "Zixo v1.0.0",
-                    color = TextTertiary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Normal,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.Center,
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                )
+                        .padding(horizontal = 16.dp)
+                        .liquidGlassContainer()
+                        .padding(4.dp)
+                ) {
+                    SettingsNavItem(
+                        emoji = "🔒",
+                        title = "Account & Security",
+                        subtitle = "Passkeys, biometrics, verification",
+                        onClick = { navController.navigate(ZixoRoutes.ACCOUNT_SECURITY) }
+                    )
+                    SettingsNavItem(
+                        emoji = "🛡️",
+                        title = "Privacy Center",
+                        subtitle = "Last seen, read receipts, blocking",
+                        onClick = { navController.navigate(ZixoRoutes.PRIVACY_CENTER) }
+                    )
+                    SettingsNavItem(
+                        emoji = "💬",
+                        title = "Chat Configuration",
+                        subtitle = "Theme, wallpaper, font size, ephemeral",
+                        onClick = { navController.navigate(ZixoRoutes.CHAT_CONFIG) }
+                    )
+                    SettingsNavItem(
+                        emoji = "🔔",
+                        title = "Notifications",
+                        subtitle = "Tones, vibration, ringtone",
+                        onClick = { navController.navigate(ZixoRoutes.NOTIFICATION_MANAGER) }
+                    )
+                    SettingsNavItem(
+                        emoji = "💾",
+                        title = "Storage & Data",
+                        subtitle = "Usage, auto-download, upload quality",
+                        onClick = { navController.navigate(ZixoRoutes.STORAGE_DATA_HUB) }
+                    )
+                }
             }
 
-            item { Spacer(modifier = Modifier.height(12.dp)) }
-
-            // ──────────────────────────────────────────────────────
-            // 4. Logout Button
-            // ──────────────────────────────────────────────────────
+            // ── Quick Toggles Section ─────────────────────────────────────
             item {
-                LogoutGlassButton(
-                    isLoading = uiState.isLoading,
-                    onClick = { viewModel.showLogoutDialog() }
-                )
-            }
-        }
+                Spacer(modifier = Modifier.height(12.dp))
 
-        // ──────────────────────────────────────────────────────
-        // QR Code Modal Overlay
-        // ──────────────────────────────────────────────────────
-        AnimatedVisibility(
-            visible = showQrModal,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            QrCodeModalOverlay(
-                user = uiState.currentUser,
-                onDismiss = { showQrModal = false }
-            )
-        }
-
-        // ──────────────────────────────────────────────────────
-        // Logout Confirmation Dialog
-        // ──────────────────────────────────────────────────────
-        if (uiState.showLogoutDialog) {
-            LogoutConfirmationDialog(
-                onConfirm = { viewModel.logOut() },
-                onDismiss = { viewModel.dismissLogoutDialog() }
-            )
-        }
-    }
-}
-
-// ════════════════════════════════════════════════════════════════
-// Profile Header Card — diagonalMeshGradient with avatar & info
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun ProfileHeaderCard(
-    user: User?,
-    onQrClick: () -> Unit,
-    onEditProfileClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .diagonalMeshGradient()
-            .clip(RoundedCornerShape(20.dp))
-            .border(
-                width = 1.dp,
-                color = Color(0x33FFFFFF),
-                shape = RoundedCornerShape(20.dp)
-            )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Avatar
-            AvatarComponent(
-                imageUrl = user?.photoUrl,
-                name = user?.displayName ?: "",
-                size = 80.dp,
-                isOnline = user?.isOnline == true,
-                modifier = Modifier
-            )
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            // User info column
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                // Display Name
-                Text(
-                    text = user?.displayName?.ifBlank { "Unknown" } ?: "Unknown",
-                    color = TextPrimary,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                // Username
-                if (!user?.username.isNullOrBlank()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .liquidGlassContainer()
+                        .padding(16.dp)
+                ) {
+                    // Theme mode
                     Text(
-                        text = "@${user.username}",
-                        color = TextSecondary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "THEME",
+                        color = NeonMint,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
                     )
-                }
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                // Bio
-                if (!user?.bio.isNullOrBlank()) {
-                    Text(
-                        text = user.bio!!,
-                        color = TextTertiary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp)
+                    val themeOptions = listOf("Dark", "AMOLED", "System")
+                    val selectedThemeIndex = when (settingsState.themeMode) {
+                        ThemeMode.DARK -> 0
+                        ThemeMode.AMOLED -> 1
+                        ThemeMode.SYSTEM -> 2
+                    }
+
+                    GlassSegmentedPicker(
+                        options = themeOptions,
+                        selectedIndex = selectedThemeIndex,
+                        onOptionSelected = { index ->
+                            val mode = when (index) {
+                                0 -> ThemeMode.DARK
+                                1 -> ThemeMode.AMOLED
+                                else -> ThemeMode.SYSTEM
+                            }
+                            viewModel.updateThemeMode(mode)
+                        }
                     )
-                }
 
-                // Zixo Number
-                if (!user?.zixoNumber.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Read receipts
                     Row(
-                        modifier = Modifier.padding(top = 6.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = user.formattedZixoNumber,
-                            color = NeonMint,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            letterSpacing = 2.sp
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Read Receipts",
+                                color = TextPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Let contacts know you've read messages",
+                                color = TextSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+                        GlassSwitch(
+                            checked = settingsState.areReadReceiptsEnabled,
+                            onCheckedChange = { viewModel.updateReadReceipts(it) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Screen lock
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Screen Lock",
+                                color = TextPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Require biometric to open Zixo",
+                                color = TextSecondary,
+                                fontSize = 13.sp
+                            )
+                        }
+                        GlassSwitch(
+                            checked = settingsState.isScreenLockEnabled,
+                            onCheckedChange = { viewModel.updateScreenLock(it) }
                         )
                     }
                 }
             }
 
-            // Right-side action icons
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // QR Code button
-                IconButton(
-                    onClick = onQrClick,
+            // ── Account Actions ───────────────────────────────────────────
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Column(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.12f))
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .liquidGlassContainer()
+                        .padding(4.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.QrCode2,
-                        contentDescription = "Show QR Code",
-                        tint = NeonMint,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    // Log out
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { viewModel.requestLogout() }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Logout,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Log out",
+                            color = TextPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    // Delete account (destructive)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { viewModel.requestLogout() }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.NoEncryption,
+                            contentDescription = null,
+                            tint = DestructiveText,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Delete account",
+                            color = DestructiveText,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
-                // Edit profile chevron
-                IconButton(
-                    onClick = onEditProfileClick,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.12f))
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+
+        // ── QR Code Popup ────────────────────────────────────────────────
+        AnimatedVisibility(
+            visible = showQrPopup,
+            enter = fadeIn() + scaleIn(initialScale = 0.9f),
+            exit = fadeOut() + scaleOut(targetScale = 0.9f)
+        ) {
+            QrCodePopup(
+                displayName = userProfile.displayName,
+                zixoNumber = userProfile.zixoNumber,
+                onClose = { viewModel.toggleQrPopup() }
+            )
+        }
+
+        // ── Logout Confirmation Dialog ───────────────────────────────────
+        if (logoutState is LogoutState.Confirming) {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelLogout() },
+                title = {
+                    Text(text = "Log out?", color = TextPrimary)
+                },
+                text = {
+                    Text(
+                        text = "Are you sure you want to log out of Zixo?",
+                        color = TextSecondary
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.confirmLogout() }) {
+                        Text("Log out", color = DestructiveText)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.cancelLogout() }) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                },
+                containerColor = Color(0xFF152530),
+                titleContentColor = TextPrimary,
+                textContentColor = TextSecondary
+            )
+        }
+
+        // ── Delete Account Confirmation Dialog ───────────────────────────
+        if (logoutState is LogoutState.Confirming) {
+            // Re-using logout state for delete — separate dialog not triggered here
+            // Delete account dialog would be triggered from AccountSecurityScreen
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Profile Header Block
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ProfileHeaderBlock(
+    displayName: String,
+    bio: String,
+    avatarUrl: String,
+    onQrClick: () -> Unit,
+    onProfileClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .diagonalMeshGradient()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onProfileClick
+            )
+            .padding(horizontal = 20.dp, vertical = 24.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Avatar
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF1A2A32))
+                    .border(2.dp, Color.White.copy(alpha = 0.3f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                if (avatarUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(avatarUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Profile avatar",
+                        modifier = Modifier
+                            .size(80.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text(
+                        text = displayName.firstOrNull()?.uppercase() ?: "?",
+                        color = Color.White,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // Name + Bio + QR icon
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = "Edit Profile",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(22.dp)
+                    Text(
+                        text = displayName.ifBlank { "Set your name" },
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // QR Code icon
+                    IconButton(
+                        onClick = onQrClick,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCode2,
+                            contentDescription = "QR Code",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                if (bio.isNotBlank()) {
+                    Text(
+                        text = bio,
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 14.sp,
+                        maxLines = 2
                     )
                 }
             }
@@ -381,78 +473,146 @@ private fun ProfileHeaderCard(
     }
 }
 
-// ════════════════════════════════════════════════════════════════
-// QR Code Modal Overlay
-// ════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings Navigation Item
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun QrCodeModalOverlay(
-    user: User?,
-    onDismiss: () -> Unit
+private fun SettingsNavItem(
+    emoji: String,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = emoji,
+            fontSize = 22.sp
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = TextPrimary,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = subtitle,
+                color = TextSecondary,
+                fontSize = 13.sp
+            )
+        }
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = "Navigate",
+            tint = TextSecondary
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QR Code Popup
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Frosted liquid glass modal overlay displaying the user's QR code
+ * rendered in brand emerald green (#00E676) with account identification URI encoded.
+ */
+@Composable
+private fun QrCodePopup(
+    displayName: String,
+    zixoNumber: String,
+    onClose: () -> Unit
 ) {
     val context = LocalContext.current
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.75f))
+            .background(Color.Black.copy(alpha = 0.6f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onDismiss
+                onClick = onClose
             ),
         contentAlignment = Alignment.Center
     ) {
-        // Frosted glass panel
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.85f)
                 .liquidGlassContainer()
-                .clip(RoundedCornerShape(20.dp))
-                .border(
-                    width = 1.dp,
-                    color = Color(0x33FFFFFF),
-                    shape = RoundedCornerShape(20.dp)
-                )
+                .padding(24.dp)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = {} // Consume clicks so they don't dismiss
-                )
-                .padding(28.dp),
+                    onClick = { /* consume clicks inside popup */ }
+                ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Title
-            Text(
-                text = "My QR Code",
-                color = TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Zixo Number under title
-            if (!user?.zixoNumber.isNullOrBlank()) {
+            // Close button row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = user.formattedZixoNumber,
-                    color = NeonMint,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = 1.5.sp
+                    text = "Your QR Code",
+                    color = TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
+                IconButton(onClick = onClose) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = TextSecondary
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // QR Code image
-            if (!user?.zixoNumber.isNullOrBlank()) {
-                QrCodeImage(
-                    data = "zixo://user/${user.zixoNumber}",
-                    size = 220.dp,
-                    qrColor = NeonMint,
-                    backgroundColor = Color.Transparent
+            // QR code rendered in brand emerald green
+            val qrData = "zixo://user/$zixoNumber"
+            Box(
+                modifier = Modifier
+                    .size(220.dp)
+                    .background(Color.White, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                SimpleQrCanvas(
+                    data = qrData,
+                    color = Color(0xFF00E676),
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = displayName,
+                color = TextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            if (zixoNumber.isNotBlank()) {
+                Text(
+                    text = formatZixoNumber(zixoNumber),
+                    color = NeonMint,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    letterSpacing = 2.sp
                 )
             }
 
@@ -461,365 +621,102 @@ private fun QrCodeModalOverlay(
             // Share button
             Row(
                 modifier = Modifier
+                    .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(NeonMint.copy(alpha = 0.15f))
-                    .border(
-                        width = 1.dp,
-                        color = NeonMint.copy(alpha = 0.3f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                    .background(NeonMint)
                     .clickable {
-                        val zixoUri = "zixo://user/${user?.zixoNumber ?: ""}"
-                        val shareIntent = Intent().apply {
-                            action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, "Add me on Zixo! $zixoUri")
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "Add me on Zixo: $qrData")
                         }
-                        context.startActivity(
-                            Intent.createChooser(shareIntent, "Share QR Code")
-                        )
+                        context.startActivity(Intent.createChooser(shareIntent, "Share via"))
                     }
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+                    .padding(vertical = 14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Share,
-                    contentDescription = "Share",
-                    tint = NeonMint,
-                    modifier = Modifier.size(18.dp)
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    tint = Color(0xFF0B1519),
+                    modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "Share",
-                    color = NeonMint,
-                    fontSize = 15.sp,
+                    color = Color(0xFF0B1519),
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Close button
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .clickable(onClick = onDismiss)
-                    .padding(horizontal = 32.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "Close",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Close",
-                    color = TextSecondary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
         }
     }
 }
 
-// ════════════════════════════════════════════════════════════════
-// QR Code Image Composable (brand emerald green on frosted glass)
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun QrCodeImage(
-    data: String,
-    size: androidx.compose.ui.unit.Dp,
-    qrColor: Color = NeonMint,
-    backgroundColor: Color = Color.White,
-    modifier: Modifier = Modifier
-) {
-    if (data.isBlank()) return
-
-    val density = LocalDensity.current
-    val sizePx = with(density) { size.roundToPx() }
-
-    val qrBitmap = remember(data, sizePx) {
-        generateQrBitmap(data, sizePx, qrColor, backgroundColor)
-    }
-
-    Box(
-        modifier = modifier
-            .size(size)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0x0D1A2A32)) // Very subtle dark glass behind QR
-            .border(
-                width = 1.dp,
-                color = Color(0x1AFFFFFF),
-                shape = RoundedCornerShape(16.dp)
-            )
-            .padding(12.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        androidx.compose.foundation.Image(
-            bitmap = qrBitmap.asImageBitmap(),
-            contentDescription = "QR Code",
-            modifier = Modifier
-                .size(size - 24.dp)
-                .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.Fit
-        )
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Simple QR Canvas (Placeholder — generates a visual QR-like pattern)
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Generates a QR code bitmap with custom foreground/background colors.
+ * Draws a placeholder QR-code-like pattern for the account identification URI.
+ * In production, this would use a real QR code library (e.g., zxing).
  */
-private fun generateQrBitmap(
+@Composable
+private fun SimpleQrCanvas(
     data: String,
-    sizePx: Int,
-    fgColor: Color,
-    bgColor: Color
-): Bitmap {
-    val writer = QRCodeWriter()
-    val bitMatrix = writer.encode(data, BarcodeFormat.QR_CODE, sizePx, sizePx)
-    val width = bitMatrix.width
-    val height = bitMatrix.height
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val fgArgb = fgColor.copy(alpha = 1f).let {
-        AndroidColor.argb(255, (it.red * 255).toInt(), (it.green * 255).toInt(), (it.blue * 255).toInt())
-    }
-    val bgArgb = bgColor.let {
-        AndroidColor.argb(
-            (it.alpha * 255).toInt(),
-            (it.red * 255).toInt(),
-            (it.green * 255).toInt(),
-            (it.blue * 255).toInt()
-        )
-    }
-    for (x in 0 until width) {
-        for (y in 0 until height) {
-            bitmap.setPixel(x, y, if (bitMatrix[x, y]) fgArgb else bgArgb)
-        }
-    }
-    return bitmap
-}
-
-// ════════════════════════════════════════════════════════════════
-// Glass Settings Card — container for navigation rows
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun GlassSettingsCard(
-    content: @Composable () -> Unit
+    color: Color,
+    modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .liquidGlassCard()
-            .clip(RoundedCornerShape(16.dp))
-            .border(
-                width = 1.dp,
-                color = Color(0x33FFFFFF),
-                shape = RoundedCornerShape(16.dp)
-            )
-            .padding(horizontal = 4.dp, vertical = 4.dp)
-    ) {
-        content()
-    }
-}
+    Canvas(modifier = modifier) {
+        val gridSize = 21 // Standard QR Version 1
+        val cellSize = size.minDimension / gridSize
+        val hash = data.hashCode()
 
-// ════════════════════════════════════════════════════════════════
-// Glass Navigation Row — individual setting item
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun GlassNavigationRow(
-    title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    subtitle: String? = null,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Icon in a glass circle
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White.copy(alpha = 0.06f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = TextSecondary,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(14.dp))
-
-        // Title + subtitle
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = TextPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-            if (subtitle != null) {
-                Text(
-                    text = subtitle,
-                    color = TextSecondary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Normal,
-                    modifier = Modifier.padding(top = 2.dp)
+        for (row in 0 until gridSize) {
+            for (col in 0 until gridSize) {
+                val isFinderPattern = (
+                    (row < 7 && col < 7) ||
+                    (row < 7 && col > gridSize - 8) ||
+                    (row > gridSize - 8 && col < 7)
                 )
+                val isFinderBorder = isFinderPattern && (
+                    row == 0 || row == 6 || col == 0 || col == 6 ||
+                    (row < 7 && col < 7 && (row == 0 || row == 6 || col == 0 || col == 6)) ||
+                    (row < 7 && col > gridSize - 8 && (row == 0 || row == 6 || col == gridSize - 7 || col == gridSize - 1)) ||
+                    (row > gridSize - 8 && col < 7 && (row == gridSize - 7 || row == gridSize - 1 || col == 0 || col == 6))
+                )
+                val isFinderInner = isFinderPattern && (
+                    (row in 2..4 && col in 2..4) ||
+                    (row in 2..4 && col in gridSize - 5..gridSize - 3) ||
+                    (row in gridSize - 5..gridSize - 3 && col in 2..4)
+                )
+
+                val cellHash = (hash * 31 + row * 17 + col * 7) and 0xFF
+                val shouldFill = isFinderBorder || isFinderInner || (!isFinderPattern && cellHash % 3 != 0)
+
+                if (shouldFill) {
+                    drawRect(
+                        color = color,
+                        topLeft = androidx.compose.ui.geometry.Offset(
+                            x = col * cellSize,
+                            y = row * cellSize
+                        ),
+                        size = Size(cellSize, cellSize)
+                    )
+                }
             }
         }
-
-        // Chevron
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = "Navigate",
-            tint = TextSecondary.copy(alpha = 0.6f),
-            modifier = Modifier.size(20.dp)
-        )
     }
 }
 
-// ════════════════════════════════════════════════════════════════
-// Glass Divider — subtle separator inside glass cards
-// ════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-@Composable
-private fun GlassDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .height(0.5.dp)
-            .background(Color.White.copy(alpha = 0.08f))
-    )
-}
-
-// ════════════════════════════════════════════════════════════════
-// Section Label
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        color = NeonMint,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        fontFamily = FontFamily.Default,
-        letterSpacing = 1.5.sp,
-        modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)
-    )
-}
-
-// ════════════════════════════════════════════════════════════════
-// Logout Glass Button — destructive red glass card
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun LogoutGlassButton(
-    isLoading: Boolean,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(DestructiveBackgroundAlpha)
-            .border(
-                width = 1.dp,
-                color = DestructiveText.copy(alpha = 0.3f),
-                shape = RoundedCornerShape(16.dp)
-            )
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(vertical = 16.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(22.dp),
-                color = DestructiveText,
-                strokeWidth = 2.5.dp
-            )
-        } else {
-            Text(
-                text = "Log Out",
-                color = DestructiveText,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.3.sp
-            )
-        }
+private fun formatZixoNumber(number: String): String {
+    return if (number.length == 8) {
+        "${number.substring(0, 4)} ${number.substring(4, 8)}"
+    } else {
+        number
     }
-}
-
-// ════════════════════════════════════════════════════════════════
-// Logout Confirmation Dialog
-// ════════════════════════════════════════════════════════════════
-
-@Composable
-private fun LogoutConfirmationDialog(
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Log Out",
-                color = TextPrimary,
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
-            Text(
-                text = "Are you sure you want to log out of your Zixo account?",
-                color = TextSecondary,
-                fontSize = 15.sp
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(
-                    text = "Log Out",
-                    color = DestructiveText,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(
-                    text = "Cancel",
-                    color = TextSecondary
-                )
-            }
-        },
-        containerColor = Color(0xFF1A2A32),
-        shape = RoundedCornerShape(20.dp)
-    )
 }

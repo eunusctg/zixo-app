@@ -3,19 +3,44 @@ package com.zixo.app.data.remote.firebase
 import com.google.firebase.auth.AuthResult
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.tasks.await
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Firebase Authentication Service — Pure FirebaseAuth + Google Sign-In via CredentialManager.
+ *
+ * NO LiveKit references. All authentication flows use FirebaseAuth directly.
+ * Google Sign-In is handled via CredentialManager on the UI layer, which provides
+ * the ID token that is then verified here.
+ *
+ * All operations run on Dispatchers.IO via the calling repository.
+ */
 @Singleton
 class FirebaseAuthService @Inject constructor(
     private val firebaseAuth: FirebaseAuth
 ) {
+
+    /**
+     * Sign in with a Google ID token obtained via CredentialManager.
+     * Converts the ID token to a Firebase credential and authenticates.
+     *
+     * @param idToken The Google Sign-In ID token.
+     * @return The Firebase [AuthResult].
+     */
+    fun signInWithGoogle(idToken: String): Flow<AuthResult> = flow {
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        val result = firebaseAuth.signInWithCredential(credential).await()
+        Timber.d("Google Sign-In successful for: %s", result.user?.uid)
+        emit(result)
+    }
 
     /**
      * Sign in with email and password.
@@ -47,6 +72,7 @@ class FirebaseAuthService @Inject constructor(
      */
     suspend fun signOut() {
         firebaseAuth.signOut()
+        Timber.d("User signed out")
     }
 
     /**
@@ -57,6 +83,7 @@ class FirebaseAuthService @Inject constructor(
         val user = firebaseAuth.currentUser
             ?: throw IllegalStateException("No authenticated user to delete")
         user.delete().await()
+        Timber.d("Account deleted: %s", user.uid)
     }
 
     /**
@@ -73,13 +100,8 @@ class FirebaseAuthService @Inject constructor(
             trySend(auth.currentUser)
         }
         firebaseAuth.addAuthStateListener(listener)
-
-        // Emit the initial state immediately
         trySend(firebaseAuth.currentUser)
-
-        awaitClose {
-            firebaseAuth.removeAuthStateListener(listener)
-        }
+        awaitClose { firebaseAuth.removeAuthStateListener(listener) }
     }
 
     /**

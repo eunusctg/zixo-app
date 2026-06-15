@@ -83,9 +83,9 @@
             </intent-filter>
         </service>
 
-        <!-- Call foreground service — runs on Dispatchers.IO, never blocks Main Thread -->
+        <!-- WebRTC Call foreground service — runs on Dispatchers.IO, never blocks Main Thread -->
         <service
-            android:name=".data.remote.livekit.CallForegroundService"
+            android:name=".data.remote.webrtc.CallForegroundService"
             android:exported="false"
             android:foregroundServiceType="phoneCall" />
 

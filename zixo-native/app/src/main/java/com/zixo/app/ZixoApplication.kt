@@ -1,79 +1,39 @@
 package com.zixo.app
 
 import android.app.Application
-import android.util.Log
-import com.zixo.app.data.local.datastore.UserPreferences
-import com.zixo.app.data.remote.firebase.FirebaseAuthService
-import com.zixo.app.data.remote.firebase.FirestoreService
+import com.zixo.app.BuildConfig
 import dagger.hilt.android.HiltAndroidApp
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import javax.inject.Inject
+import timber.log.Timber
 
+// ════════════════════════════════════════════════════════════════
+// Zixo Application — Hilt entry point
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * Application class annotated with [@HiltAndroidApp][HiltAndroidApp]
+ * to trigger Hilt's code generation and dependency injection.
+ *
+ * Initialization order:
+ * 1. **Timber** logging — plants [Timber.DebugTree] in debug builds
+ * 2. **Firebase** — auto-initialized by the `google-services` Gradle plugin;
+ *    no manual setup required here
+ *
+ * No LiveKit, no manual Firebase initialization, no singleton references.
+ * All services are provided through Hilt modules ([AppModule], [FirebaseModule]).
+ */
 @HiltAndroidApp
 class ZixoApplication : Application() {
 
-    @Inject
-    lateinit var firebaseAuthService: FirebaseAuthService
-
-    @Inject
-    lateinit var firestoreService: FirestoreService
-
-    @Inject
-    lateinit var userPreferences: UserPreferences
-
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-
     override fun onCreate() {
         super.onCreate()
-        instance = this
-        initializeApp()
-    }
 
-    private fun initializeApp() {
-        // Configure strict mode for debug builds
+        // ── Initialize Timber logging ────────────────────────────
         if (BuildConfig.DEBUG) {
-            enableStrictMode()
+            Timber.plant(Timber.DebugTree())
         }
 
-        // Update the user's online status and last-seen timestamp on app start
-        applicationScope.launch {
-            try {
-                val currentUser = firebaseAuthService.getCurrentUser()
-                if (currentUser != null) {
-                    firestoreService.updateOnlineStatus(currentUser.uid, true).first()
-                    firestoreService.updateLastSeen(currentUser.uid).first()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to update online status on start", e)
-            }
-        }
-    }
-
-    private fun enableStrictMode() {
-        android.os.StrictMode.setThreadPolicy(
-            android.os.StrictMode.ThreadPolicy.Builder()
-                .detectAll()
-                .penaltyLog()
-                .build()
-        )
-        android.os.StrictMode.setVmPolicy(
-            android.os.StrictMode.VmPolicy.Builder()
-                .detectAll()
-                .penaltyLog()
-                .build()
-        )
-    }
-
-    companion object {
-        private const val TAG = "ZixoApplication"
-
-        @Volatile
-        private lateinit var instance: ZixoApplication
-
-        fun getInstance(): ZixoApplication = instance
+        // ── Firebase is auto-initialized by google-services.json ─
+        // No manual FirebaseApp.initializeApp() call needed when
+        // the google-services Gradle plugin is applied.
     }
 }

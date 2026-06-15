@@ -61,6 +61,10 @@ private val ZixoDarkColorScheme = darkColorScheme(
 
 // ════════════════════════════════════════════════════════════════
 // ZIXO AMOLED — Pure Black (#000000) Power-Saving Variant
+//
+// Designed for OLED/AMOLED displays where pure black pixels
+// are turned off, providing maximum power savings.
+// All surface tokens collapse to #000000 or near-black values.
 // ════════════════════════════════════════════════════════════════
 
 private val ZixoAmoledColorScheme = ZixoDarkColorScheme.copy(
@@ -131,7 +135,22 @@ private val ZixoLightColorScheme = lightColorScheme(
 /**
  * Root theme composable for the entire Zixo application.
  *
- * @param themeMode   DARK  → custom slate/emerald matrix,
+ * Supports three theme modes via [ThemeMode] (imported from `domain.model`):
+ *
+ * | Mode              | Behaviour                                                      |
+ * |-------------------|----------------------------------------------------------------|
+ * | [ThemeMode.DARK]  | Custom slate/dark emerald matrix — the default Zixo look       |
+ * | [ThemeMode.AMOLED]| Pure black (#000000) backgrounds for OLED power saving         |
+ * | [ThemeMode.SYSTEM]| Follows the Android system dark/light setting                  |
+ *
+ * When [dynamicColor] is `true` **and** the device runs API 31+,
+ * Material You dynamic colours from the user's wallpaper replace
+ * the brand palette.  The AMOLED mode always overrides dynamic colour
+ * since pure-black backgrounds are critical for OLED power saving.
+ *
+ * Typography is provided by [ZixoTypography] (defined in `Typography.kt`).
+ *
+ * @param themeMode   DARK → custom slate/emerald matrix,
  *                    AMOLED → pure-black power-saving variant,
  *                    SYSTEM → follows Android system setting.
  * @param dynamicColor When true & API 31+, uses Material You
@@ -156,7 +175,7 @@ fun ZixoTheme(
 
     val colorScheme = when {
         // Android 12+ dynamic colour takes priority when enabled
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && themeMode != ThemeMode.AMOLED -> {
             val context = LocalContext.current
             if (useDarkTheme) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)

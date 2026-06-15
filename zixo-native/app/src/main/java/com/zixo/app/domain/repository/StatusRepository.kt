@@ -2,6 +2,7 @@ package com.zixo.app.domain.repository
 
 import com.zixo.app.domain.model.MyStatusState
 import com.zixo.app.domain.model.StatusGroupModel
+import com.zixo.app.domain.model.StatusModel
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -16,66 +17,64 @@ import kotlinx.coroutines.flow.Flow
 interface StatusRepository {
 
     /**
-     * Observes the status feed for the current user.
-     *
-     * Returns statuses grouped by sender ([StatusGroupModel]), containing
-     * only statuses from verified mutual contacts. Statuses older than
-     * 24 hours are automatically filtered out.
-     *
-     * @return A flow emitting the current list of [StatusGroupModel] entries.
-     */
-    fun observeStatusFeed(): Flow<List<StatusGroupModel>>
-
-    /**
-     * Observes the current user's own statuses.
+     * Gets the current user's own statuses.
      *
      * @return A flow emitting the current [MyStatusState].
      */
-    fun observeMyStatuses(): Flow<MyStatusState>
+    fun getMyStatuses(): Flow<MyStatusState>
 
     /**
-     * Posts a text status update.
+     * Gets the status feed for the current user.
+     * Returns statuses grouped by sender, containing only statuses
+     * from verified mutual contacts. Statuses older than 24 hours
+     * are automatically filtered out.
      *
-     * @param text The text content of the status.
-     * @param backgroundColor Optional hex color for the background.
+     * @return A flow emitting the current list of [StatusGroupModel] entries.
      */
-    suspend fun postTextStatus(text: String, backgroundColor: String?)
+    fun getContactStatuses(): Flow<List<StatusGroupModel>>
 
     /**
-     * Posts an image status update.
+     * Observes the contact status feed in real-time via Firestore addSnapshotListener.
+     * Only statuses from verified mutual contacts are delivered.
+     * Auto-expiration logic filters out statuses older than 24 hours.
      *
-     * @param localFilePath The local file path of the image to upload.
-     * @param caption Optional caption for the image.
+     * @return A flow emitting the current list of [StatusGroupModel] entries.
      */
-    suspend fun postImageStatus(localFilePath: String, caption: String?)
+    fun observeContactStatusesRealtime(): Flow<List<StatusGroupModel>>
 
     /**
-     * Posts a video status update.
+     * Posts a new status update.
+     * The status is delivered only to verified mutual contacts.
+     * Media uploads go to Firebase Storage.
      *
-     * @param localFilePath The local file path of the video to upload.
-     * @param caption Optional caption for the video.
+     * @param status The [StatusModel] to post.
+     * @return A flow emitting the posted [StatusModel] or an error.
      */
-    suspend fun postVideoStatus(localFilePath: String, caption: String?)
-
-    /**
-     * Marks a status as viewed by the current user.
-     *
-     * @param statusId The ID of the status to mark as viewed.
-     */
-    suspend fun viewStatus(statusId: String)
-
-    /**
-     * Adds a reaction to a status.
-     *
-     * @param statusId The ID of the status to react to.
-     * @param emoji The emoji character to react with.
-     */
-    suspend fun addStatusReaction(statusId: String, emoji: String)
+    fun postStatus(status: StatusModel): Flow<Result<StatusModel>>
 
     /**
      * Deletes a status posted by the current user.
      *
      * @param statusId The ID of the status to delete.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun deleteStatus(statusId: String)
+    fun deleteStatus(statusId: String): Flow<Result<Unit>>
+
+    /**
+     * Marks a status as viewed by the current user.
+     *
+     * @param statusId The ID of the status to mark as viewed.
+     * @return A flow emitting Result success or failure.
+     */
+    fun markStatusViewed(statusId: String): Flow<Result<Unit>>
+
+    /**
+     * Adds a reaction to a status.
+     * Only mutual contacts can react to each other's statuses.
+     *
+     * @param statusId The ID of the status to react to.
+     * @param emoji The emoji character to react with.
+     * @return A flow emitting Result success or failure.
+     */
+    fun reactToStatus(statusId: String, emoji: String): Flow<Result<Unit>>
 }

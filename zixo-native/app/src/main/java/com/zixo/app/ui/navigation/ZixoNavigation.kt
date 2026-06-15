@@ -1,9 +1,12 @@
 package com.zixo.app.ui.navigation
 
+import android.content.Intent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -14,8 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -26,12 +28,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.zixo.app.data.repository.AuthState
+import com.zixo.app.domain.repository.AuthState
 import com.zixo.app.ui.chat.ChatMessageScreen
 import com.zixo.app.ui.chat.GroupChatScreen
+import com.zixo.app.ui.components.CallScreenOverlay
 import com.zixo.app.ui.components.ZixoBottomNav
 import com.zixo.app.ui.components.ZixoGlassBackground
-import com.zixo.app.ui.components.ZixoTopBar
 import com.zixo.app.ui.contacts.ContactListScreen
 import com.zixo.app.ui.main.HomeScreen
 import com.zixo.app.ui.screens.auth.AuthScreen
@@ -45,80 +47,162 @@ import com.zixo.app.ui.settings.SubPages.ChatConfigScreen
 import com.zixo.app.ui.settings.SubPages.NotificationManagerScreen
 import com.zixo.app.ui.settings.SubPages.PrivacyCenterScreen
 import com.zixo.app.ui.settings.SubPages.StorageDataHubScreen
-import com.zixo.app.ui.status.StatusTabScreen
-import androidx.compose.foundation.layout.Column
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.Color
 
-// ──────────────────────────────────────────────
-// Route Constants
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// Type-Safe Route Definitions
+// ════════════════════════════════════════════════════════════════
 
-object ZixoRoutes {
-    const val AUTH = "auth"
-    const val HOME = "home"
-    const val CHATS = "chats"
-    const val CONTACTS = "contacts"
-    const val CALLS = "calls"
-    const val STATUS = "status"
-    const val SETTINGS = "settings"
-    const val EDIT_PROFILE = "edit_profile"
-    const val ACCOUNT_SECURITY = "account_security"
-    const val PRIVACY_CENTER = "privacy_center"
-    const val CHAT_CONFIG = "chat_config"
-    const val NOTIFICATION_MANAGER = "notification_manager"
-    const val STORAGE_DATA_HUB = "storage_data_hub"
-    const val CHAT_MESSAGE = "chat_message/{threadId}"
-    const val GROUP_CHAT = "group_chat/{threadId}"
-
-    fun chatMessageRoute(threadId: String) = "chat_message/$threadId"
-    fun groupChatRoute(threadId: String) = "group_chat/$threadId"
+/**
+ * Sealed class of all navigable routes in the Zixo application.
+ *
+ * Routes with path parameters use the `{param}` syntax and expose a
+ * `createRoute()` helper so callers never construct route strings by hand.
+ */
+sealed class ZixoRoute(val route: String) {
+    data object Auth : ZixoRoute("auth")
+    data object Home : ZixoRoute("home")
+    data object Chat : ZixoRoute("chat/{threadId}") {
+        fun createRoute(threadId: String) = "chat/$threadId"
+    }
+    data object GroupChat : ZixoRoute("group_chat/{threadId}") {
+        fun createRoute(threadId: String) = "group_chat/$threadId"
+    }
+    data object ContactList : ZixoRoute("contacts")
+    data object Settings : ZixoRoute("settings")
+    data object EditProfile : ZixoRoute("edit_profile")
+    data object AccountSecurity : ZixoRoute("account_security")
+    data object PrivacyCenter : ZixoRoute("privacy_center")
+    data object ChatConfig : ZixoRoute("chat_config")
+    data object NotificationManager : ZixoRoute("notification_manager")
+    data object StorageDataHub : ZixoRoute("storage_data_hub")
+    data object CallScreen : ZixoRoute("call/{callId}") {
+        fun createRoute(callId: String) = "call/$callId"
+    }
 }
 
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
 // Routes that display the bottom navigation bar
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
 
+/**
+ * Routes that display the outer bottom navigation bar.
+ * HOME is excluded because HomeScreen manages its own internal 85dp bottom nav
+ * with 4 tabs (Chats, Status, Calls, Contacts). Only SETTINGS shows the outer nav.
+ */
 private val BOTTOM_NAV_ROUTES = setOf(
-    ZixoRoutes.HOME,
-    ZixoRoutes.SETTINGS,
+    ZixoRoute.Settings.route,
 )
 
-// ──────────────────────────────────────────────
-// Animation constants
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// Animation Constants
+// ════════════════════════════════════════════════════════════════
 
 private const val ANIM_DURATION_MS = 350
+private const val OVERLAY_ANIM_DURATION_MS = 300
 
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// Default Animated Transitions — Fade + Slide
+// ════════════════════════════════════════════════════════════════
+
+private val DefaultEnterTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.EnterTransition = {
+    fadeIn(animationSpec = tween(ANIM_DURATION_MS)) +
+            slideIntoContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                animationSpec = tween(ANIM_DURATION_MS),
+            )
+}
+
+private val DefaultExitTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.ExitTransition = {
+    fadeOut(animationSpec = tween(ANIM_DURATION_MS)) +
+            slideOutOfContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                animationSpec = tween(ANIM_DURATION_MS),
+            )
+}
+
+private val DefaultPopEnterTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.EnterTransition = {
+    fadeIn(animationSpec = tween(ANIM_DURATION_MS)) +
+            slideIntoContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.End,
+                animationSpec = tween(ANIM_DURATION_MS),
+            )
+}
+
+private val DefaultPopExitTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.ExitTransition = {
+    fadeOut(animationSpec = tween(ANIM_DURATION_MS)) +
+            slideOutOfContainer(
+                towards = AnimatedContentTransitionScope.SlideDirection.End,
+                animationSpec = tween(ANIM_DURATION_MS),
+            )
+}
+
+/** Fade-only transition used for the Auth screen (no directional slide). */
+private val FadeEnterTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.EnterTransition = {
+    fadeIn(animationSpec = tween(ANIM_DURATION_MS))
+}
+
+private val FadeExitTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.ExitTransition = {
+    fadeOut(animationSpec = tween(ANIM_DURATION_MS))
+}
+
+/** Scale + fade for the fullscreen Call overlay. */
+private val CallEnterTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.EnterTransition = {
+    fadeIn(animationSpec = tween(OVERLAY_ANIM_DURATION_MS)) +
+            scaleIn(
+                initialScale = 0.85f,
+                animationSpec = tween(OVERLAY_ANIM_DURATION_MS)
+            )
+}
+
+private val CallExitTransition: AnimatedContentTransitionScope<*>.() -> androidx.compose.animation.ExitTransition = {
+    fadeOut(animationSpec = tween(OVERLAY_ANIM_DURATION_MS)) +
+            scaleOut(
+                targetScale = 0.85f,
+                animationSpec = tween(OVERLAY_ANIM_DURATION_MS)
+            )
+}
+
+// ════════════════════════════════════════════════════════════════
 // NavHost
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
 
+/**
+ * The navigation graph host for the entire Zixo application.
+ *
+ * Auth-gating:
+ * - On first composition, starts at [ZixoRoute.Auth].
+ * - When [AuthState.Authenticated] is emitted, navigates to [ZixoRoute.Home].
+ * - When [AuthState.Unauthenticated] is emitted, navigates back to [ZixoRoute.Auth].
+ *
+ * Deep linking from FCM notifications is handled via [deepLinkCallId].
+ */
 @Composable
 fun ZixoNavHost(
     navController: NavHostController,
+    deepLinkCallId: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val authViewModel: AuthViewModel = hiltViewModel()
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
     val settingsViewModel: SettingsViewModel = hiltViewModel()
 
-    // Navigate based on auth state changes
+    // ── Navigate based on auth state changes ─────────────────────
     LaunchedEffect(authState) {
         when (authState) {
             is AuthState.Authenticated -> {
                 val currentRoute = navController.currentDestination?.route
-                if (currentRoute == ZixoRoutes.AUTH) {
-                    navController.navigate(ZixoRoutes.HOME) {
-                        popUpTo(ZixoRoutes.AUTH) { inclusive = true }
+                if (currentRoute == ZixoRoute.Auth.route) {
+                    navController.navigate(ZixoRoute.Home.route) {
+                        popUpTo(ZixoRoute.Auth.route) { inclusive = true }
                     }
                 }
             }
             is AuthState.Unauthenticated -> {
                 val currentRoute = navController.currentDestination?.route
-                if (currentRoute != null && currentRoute != ZixoRoutes.AUTH) {
-                    navController.navigate(ZixoRoutes.AUTH) {
+                if (currentRoute != null && currentRoute != ZixoRoute.Auth.route) {
+                    navController.navigate(ZixoRoute.Auth.route) {
                         popUpTo(navController.graph.findStartDestination().id) {
                             inclusive = true
                         }
@@ -129,145 +213,173 @@ fun ZixoNavHost(
         }
     }
 
+    // ── Handle FCM deep link for incoming calls ──────────────────
+    LaunchedEffect(deepLinkCallId) {
+        if (deepLinkCallId != null && authState is AuthState.Authenticated) {
+            navController.navigate(ZixoRoute.CallScreen.createRoute(deepLinkCallId))
+        }
+    }
+
     NavHost(
         navController = navController,
-        startDestination = ZixoRoutes.AUTH,
+        startDestination = ZixoRoute.Auth.route,
         modifier = modifier,
-        enterTransition = {
-            fadeIn(animationSpec = tween(ANIM_DURATION_MS)) +
-                    slideIntoContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.Start,
-                        animationSpec = tween(ANIM_DURATION_MS),
-                    )
-        },
-        exitTransition = {
-            fadeOut(animationSpec = tween(ANIM_DURATION_MS)) +
-                    slideOutOfContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.Start,
-                        animationSpec = tween(ANIM_DURATION_MS),
-                    )
-        },
-        popEnterTransition = {
-            fadeIn(animationSpec = tween(ANIM_DURATION_MS)) +
-                    slideIntoContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.End,
-                        animationSpec = tween(ANIM_DURATION_MS),
-                    )
-        },
-        popExitTransition = {
-            fadeOut(animationSpec = tween(ANIM_DURATION_MS)) +
-                    slideOutOfContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.End,
-                        animationSpec = tween(ANIM_DURATION_MS),
-                    )
-        },
+        enterTransition = DefaultEnterTransition,
+        exitTransition = DefaultExitTransition,
+        popEnterTransition = DefaultPopEnterTransition,
+        popExitTransition = DefaultPopExitTransition,
     ) {
-        // ── Auth ───────────────────────────────────────
+        // ── Auth ───────────────────────────────────────────────
         composable(
-            route = ZixoRoutes.AUTH,
-            enterTransition = { fadeIn(animationSpec = tween(ANIM_DURATION_MS)) },
-            exitTransition = { fadeOut(animationSpec = tween(ANIM_DURATION_MS)) },
+            route = ZixoRoute.Auth.route,
+            enterTransition = FadeEnterTransition,
+            exitTransition = FadeExitTransition,
         ) {
             AuthScreen()
         }
 
-        // ── Home (main tab host) ─────────────────────
-        composable(route = ZixoRoutes.HOME) {
+        // ── Home (main tab host — contains internal tab navigation) ──
+        composable(route = ZixoRoute.Home.route) {
             HomeScreen(
+                navController = navController,
                 onChatClick = { threadId ->
-                    navController.navigate(ZixoRoutes.chatMessageRoute(threadId))
+                    navController.navigate(ZixoRoute.Chat.createRoute(threadId))
                 },
                 onGroupChatClick = { threadId ->
-                    navController.navigate(ZixoRoutes.groupChatRoute(threadId))
+                    navController.navigate(ZixoRoute.GroupChat.createRoute(threadId))
+                },
+                onContactClick = { contactUserId ->
+                    // Zero-trust: only mutual contacts can navigate to chat
+                    // TODO: Create or find existing thread with this contact
+                },
+                onNewChatClick = {
+                    // TODO: Open new chat / find contact flow
+                },
+                onCallClick = { callId ->
+                    navController.navigate(ZixoRoute.CallScreen.createRoute(callId))
                 },
             )
         }
 
-        // ── Settings (with bottom nav) ──────────────
-        composable(route = ZixoRoutes.SETTINGS) {
+        // ── Contact List ───────────────────────────────────────
+        composable(route = ZixoRoute.ContactList.route) {
+            ContactListScreen(
+                onContactClick = { contactUserId ->
+                    // Navigate to chat with the contact (zero-trust: mutual only)
+                },
+            )
+        }
+
+        // ── Settings (with bottom nav) ──────────────────────────
+        composable(route = ZixoRoute.Settings.route) {
             SettingsScreen(
                 navController = navController,
                 viewModel = settingsViewModel,
             )
         }
 
-        // ── Chat Message Screen (keyboard-safe) ────
+        // ── Chat Message Screen ─────────────────────────────────
         composable(
-            route = ZixoRoutes.CHAT_MESSAGE,
+            route = ZixoRoute.Chat.route,
             arguments = listOf(navArgument("threadId") { type = NavType.StringType })
         ) { backStackEntry ->
             val threadId = backStackEntry.arguments?.getString("threadId") ?: return@composable
             ChatMessageScreen(
                 threadId = threadId,
-                onBackClick = { navController.popBackStack() },
+                navController = navController,
+                onBack = { navController.popBackStack() },
             )
         }
 
-        // ── Group Chat Screen ──────────────────────
+        // ── Group Chat Screen ───────────────────────────────────
         composable(
-            route = ZixoRoutes.GROUP_CHAT,
+            route = ZixoRoute.GroupChat.route,
             arguments = listOf(navArgument("threadId") { type = NavType.StringType })
         ) { backStackEntry ->
             val threadId = backStackEntry.arguments?.getString("threadId") ?: return@composable
             GroupChatScreen(
                 threadId = threadId,
-                onBackClick = { navController.popBackStack() },
+                navController = navController,
+                onBack = { navController.popBackStack() },
             )
         }
 
-        // ── Edit Profile (Liquid Glass) ────────────
-        composable(route = ZixoRoutes.EDIT_PROFILE) {
+        // ── Edit Profile ────────────────────────────────────────
+        composable(route = ZixoRoute.EditProfile.route) {
             EditProfileScreen(
-                onBackClick = { navController.popBackStack() },
-                viewModel = settingsViewModel,
+                navController = navController,
             )
         }
 
-        // ── Settings Sub-Pages (Liquid Glass) ─────
-        composable(route = ZixoRoutes.ACCOUNT_SECURITY) {
+        // ── Settings Sub-Pages ──────────────────────────────────
+        composable(route = ZixoRoute.AccountSecurity.route) {
             AccountSecurityScreen(
                 onBackClick = { navController.popBackStack() },
                 viewModel = settingsViewModel,
             )
         }
 
-        composable(route = ZixoRoutes.PRIVACY_CENTER) {
+        composable(route = ZixoRoute.PrivacyCenter.route) {
             PrivacyCenterScreen(
                 onBackClick = { navController.popBackStack() },
                 viewModel = settingsViewModel,
             )
         }
 
-        composable(route = ZixoRoutes.CHAT_CONFIG) {
+        composable(route = ZixoRoute.ChatConfig.route) {
             ChatConfigScreen(
                 onBackClick = { navController.popBackStack() },
                 viewModel = settingsViewModel,
             )
         }
 
-        composable(route = ZixoRoutes.NOTIFICATION_MANAGER) {
+        composable(route = ZixoRoute.NotificationManager.route) {
             NotificationManagerScreen(
                 onBackClick = { navController.popBackStack() },
                 viewModel = settingsViewModel,
             )
         }
 
-        composable(route = ZixoRoutes.STORAGE_DATA_HUB) {
+        composable(route = ZixoRoute.StorageDataHub.route) {
             StorageDataHubScreen(
                 onBackClick = { navController.popBackStack() },
                 viewModel = settingsViewModel,
             )
         }
+
+        // ── Call Screen (fullscreen overlay) ────────────────────
+        composable(
+            route = ZixoRoute.CallScreen.route,
+            arguments = listOf(navArgument("callId") { type = NavType.StringType }),
+            enterTransition = CallEnterTransition,
+            exitTransition = CallExitTransition,
+        ) { backStackEntry ->
+            val callId = backStackEntry.arguments?.getString("callId") ?: return@composable
+            CallScreenOverlay(
+                callId = callId,
+                onEndCall = { navController.popBackStack() },
+            )
+        }
     }
 }
 
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
 // Main Scaffold with Bottom Navigation + Glass BG
-// ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
 
+/**
+ * Root scaffold that wraps the [ZixoNavHost] with:
+ * - [ZixoGlassBackground] for the animated blob atmosphere
+ * - Bottom navigation bar on applicable routes
+ * - Transparent container color so the glass background shows through
+ *
+ * @param navController  The navigation controller. Defaults to `rememberNavController()`.
+ * @param deepLinkCallId Optional FCM notification call ID for deep linking.
+ */
 @Composable
-fun ZixoMainScaffold(
+fun ZixoNavigation(
     navController: NavHostController = rememberNavController(),
+    deepLinkCallId: String? = null,
 ) {
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
@@ -277,24 +389,24 @@ fun ZixoMainScaffold(
     }
 
     val selectedTabIndex = when (currentRoute) {
-        ZixoRoutes.HOME -> 0
-        ZixoRoutes.SETTINGS -> 1
+        ZixoRoute.Home.route -> 0
+        ZixoRoute.Settings.route -> 1
         else -> 0
     }
 
     ZixoGlassBackground {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            containerColor = Color.Transparent,
             bottomBar = {
                 if (showBottomNav) {
                     ZixoBottomNav(
                         selectedIndex = selectedTabIndex,
                         onItemSelected = { index ->
                             val targetRoute = when (index) {
-                                0 -> ZixoRoutes.HOME
-                                1 -> ZixoRoutes.SETTINGS
-                                else -> ZixoRoutes.HOME
+                                0 -> ZixoRoute.Home.route
+                                1 -> ZixoRoute.Settings.route
+                                else -> ZixoRoute.Home.route
                             }
                             navController.navigate(targetRoute) {
                                 popUpTo(navController.graph.findStartDestination().id) {
@@ -315,42 +427,8 @@ fun ZixoMainScaffold(
             ) {
                 ZixoNavHost(
                     navController = navController,
+                    deepLinkCallId = deepLinkCallId,
                     modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-    }
-}
-
-// ──────────────────────────────────────────────
-// Placeholder for screens not yet fully implemented
-// ──────────────────────────────────────────────
-
-@Composable
-private fun SubScreenPlaceholder(
-    title: String,
-    onBackClick: () -> Unit,
-) {
-    ZixoGlassBackground {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            ZixoTopBar(
-                title = title,
-                showBackButton = true,
-                onBackClick = onBackClick,
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "$title\nComing Soon",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
                 )
             }
         }

@@ -1,161 +1,111 @@
 package com.zixo.app.domain.repository
 
-import com.zixo.app.domain.model.CallEndReason
+import com.zixo.app.domain.model.CallLogEntry
 import com.zixo.app.domain.model.CallState
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Call Repository Interface — LiveKit WebRTC Call Engine
+ * Call Repository Interface — Pure WebRTC Call Engine with Firebase Signaling
  *
- * All LiveKit session parameters, peer allocations, ICE setups, token
- * collections, and audio track rendering components are isolated in
- * asynchronous background workers running under Dispatchers.IO.
- * The Android Main Thread is NEVER blocked by call operations.
+ * All WebRTC operations (PeerConnectionFactory, SDP creation, ICE handling)
+ * run on Dispatchers.IO. The Android Main Thread is NEVER blocked by call operations.
+ *
+ * Signaling uses Firebase Realtime Database (/calls/{callId}/) for
+ * SDP Offer/Answer exchange and ICE candidate relay.
  *
  * Zero-trust enforcement: All call initiation methods verify mutual
- * contact status through [ContactRepository.checkCommunicationGate]
+ * contact status through [ContactRepository.verifyMutualContact]
  * before executing. Non-contact calls are blocked at this boundary.
  */
 interface CallRepository {
 
     /**
-     * Observes the current call state in real-time.
-     *
-     * The UI collects this StateFlow to render the appropriate call
-     * overlay (idle, dialing, ringing, connected) as a frosted
-     * translucent glass canvas over the chat interface.
-     *
-     * @return A flow emitting the current [CallState].
-     */
-    fun observeCallState(): Flow<CallState>
-
-    /**
-     * Initiates a 1-on-1 audio call with a mutual contact.
+     * Initiates a 1-on-1 call with a mutual contact.
      *
      * Before initiating, this method verifies that the target user
      * is a verified mutual contact. If not, the call is rejected.
-     * All LiveKit operations (token fetch, room connect, track publish)
-     * run on Dispatchers.IO to prevent Main Thread blocking.
+     * All WebRTC operations (PeerConnection, SDP, ICE) run on Dispatchers.IO.
      *
      * @param targetUid The UID of the contact to call.
+     * @param isVideoCall Whether this is a video call (false = audio only).
      * @return A flow emitting the [CallState] transitions.
      */
-    fun initiateAudioCall(targetUid: String): Flow<CallState>
+    fun initiateCall(targetUid: String, isVideoCall: Boolean): Flow<CallState>
 
     /**
-     * Initiates a 1-on-1 video call with a mutual contact.
+     * Observes incoming calls in real-time via Firebase Realtime DB listener.
      *
-     * Before initiating, this method verifies that the target user
-     * is a verified mutual contact. If not, the call is rejected.
-     *
-     * @param targetUid The UID of the contact to call.
-     * @return A flow emitting the [CallState] transitions.
+     * @return A flow emitting [CallState.RINGING] for each incoming call.
      */
-    fun initiateVideoCall(targetUid: String): Flow<CallState>
-
-    /**
-     * Initiates a group audio call in a LiveKit Room.
-     *
-     * All participants must be verified mutual contacts.
-     * Uses LiveKit Room multipoint protocols with participant
-     * track configurations that update as members join/leave.
-     *
-     * @param threadId The ID of the group thread to start a call in.
-     * @return A flow emitting the [CallState] transitions.
-     */
-    fun initiateGroupAudioCall(threadId: String): Flow<CallState>
-
-    /**
-     * Initiates a group video call in a LiveKit Room.
-     *
-     * @param threadId The ID of the group thread to start a call in.
-     * @return A flow emitting the [CallState] transitions.
-     */
-    fun initiateGroupVideoCall(threadId: String): Flow<CallState>
+    fun observeIncomingCalls(): Flow<CallState>
 
     /**
      * Accepts an incoming call that is currently in the RINGING state.
-     *
-     * Connects to the LiveKit Room and publishes local audio/video tracks.
+     * Connects WebRTC PeerConnection and publishes local audio/video tracks.
      *
      * @param callId The ID of the call to accept.
+     * @return A flow emitting the [CallState] transitions.
      */
-    suspend fun acceptCall(callId: String)
+    fun answerCall(callId: String): Flow<CallState>
 
     /**
      * Declines an incoming call that is currently in the RINGING state.
      *
      * @param callId The ID of the call to decline.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun declineCall(callId: String)
+    fun declineCall(callId: String): Flow<Result<Unit>>
 
     /**
      * Ends the current active call.
-     *
-     * Disconnects from the LiveKit Room, unpublishes all tracks,
+     * Disconnects WebRTC PeerConnection, removes all tracks,
      * and transitions the call state to [CallState.ENDED].
-     * The foreground service notification is removed.
+     *
+     * @param callId The ID of the call to end.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun endCall()
+    fun endCall(callId: String): Flow<Result<Unit>>
 
     /**
      * Toggles the local microphone mute state during an active call.
      *
+     * @param callId The ID of the active call.
      * @param isMuted Whether the microphone should be muted.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun setMuted(isMuted: Boolean)
+    fun toggleMute(callId: String, isMuted: Boolean): Flow<Result<Unit>>
 
     /**
      * Toggles the local camera on/off during an active video call.
      *
+     * @param callId The ID of the active call.
      * @param isCameraOff Whether the camera should be turned off.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun setCameraOff(isCameraOff: Boolean)
+    fun toggleCamera(callId: String, isCameraOff: Boolean): Flow<Result<Unit>>
 
     /**
      * Toggles the speaker on/off during an active call.
      *
+     * @param callId The ID of the active call.
      * @param isSpeakerOn Whether the speaker should be enabled.
+     * @return A flow emitting Result success or failure.
      */
-    suspend fun setSpeakerOn(isSpeakerOn: Boolean)
+    fun toggleSpeaker(callId: String, isSpeakerOn: Boolean): Flow<Result<Unit>>
 
     /**
-     * Switches between front and back camera during a video call.
+     * Observes the current call state for a specific call.
+     *
+     * @param callId The ID of the call to observe.
+     * @return A flow emitting the current [CallState].
      */
-    suspend fun switchCamera()
+    fun observeCallState(callId: String): Flow<CallState>
 
     /**
-     * Observes the call duration for the current active call.
+     * Gets the call history for the current user.
+     * Uses Firestore addSnapshotListener for real-time updates.
      *
-     * @return A flow emitting the duration in seconds, updated every second.
+     * @return A flow emitting the list of past [CallLogEntry] entries.
      */
-    fun observeCallDuration(): Flow<Long>
-
-    /**
-     * Observes the call history for the current user.
-     *
-     * Uses Firestore [addSnapshotListener] for real-time updates.
-     *
-     * @return A flow emitting the list of past call entries.
-     */
-    fun observeCallHistory(): Flow<List<CallHistoryEntry>>
+    fun getCallHistory(): Flow<List<CallLogEntry>>
 }
-
-/**
- * Represents a past call entry in the call history.
- */
-data class CallHistoryEntry(
-    val id: String = "",
-    val callId: String = "",
-    val callerUid: String = "",
-    val callerDisplayName: String = "",
-    val callerAvatarUrl: String = "",
-    val calleeUid: String = "",
-    val calleeDisplayName: String = "",
-    val calleeAvatarUrl: String = "",
-    val isVideoCall: Boolean = false,
-    val durationSeconds: Long = 0L,
-    val timestamp: Long = 0L,
-    val endReason: CallEndReason = CallEndReason.COMPLETED,
-    val threadId: String = ""
-)

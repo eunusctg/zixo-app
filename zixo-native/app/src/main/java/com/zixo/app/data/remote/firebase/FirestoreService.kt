@@ -5,12 +5,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
-import com.zixo.app.domain.model.CallDirection
 import com.zixo.app.domain.model.CallLogEntry
-import com.zixo.app.domain.model.CallTechnology
-import com.zixo.app.domain.model.ChatThread
-import com.zixo.app.domain.model.Message
-import com.zixo.app.domain.model.MessageType
 import com.zixo.app.domain.model.Session
 import com.zixo.app.domain.model.User
 import kotlinx.coroutines.channels.awaitClose
@@ -19,45 +14,48 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.tasks.await
 import timber.log.Timber
-import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Firestore Service — All Firestore operations using continuous snapshot listeners.
+ *
+ * Provides:
+ * - User profile CRUD with real-time listeners
+ * - Contact list operations with mutual verification
+ * - Thread/message operations (delegated to repositories)
+ * - Call log operations with real-time listeners
+ * - Session management
+ * - File upload to Firebase Storage
+ *
+ * NO LiveKit references. All operations are pure Firestore/Firebase Storage.
+ * All snapshot-based reads use addSnapshotListener for continuous real-time sync.
+ * All operations run on Dispatchers.IO via the calling repository.
+ */
 @Singleton
 class FirestoreService @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val storage: FirebaseStorage
 ) {
 
-    // ---------------------------------------------------------------------------
-    // Collections
-    // ---------------------------------------------------------------------------
+    // ── Collections ───────────────────────────────────────────────────────────
 
     private val usersCollection get() = firestore.collection("users")
-    private fun threadsCollection(uid: String) =
-        usersCollection.document(uid).collection("threads")
-    private fun messagesCollection(threadId: String) = firestore.collection("threads")
-        .document(threadId)
-        .collection("messages")
-    private fun blockedCollection(uid: String) = usersCollection.document(uid)
-        .collection("blocked")
-    private fun callLogCollection(uid: String) = usersCollection.document(uid)
-        .collection("call_log")
-    private fun sessionsCollection(uid: String) = usersCollection.document(uid)
-        .collection("sessions")
+    private fun blockedCollection(uid: String) = usersCollection.document(uid).collection("blocked")
+    private fun callLogCollection(uid: String) = usersCollection.document(uid).collection("call_log")
+    private fun sessionsCollection(uid: String) = usersCollection.document(uid).collection("sessions")
 
-    // ---------------------------------------------------------------------------
-    // User profile
-    // ---------------------------------------------------------------------------
+    // ── User Profile ──────────────────────────────────────────────────────────
 
     /**
-     * Observe a user profile in real-time.
+     * Observe a user profile in real-time via addSnapshotListener.
      */
     fun getUserProfile(uid: String): Flow<User?> = callbackFlow {
         val docRef = usersCollection.document(uid)
         val subscription = docRef.addSnapshotListener { snapshot, error ->
             if (error != null) {
-                close(error)
+                Timber.e(error, "Error observing user profile: %s", uid)
+                trySend(null)
                 return@addSnapshotListener
             }
             trySend(snapshot?.toUser())
@@ -70,6 +68,7 @@ class FirestoreService @Inject constructor(
      */
     fun updateUserProfile(uid: String, updates: Map<String, Any?>): Flow<Unit> = flow {
         usersCollection.document(uid).update(updates).await()
+        Timber.d("User profile updated: %s", uid)
         emit(Unit)
     }
 
@@ -78,74 +77,11 @@ class FirestoreService @Inject constructor(
      */
     fun createUserProfile(uid: String, user: User): Flow<Unit> = flow {
         usersCollection.document(uid).set(user.toFirestoreMap()).await()
+        Timber.d("User profile created: %s", uid)
         emit(Unit)
     }
 
-    // ---------------------------------------------------------------------------
-    // Chat threads
-    // ---------------------------------------------------------------------------
-
-    /**
-     * Observe the list of chat threads for the given user in real-time,
-     * ordered by the most recent message timestamp (descending).
-     */
-    fun getChatThreads(uid: String): Flow<List<ChatThread>> = callbackFlow {
-        val subscription = threadsCollection(uid)
-            .orderBy("lastMessageTimestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    close(error)
-                    return@addSnapshotListener
-                }
-                val threads = snapshot?.documents?.mapNotNull { it.toChatThread() }
-                    ?: emptyList()
-                trySend(threads)
-            }
-        awaitClose { subscription.remove() }
-    }
-
-    // ---------------------------------------------------------------------------
-    // Messages
-    // ---------------------------------------------------------------------------
-
-    /**
-     * Observe the most recent [limit] messages in a thread in real-time,
-     * ordered by timestamp ascending.
-     */
-    fun getMessages(threadId: String, limit: Long = 50): Flow<List<Message>> = callbackFlow {
-        val subscription = messagesCollection(threadId)
-            .orderBy("timestamp", Query.Direction.ASCENDING)
-            .limitToLast(limit)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    close(error)
-                    return@addSnapshotListener
-                }
-                val messages = snapshot?.documents?.mapNotNull { it.toMessage() }
-                    ?: emptyList()
-                trySend(messages)
-            }
-        awaitClose { subscription.remove() }
-    }
-
-    /**
-     * Send a message to a thread.
-     */
-    fun sendMessage(threadId: String, message: Message): Flow<Unit> = flow {
-        messagesCollection(threadId).add(message.toFirestoreMap()).await()
-
-        // Update the thread's last-message metadata
-        val threadUpdates = mapOf(
-            "lastMessage" to message.content,
-            "lastMessageTimestamp" to message.timestamp.toEpochMilli()
-        )
-        firestore.collection("threads").document(threadId).update(threadUpdates).await()
-        emit(Unit)
-    }
-
-    // ---------------------------------------------------------------------------
-    // Online status
-    // ---------------------------------------------------------------------------
+    // ── Online Status ─────────────────────────────────────────────────────────
 
     /**
      * Update the user's online / offline flag.
@@ -168,9 +104,7 @@ class FirestoreService @Inject constructor(
         emit(Unit)
     }
 
-    // ---------------------------------------------------------------------------
-    // Blocking
-    // ---------------------------------------------------------------------------
+    // ── Blocking ──────────────────────────────────────────────────────────────
 
     /**
      * Observe the list of blocked user IDs in real-time.
@@ -178,7 +112,8 @@ class FirestoreService @Inject constructor(
     fun getBlockedUsers(uid: String): Flow<List<String>> = callbackFlow {
         val subscription = blockedCollection(uid).addSnapshotListener { snapshot, error ->
             if (error != null) {
-                close(error)
+                Timber.e(error, "Error observing blocked users")
+                trySend(emptyList())
                 return@addSnapshotListener
             }
             val blockedIds = snapshot?.documents?.mapNotNull { it.id } ?: emptyList()
@@ -204,52 +139,21 @@ class FirestoreService @Inject constructor(
         emit(Unit)
     }
 
-    // ---------------------------------------------------------------------------
-    // Account deletion
-    // ---------------------------------------------------------------------------
+    // ── Call Logs ─────────────────────────────────────────────────────────────
 
     /**
-     * Delete all user data from Firestore (profile, threads, blocked list).
-     * This is a best-effort deletion; it does not recursively delete every
-     * sub-collection in threads/messages. A Cloud Function should handle
-     * full cascading deletion for production.
-     */
-    fun deleteUserData(uid: String): Flow<Unit> = flow {
-        // Delete blocked sub-collection documents
-        val blockedSnapshot = blockedCollection(uid).get().await()
-        for (doc in blockedSnapshot.documents) {
-            doc.reference.delete().await()
-        }
-
-        // Delete thread references
-        val threadsSnapshot = threadsCollection(uid).get().await()
-        for (doc in threadsSnapshot.documents) {
-            doc.reference.delete().await()
-        }
-
-        // Delete the user profile document
-        usersCollection.document(uid).delete().await()
-        emit(Unit)
-    }
-
-    // ---------------------------------------------------------------------------
-    // Call logs
-    // ---------------------------------------------------------------------------
-
-    /**
-     * Observe the list of call log entries for the given user in real-time,
-     * ordered by timestamp descending.
+     * Observe call log entries for the given user in real-time.
      */
     fun getCallLogs(uid: String): Flow<List<CallLogEntry>> = callbackFlow {
         val subscription = callLogCollection(uid)
             .orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    Timber.e(error, "Error observing call logs")
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
-                val calls = snapshot?.documents?.mapNotNull { it.toCallLogEntry() }
-                    ?: emptyList()
+                val calls = snapshot?.documents?.mapNotNull { it.toCallLogEntry() } ?: emptyList()
                 trySend(calls)
             }
         awaitClose { subscription.remove() }
@@ -259,8 +163,7 @@ class FirestoreService @Inject constructor(
      * Insert a call log entry into Firestore.
      */
     fun insertCallLog(uid: String, entry: CallLogEntry): Flow<Unit> = flow {
-        callLogCollection(uid).document(entry.id)
-            .set(entry.toFirestoreMap()).await()
+        callLogCollection(uid).document(entry.id).set(entry.toFirestoreMap()).await()
         emit(Unit)
     }
 
@@ -269,22 +172,40 @@ class FirestoreService @Inject constructor(
      */
     fun clearCallHistory(uid: String): Flow<Unit> = flow {
         val snapshot = callLogCollection(uid).get().await()
-        for (doc in snapshot.documents) {
-            doc.reference.delete().await()
-        }
+        for (doc in snapshot.documents) { doc.reference.delete().await() }
         emit(Unit)
     }
 
-    // ---------------------------------------------------------------------------
-    // File upload
-    // ---------------------------------------------------------------------------
+    // ── Account Deletion ──────────────────────────────────────────────────────
+
+    /**
+     * Delete all user data from Firestore (profile, contacts, blocked list, etc.).
+     * Best-effort deletion; Cloud Functions should handle cascading sub-collection cleanup.
+     */
+    fun deleteUserData(uid: String): Flow<Unit> = flow {
+        // Delete blocked sub-collection
+        val blockedSnapshot = blockedCollection(uid).get().await()
+        for (doc in blockedSnapshot.documents) { doc.reference.delete().await() }
+
+        // Delete call log sub-collection
+        val callLogSnapshot = callLogCollection(uid).get().await()
+        for (doc in callLogSnapshot.documents) { doc.reference.delete().await() }
+
+        // Delete sessions sub-collection
+        val sessionsSnapshot = sessionsCollection(uid).get().await()
+        for (doc in sessionsSnapshot.documents) { doc.reference.delete().await() }
+
+        // Delete the user profile document
+        usersCollection.document(uid).delete().await()
+
+        Timber.d("User data deleted: %s", uid)
+        emit(Unit)
+    }
+
+    // ── File Upload ───────────────────────────────────────────────────────────
 
     /**
      * Upload a file to Firebase Storage and return the download URL.
-     *
-     * @param storagePath The path in Firebase Storage (e.g., "avatars/uid/profile.jpg").
-     * @param uri The local URI of the file to upload.
-     * @return The download URL string.
      */
     suspend fun uploadFile(storagePath: String, uri: Uri): String {
         val ref = storage.reference.child(storagePath)
@@ -292,31 +213,20 @@ class FirestoreService @Inject constructor(
         return ref.downloadUrl.await().toString()
     }
 
-    // ---------------------------------------------------------------------------
-    // Account data export
-    // ---------------------------------------------------------------------------
+    // ── Account Data Export ───────────────────────────────────────────────────
 
     /**
      * Requests a GDPR-style account data export.
-     * Creates a pending export document in Firestore; a Cloud Function
-     * picks it up, assembles the report, and emails the download link.
      */
     fun requestAccountInfo(uid: String): Flow<Unit> = flow {
-        val exportRef = usersCollection.document(uid)
-            .collection("data_exports")
-            .document()
+        val exportRef = usersCollection.document(uid).collection("data_exports").document()
         exportRef.set(
-            mapOf(
-                "requestedAt" to System.currentTimeMillis(),
-                "status" to "PENDING"
-            )
+            mapOf("requestedAt" to System.currentTimeMillis(), "status" to "PENDING")
         ).await()
         emit(Unit)
     }
 
-    // ---------------------------------------------------------------------------
-    // Session management
-    // ---------------------------------------------------------------------------
+    // ── Session Management ────────────────────────────────────────────────────
 
     /**
      * Observe all active sessions for the given user in real-time.
@@ -326,11 +236,11 @@ class FirestoreService @Inject constructor(
             .orderBy("lastActive", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    Timber.e(error, "Error observing sessions")
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
-                val sessions = snapshot?.documents?.mapNotNull { it.toSession() }
-                    ?: emptyList()
+                val sessions = snapshot?.documents?.mapNotNull { it.toSession() } ?: emptyList()
                 trySend(sessions)
             }
         awaitClose { subscription.remove() }
@@ -344,23 +254,26 @@ class FirestoreService @Inject constructor(
         emit(Unit)
     }
 
-    // ---------------------------------------------------------------------------
-    // Mapping helpers – DocumentSnapshot → Domain model
-    // ---------------------------------------------------------------------------
+    // ── Mapping Helpers ───────────────────────────────────────────────────────
 
     private fun DocumentSnapshot.toUser(): User? {
         return try {
             User(
                 uid = id,
                 displayName = getString("displayName") ?: return null,
+                username = getString("username") ?: "",
                 email = getString("email") ?: "",
                 photoUrl = getString("photoUrl"),
                 phoneNumber = getString("phoneNumber"),
+                bio = getString("bio"),
+                zixoNumber = getString("zixoNumber") ?: "",
                 isOnline = getBoolean("isOnline") ?: false,
                 lastSeen = getLong("lastSeen") ?: 0L,
+                blockedUsers = (get("blockedUsers") as? List<String>) ?: emptyList(),
+                fcmToken = getString("fcmToken"),
                 createdAt = getLong("createdAt") ?: 0L,
-                bio = getString("bio"),
-                fcmToken = getString("fcmToken")
+                passkeyCredentialId = getString("passkeyCredentialId"),
+                hasPasskey = getBoolean("hasPasskey") ?: false
             )
         } catch (e: Exception) {
             Timber.e(e, "Failed to map DocumentSnapshot to User")
@@ -368,63 +281,32 @@ class FirestoreService @Inject constructor(
         }
     }
 
-    private fun DocumentSnapshot.toChatThread(): ChatThread? {
-        return try {
-            ChatThread(
-                id = id,
-                participantUids = (get("participantUids") as? List<String>)
-                    ?: emptyList(),
-                lastMessage = getString("lastMessage"),
-                lastMessageTimestamp = getLong("lastMessageTimestamp")
-                    ?.let { Instant.ofEpochMilli(it) },
-                unreadCount = getLong("unreadCount")?.toInt() ?: 0,
-                isPinned = getBoolean("isPinned") ?: false,
-                isMuted = getBoolean("isMuted") ?: false
-            )
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to map DocumentSnapshot to ChatThread")
-            null
-        }
-    }
-
-    private fun DocumentSnapshot.toMessage(): Message? {
-        return try {
-            val typeString = getString("type") ?: "TEXT"
-            Message(
-                id = id,
-                threadId = getString("threadId") ?: return null,
-                senderUid = getString("senderUid") ?: return null,
-                content = getString("content") ?: "",
-                timestamp = getLong("timestamp")?.let { Instant.ofEpochMilli(it) }
-                    ?: Instant.now(),
-                isRead = getBoolean("isRead") ?: false,
-                type = runCatching { MessageType.valueOf(typeString) }
-                    .getOrDefault(MessageType.TEXT),
-                mediaUrl = getString("mediaUrl")
-            )
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to map DocumentSnapshot to Message")
-            null
-        }
-    }
-
     private fun DocumentSnapshot.toCallLogEntry(): CallLogEntry? {
         return try {
+            val directionStr = getString("type") ?: "OUTGOING"
+            val direction = try { com.zixo.app.domain.model.CallDirection.valueOf(directionStr) }
+                catch (_: Exception) { com.zixo.app.domain.model.CallDirection.OUTGOING }
+
+            val endReasonStr = getString("endReason") ?: "COMPLETED"
+            val endReason = try { com.zixo.app.domain.model.CallEndReason.valueOf(endReasonStr) }
+                catch (_: Exception) { com.zixo.app.domain.model.CallEndReason.COMPLETED }
+
             CallLogEntry(
                 id = id,
+                callId = getString("callId") ?: "",
                 callerUid = getString("callerUid") ?: return null,
                 calleeUid = getString("calleeUid") ?: return null,
                 callerName = getString("callerName") ?: "",
                 calleeName = getString("calleeName") ?: "",
                 callerAvatar = getString("callerAvatar"),
                 calleeAvatar = getString("calleeAvatar"),
-                type = getString("type")?.let { runCatching { CallDirection.valueOf(it) }.getOrNull() }
-                    ?: CallDirection.OUTGOING,
-                callType = getString("callType")?.let { runCatching { CallTechnology.valueOf(it) }.getOrNull() }
-                    ?: CallTechnology.WEBRTC_AUDIO,
+                type = direction,
+                isVideoCall = getBoolean("isVideoCall") ?: false,
+                isGroupCall = getBoolean("isGroupCall") ?: false,
                 duration = getLong("duration") ?: 0L,
-                timestamp = getLong("timestamp")?.let { Instant.ofEpochMilli(it) }
-                    ?: Instant.now(),
+                timestamp = getLong("timestamp") ?: 0L,
+                endReason = endReason,
+                threadId = getString("threadId") ?: "",
                 isRead = getBoolean("isRead") ?: false
             )
         } catch (e: Exception) {
@@ -453,33 +335,27 @@ class FirestoreService @Inject constructor(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Domain model extensions for Firestore serialization
-// ---------------------------------------------------------------------------
+// ── Firestore Serialization Extensions ────────────────────────────────────────
 
 private fun User.toFirestoreMap(): Map<String, Any?> = mapOf(
     "displayName" to displayName,
+    "username" to username,
     "email" to email,
     "photoUrl" to photoUrl,
     "phoneNumber" to phoneNumber,
+    "bio" to bio,
+    "zixoNumber" to zixoNumber,
     "isOnline" to isOnline,
     "lastSeen" to lastSeen,
+    "blockedUsers" to blockedUsers,
+    "fcmToken" to fcmToken,
     "createdAt" to createdAt,
-    "bio" to bio,
-    "fcmToken" to fcmToken
-)
-
-private fun Message.toFirestoreMap(): Map<String, Any?> = mapOf(
-    "threadId" to threadId,
-    "senderUid" to senderUid,
-    "content" to content,
-    "timestamp" to timestamp.toEpochMilli(),
-    "type" to type.name,
-    "isRead" to isRead,
-    "mediaUrl" to mediaUrl
+    "passkeyCredentialId" to passkeyCredentialId,
+    "hasPasskey" to hasPasskey
 )
 
 private fun CallLogEntry.toFirestoreMap(): Map<String, Any?> = mapOf(
+    "callId" to callId,
     "callerUid" to callerUid,
     "calleeUid" to calleeUid,
     "callerName" to callerName,
@@ -487,8 +363,11 @@ private fun CallLogEntry.toFirestoreMap(): Map<String, Any?> = mapOf(
     "callerAvatar" to callerAvatar,
     "calleeAvatar" to calleeAvatar,
     "type" to type.name,
-    "callType" to callType.name,
+    "isVideoCall" to isVideoCall,
+    "isGroupCall" to isGroupCall,
     "duration" to duration,
-    "timestamp" to timestamp.toEpochMilli(),
+    "timestamp" to timestamp,
+    "endReason" to endReason.name,
+    "threadId" to threadId,
     "isRead" to isRead
 )

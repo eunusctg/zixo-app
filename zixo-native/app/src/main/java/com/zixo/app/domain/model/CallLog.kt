@@ -1,19 +1,28 @@
 package com.zixo.app.domain.model
 
-import java.time.Instant
+/**
+ * Call Log Model — Pure WebRTC call history (NO LiveKit).
+ *
+ * All call entries use WebRTC with Firebase Realtime DB signaling.
+ * The SIP/LiveKit technology types have been removed.
+ */
 
 data class CallLogEntry(
-    val id: String,
-    val callerUid: String,
-    val calleeUid: String,
-    val callerName: String,
-    val calleeName: String,
-    val callerAvatar: String?,
-    val calleeAvatar: String?,
-    val type: CallDirection,
-    val callType: CallTechnology,
-    val duration: Long = 0L,
-    val timestamp: Instant,
+    val id: String = "",
+    val callId: String = "",
+    val callerUid: String = "",
+    val calleeUid: String = "",
+    val callerName: String = "",
+    val calleeName: String = "",
+    val callerAvatar: String? = null,
+    val calleeAvatar: String? = null,
+    val type: CallDirection = CallDirection.OUTGOING,
+    val isVideoCall: Boolean = false,
+    val isGroupCall: Boolean = false,
+    val duration: Long = 0L,             // Duration in seconds
+    val timestamp: Long = 0L,            // Epoch milliseconds
+    val endReason: CallEndReason = CallEndReason.COMPLETED,
+    val threadId: String = "",
     val isRead: Boolean = false
 )
 
@@ -21,12 +30,6 @@ enum class CallDirection {
     INCOMING,
     OUTGOING,
     MISSED
-}
-
-enum class CallTechnology {
-    SIP,
-    WEBRTC_AUDIO,
-    WEBRTC_VIDEO
 }
 
 enum class CallFilter {

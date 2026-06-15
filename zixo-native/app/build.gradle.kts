@@ -4,7 +4,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.hilt.android)
     alias(libs.plugins.google.services)
 }
 
@@ -33,8 +32,8 @@ android {
             buildConfigField("String", "FIREBASE_MESSAGING_SENDER_ID", "\"809372450511\"")
             buildConfigField("String", "FIREBASE_APP_ID", "\"1:809372450511:android:7910b1a9b8836c7666c1ba\"")
             buildConfigField("String", "FIREBASE_MEASUREMENT_ID", "\"G-L792VKMNTT\"")
-            // LiveKit server URL — hidden from user-facing UI, used only by background repositories
-            buildConfigField("String", "LIVEKIT_URL", "\"wss://zixo-livekit.livekit.cloud\"")
+            // Cloudflare Edge Worker endpoint for registration & passkey minting
+            buildConfigField("String", "CLOUDFLARE_EDGE_URL", "\"https://zixo-edge.workers.dev\"")
         }
         release {
             isMinifyEnabled = true
@@ -51,7 +50,7 @@ android {
             buildConfigField("String", "FIREBASE_MESSAGING_SENDER_ID", "\"809372450511\"")
             buildConfigField("String", "FIREBASE_APP_ID", "\"1:809372450511:android:7910b1a9b8836c7666c1ba\"")
             buildConfigField("String", "FIREBASE_MEASUREMENT_ID", "\"G-L792VKMNTT\"")
-            buildConfigField("String", "LIVEKIT_URL", "\"wss://zixo-livekit.livekit.cloud\"")
+            buildConfigField("String", "CLOUDFLARE_EDGE_URL", "\"https://zixo-edge.workers.dev\"")
         }
     }
 
@@ -110,22 +109,23 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
-    // ── Google Credential Manager (Native Sign-In API) ──
+    // ── Google Credential Manager (Native Sign-In & WebAuthn Passkeys API) ──
     implementation("androidx.credentials:credentials:1.2.2")
     implementation("androidx.credentials:credentials-play-services-auth:1.2.2")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
-    // ── Unified Firebase Enterprise Realtime Stack ──
+    // ── WebRTC Android Native Library for Pure Peer-to-Peer Calling Media Engine ──
+    implementation("io.github.webrtc-sdk:android:120.0.0")
+
+    // ── Unified Firebase Enterprise Realtime Stack (100% Realtime Sockets Architecture) ──
     implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-storage-ktx")
-    implementation("com.google.firebase:firebase-database-ktx")  // 100% Realtime Database Sockets
+    implementation("com.google.firebase:firebase-database-ktx")
     implementation("com.google.firebase:firebase-messaging-ktx")
 
-    // ── LiveKit WebRTC Core SDK (Real-time Peer-to-Peer Calling Media Engine) ──
-    implementation("io.livekit:livekit-android:2.4.0")
-
-    // ── Networking ──
+    // ── Networking (Cloudflare Edge Worker API) ──
     implementation(libs.retrofit)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.okhttp)

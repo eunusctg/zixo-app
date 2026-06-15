@@ -10,20 +10,30 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.room.Room
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import com.zixo.app.data.local.PreferencesDataStore
 import com.zixo.app.data.local.room.ZixoDatabase
 import com.zixo.app.data.local.room.dao.CallLogDao
 import com.zixo.app.data.local.room.dao.ChatDao
+import com.zixo.app.data.remote.cloudflare.CloudflareApi
 import com.zixo.app.data.remote.cloudflare.CloudflareApiService
+import com.zixo.app.domain.repository.AuthRepository
 import com.zixo.app.domain.repository.CallRepository
 import com.zixo.app.domain.repository.ChatRepository
 import com.zixo.app.domain.repository.ContactRepository
 import com.zixo.app.domain.repository.SettingsRepository
 import com.zixo.app.domain.repository.StatusRepository
+import com.zixo.app.data.repository.AuthRepositoryImpl
 import com.zixo.app.data.repository.CallRepositoryImpl
 import com.zixo.app.data.repository.ChatRepositoryImpl
 import com.zixo.app.data.repository.ContactRepositoryImpl
 import com.zixo.app.data.repository.SettingsRepositoryImpl
 import com.zixo.app.data.repository.StatusRepositoryImpl
+import com.zixo.app.data.remote.webrtc.FirebaseSignalingClient
+import com.zixo.app.data.remote.webrtc.WebRtcClient
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -40,6 +50,23 @@ import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
+/**
+ * Hilt dependency injection module providing all application-scoped dependencies.
+ *
+ * Provides:
+ * - [DataStore]<[Preferences]> for user preferences persistence
+ * - [ZixoDatabase] and DAOs for local Room database
+ * - [Json], [OkHttpClient], [Retrofit] for networking
+ * - [CloudflareApiService] for Cloudflare Edge Worker API
+ * - [WebRtcClient] for peer-to-peer WebRTC calls
+ * - [FirebaseSignalingClient] for Firebase Realtime DB call signaling
+ * - All repository implementations bound to their domain interfaces
+ *
+ * All Firebase instances ([FirebaseAuth], [FirebaseFirestore],
+ * [FirebaseDatabase], [FirebaseStorage]) are provided by [FirebaseModule].
+ *
+ * No LiveKit-related providers exist in this module.
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
@@ -47,7 +74,9 @@ object AppModule {
     private const val PREFERENCES_NAME = "zixo_preferences"
     private const val BASE_URL = "https://api.zixo.app/"
 
-    // ── DataStore ───────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════
+    // DataStore
+    // ════════════════════════════════════════════════════════
 
     @Provides
     @Singleton
@@ -62,7 +91,9 @@ object AppModule {
         produceFile = { context.preferencesDataStoreFile(PREFERENCES_NAME) }
     )
 
-    // ── Room Database ───────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════
+    // Room Database
+    // ════════════════════════════════════════════════════════
 
     @Provides
     @Singleton
@@ -84,7 +115,9 @@ object AppModule {
     fun provideCallLogDao(database: ZixoDatabase): CallLogDao =
         database.callLogDao()
 
-    // ── Networking ──────────────────────────────────────────────────────────
+    // ════════════════════════════════════════════════════════
+    // Networking
+    // ════════════════════════════════════════════════════════
 
     @Provides
     @Singleton
@@ -122,12 +155,39 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideCloudflareApiService(retrofit: Retrofit): CloudflareApiService =
-        retrofit.create(CloudflareApiService::class.java)
+    fun provideCloudflareApi(retrofit: Retrofit): CloudflareApi =
+        retrofit.create(CloudflareApi::class.java)
 
-    // ── Repository Bindings ─────────────────────────────────────────────────
+    @Provides
+    @Singleton
+    fun provideCloudflareApiService(api: CloudflareApi): CloudflareApiService =
+        CloudflareApiService(api)
+
+    // ════════════════════════════════════════════════════════
+    // WebRTC — Pure Peer-to-Peer Calling
+    // ════════════════════════════════════════════════════════
+
+    @Provides
+    @Singleton
+    fun provideWebRtcClient(
+        @ApplicationContext context: Context
+    ): WebRtcClient = WebRtcClient(context)
+
+    @Provides
+    @Singleton
+    fun provideFirebaseSignalingClient(
+        firebaseDatabase: FirebaseDatabase
+    ): FirebaseSignalingClient = FirebaseSignalingClient(firebaseDatabase)
+
+    // ════════════════════════════════════════════════════════
+    // Repository Bindings
+    // ════════════════════════════════════════════════════════
     // Binds domain repository interfaces to their concrete implementations.
     // All implementations are @Singleton and injected via @Inject constructor().
+
+    @Provides
+    @Singleton
+    fun provideAuthRepository(impl: AuthRepositoryImpl): AuthRepository = impl
 
     @Provides
     @Singleton
