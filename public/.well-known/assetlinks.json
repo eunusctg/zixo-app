@@ -1,0 +1,13 @@
+[{
+  "relation": [
+    "delegate_permission/common.handle_all_urls",
+    "delegate_permission/common.get_login_creds"
+  ],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.zixo.app",
+    "sha256_cert_fingerprints": [
+      "05:2C:95:BD:FB:FE:9C:12:92:02:CA:B4:F8:F6:F6:6B:37:25:B3:94:18:76:63:A3:D6:7E:C6:F6:4A:95:49:7B"
+    ]
+  }
+}]
