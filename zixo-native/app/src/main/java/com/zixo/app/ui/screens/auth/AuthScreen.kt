@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -202,11 +203,16 @@ fun AuthScreen(
         // ── Soft blurred radial blobs for depth ──────────────────────
         Box(modifier = Modifier.fillMaxSize()) {
             // Mint radial blob — upper-left
+            // NOTE: Use offset() — NOT padding() — to push decorative blobs
+            // off-screen. Compose's padding() throws IllegalArgumentException
+            // for negative values, which crashed the auth screen on launch.
+            // offset() accepts negative values and moves the element without
+            // touching its internal layout bounds.
             Box(
                 modifier = Modifier
                     .size(280.dp)
                     .align(Alignment.TopStart)
-                    .padding(start = (-80).dp, top = 60.dp)
+                    .offset(x = (-80).dp, y = 60.dp)
                     .blur(80.dp)
                     .background(
                         Brush.radialGradient(
@@ -222,7 +228,7 @@ fun AuthScreen(
                 modifier = Modifier
                     .size(200.dp)
                     .align(Alignment.TopEnd)
-                    .padding(end = (-40).dp, top = 220.dp)
+                    .offset(x = 40.dp, y = 220.dp)
                     .blur(60.dp)
                     .background(
                         Brush.radialGradient(
